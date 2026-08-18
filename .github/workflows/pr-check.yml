@@ -1,0 +1,60 @@
+name: PR check
+
+on:
+  pull_request:
+    branches: [personal]
+  workflow_dispatch:
+
+concurrency:
+  group: pr-check-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  pr-check:
+    name: Local check
+    runs-on: windows-2025
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.1
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: pnpm
+          cache-dependency-path: apps/desktop-tauri/pnpm-lock.yaml
+
+      - name: Install frontend deps
+        run: pnpm --dir apps/desktop-tauri install --frozen-lockfile
+
+      - name: Rust format check
+        run: cargo fmt --all --check
+
+      - name: Rust clippy (workspace)
+        run: cargo clippy --workspace --all-targets -- -D warnings
+
+      - name: Rust tests (workspace)
+        run: cargo test --workspace
+
+      - name: Frontend tests
+        run: pnpm --dir apps/desktop-tauri test
+
+      - name: Frontend type check / build
+        run: pnpm --dir apps/desktop-tauri run build

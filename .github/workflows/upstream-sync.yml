@@ -1,0 +1,165 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Monday 03:00 Asia/Seoul
+    - cron: "0 3 * * 1"
+      timezone: "Asia/Seoul"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    name: Upstream Sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: |
+          git remote add upstream https://github.com/nesszer/Win-CodexBar.git
+
+      - name: Fetch repositories
+        run: |
+          git fetch --prune origin
+          git fetch upstream main
+
+      - name: Sync main with upstream
+        id: sync_main
+        shell: bash
+        run: |
+          LOCAL_MAIN_SHA="$(git rev-parse origin/main)"
+          UPSTREAM_MAIN_SHA="$(git rev-parse upstream/main)"
+
+          echo "local_main_sha=$LOCAL_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream_main_sha=$UPSTREAM_MAIN_SHA" >> "$GITHUB_OUTPUT"
+
+          if [ "$LOCAL_MAIN_SHA" != "$UPSTREAM_MAIN_SHA" ]; then
+            echo "Fast-forwarding main from $LOCAL_MAIN_SHA to $UPSTREAM_MAIN_SHA..."
+            git checkout main
+            git reset --hard origin/main
+            git merge --ff-only upstream/main
+            git push origin main
+            echo "main successfully fast-forwarded and pushed."
+          else
+            echo "main is already up to date with upstream/main."
+            git checkout main
+            git reset --hard origin/main
+          fi
+
+      - name: Find existing sync PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          PR_NUMBER="$(
+            gh pr list \
+              --state open \
+              --base personal \
+              --head sync/upstream \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+            echo "Found existing open sync PR #$PR_NUMBER"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+            echo "No existing open sync PR found."
+          fi
+
+      - name: Update existing sync branch
+        if: steps.pr.outputs.exists == 'true'
+        shell: bash
+        run: |
+          git fetch origin sync/upstream
+          if git merge-base --is-ancestor main origin/sync/upstream; then
+            echo "sync/upstream already contains the latest main. Nothing to update."
+          else
+            echo "Merging latest main into existing sync/upstream..."
+            git checkout -B sync/upstream origin/sync/upstream
+
+            if ! git merge --no-edit main; then
+              git merge --abort || true
+              echo "::error::New upstream changes conflict with sync/upstream."
+              echo "::error::Resolve the conflict manually or with a local coding agent."
+              exit 1
+            fi
+
+            git push origin sync/upstream
+            echo "Successfully updated sync/upstream for PR #${{ steps.pr.outputs.number }}."
+          fi
+
+      - name: Create new sync branch and PR
+        if: steps.pr.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
+          NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
+        shell: bash
+        run: |
+          if git merge-base --is-ancestor main origin/personal; then
+            echo "personal already contains the latest main. No sync PR needed."
+          else
+            echo "personal does not yet contain the latest main. Creating sync/upstream branch and PR..."
+            # Clean up stale remote sync/upstream branch if left over from a previous closed/merged PR
+            git push origin --delete sync/upstream || true
+
+            git checkout -B sync/upstream main
+            git push -u origin sync/upstream
+
+            gh pr create \
+              --base personal \
+              --head sync/upstream \
+              --title "chore: sync upstream" \
+              --body "$(cat <<EOF
+          Automated upstream synchronization.
+
+          Fork main before sync:
+          \`$OLD_SHA\`
+
+          Upstream main:
+          \`$NEW_SHA\`
+
+          This PR is maintained automatically.
+
+          If upstream receives additional commits before this PR is merged,
+          they will be added to this PR.
+
+          Conflict resolution and final merge are intentionally manual.
+
+          ---
+
+          ### Local Conflict Resolution Guide
+          If this PR has merge conflicts with \`personal\`:
+          \`\`\`bash
+          git fetch origin
+          git checkout -B sync/upstream origin/sync/upstream
+          git merge origin/personal
+
+          # Resolve conflicts, verify tests, and commit
+          git push origin sync/upstream
+          \`\`\`
+          EOF
+          )"
+            echo "Successfully created upstream sync PR targeting personal."
+          fi

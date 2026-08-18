@@ -1,0 +1,32 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+language: en-US
+
+reviews:
+  auto_review:
+    enabled: true
+    auto_incremental_review: true
+    auto_pause_after_reviewed_commits: 20
+
+  path_instructions:
+    - path: "**/*"
+      instructions: |
+        This repository is a long-lived fork.
+
+        The target branch "personal" contains intentional personal
+        modifications maintained on top of upstream/main.
+
+        For pull requests from "sync/upstream" to "personal",
+        focus on integration risks introduced by upstream changes.
+
+        Look specifically for:
+        - upstream API changes that break personal modifications
+        - renamed or removed APIs still referenced by personal code
+        - behavioral changes that Git merge does not detect
+        - configuration schema changes
+        - personal behavior accidentally removed by upstream changes
+        - subtle semantic conflicts even when Git reports no conflict
+        - upstream changes that make existing personal patches redundant or obsolete
+
+        Prefer review comments, summaries, and explanations in English.
+
+        Do not recommend rebasing this branch.
