@@ -32,6 +32,7 @@ Cargo workspace (root `Cargo.toml`): members `rust`, `apps/desktop-tauri/src-tau
 
 4. **Float bar**  
    Detached always-on-top window owned by `floatbar/`. Builder must pin `.theme(Some(tauri::Theme::Dark))` so WebView2’s shared profile does not flip other windows under theme `auto`.
+   The provider pill reads canonical `primary`, `secondary`, and `tertiary` rate windows and renders fixed 5-hour / weekly / monthly positions. Values are consumed percentages; missing or informational windows render as `—`. When inline resets are enabled, a slot with a valid future reset temporarily shows its own relative countdown while tooltip/accessibility text retains the percentage. Sorting and status color follow the highest recognized usage value. Cost, model-specific, and extra windows remain separate from these quota positions.
 
 5. **CLI**  
    Same provider factory and settings stores as the app. Useful for scripts without UI (`usage`, `cost`, `guard`, `serve`, `config`, …).
