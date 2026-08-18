@@ -1,4 +1,6 @@
-# Win-CodexBar Float Bar Overlay
+<img width="1149" height="159" alt="Screenshot 2026-08-18 164102" src="https://github.com/user-attachments/assets/a9be3368-0a19-4890-93f9-064e80e81237" />
+
+# Win-CodexBar Float Bar Overlay 
 
 이 브랜치는 Win-CodexBar의 Float Bar를 **5시간 / 주간 / 월간 사용률 오버레이**로 바꾸는 작업에 집중한다. 기존처럼 출처가 불명확한 단일 숫자를 보여주지 않고, provider가 제공한 실제 quota window를 세 개의 고정 위치에 배치한다.
 
