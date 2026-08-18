@@ -107,74 +107,21 @@ function maxFloatBarUsedPercent(
 type FallbackMetric = {
   window: RateWindowSnapshot;
   providerLabel: string | null;
-  labelKey: LocaleKey | null;
+  labelKey: LocaleKey;
+};
+
+/** One canonical window candidate with its provider label and generic key. */
+type FallbackCandidate = {
+  window: RateWindowSnapshot | null;
+  providerLabel: string | null;
+  labelKey: LocaleKey;
 };
 
 function fallbackFor(
   provider: ProviderUsageSnapshot,
   preference: MetricPreference | undefined,
 ): FallbackMetric | null {
-  // Explicit preference -> the matching window, when present and not
-  // informational. Anything else (automatic, unsupported, absent,
-  // informational) falls through to the amended automatic order:
-  // modelSpecific -> primary -> secondary -> tertiary.
-  const explicit: Array<{
-    window: RateWindowSnapshot | null;
-    providerLabel: string | null;
-    labelKey: LocaleKey | null;
-  }> = [
-    ...(preference === "session"
-      ? [
-          {
-            window: provider.primary,
-            providerLabel: provider.primaryLabel ?? null,
-            labelKey: "ProviderSessionLabel" as LocaleKey | null,
-          },
-        ]
-      : []),
-    ...(preference === "weekly"
-      ? [
-          {
-            window: provider.secondary,
-            providerLabel: provider.secondaryLabel ?? null,
-            labelKey: "ProviderWeeklyLabel" as LocaleKey | null,
-          },
-        ]
-      : []),
-    ...(preference === "model"
-      ? [
-          {
-            window: provider.modelSpecific,
-            providerLabel: null,
-            labelKey: "DetailWindowModelSpecific" as LocaleKey | null,
-          },
-        ]
-      : []),
-    ...(preference === "tertiary"
-      ? [
-          {
-            window: provider.tertiary,
-            providerLabel: provider.tertiaryLabel ?? null,
-            labelKey: "DetailWindowTertiary" as LocaleKey | null,
-          },
-        ]
-      : []),
-  ];
-  for (const candidate of explicit) {
-    if (candidate.window && !candidate.window.isInformational) {
-      return {
-        window: candidate.window,
-        providerLabel: candidate.providerLabel,
-        labelKey: candidate.labelKey,
-      };
-    }
-  }
-
-  const automatic: Array<{
-    window: RateWindowSnapshot | null;
-    providerLabel: string | null;
-    labelKey: LocaleKey | null;
-  }> = [
+  const candidates: FallbackCandidate[] = [
     {
       window: provider.modelSpecific,
       providerLabel: null,
@@ -196,7 +143,31 @@ function fallbackFor(
       labelKey: "DetailWindowTertiary",
     },
   ];
-  for (const candidate of automatic) {
+
+  // Explicit preference -> the matching window, when present and not
+  // informational. Anything else (automatic, unsupported, absent,
+  // informational) falls through to the automatic order:
+  // modelSpecific -> primary -> secondary -> tertiary.
+  const preferredIndex =
+    preference === "session"
+      ? 1
+      : preference === "weekly"
+        ? 2
+        : preference === "model"
+          ? 0
+          : preference === "tertiary"
+            ? 3
+            : -1;
+  const preferred = preferredIndex >= 0 ? candidates[preferredIndex] : null;
+  if (preferred?.window && !preferred.window.isInformational) {
+    return {
+      window: preferred.window,
+      providerLabel: preferred.providerLabel,
+      labelKey: preferred.labelKey,
+    };
+  }
+
+  for (const candidate of candidates) {
     if (candidate.window && !candidate.window.isInformational) {
       return {
         window: candidate.window,
@@ -412,7 +383,7 @@ function ProviderPill({
   });
   let pillDetail: string;
   const fallbackLabel = fallback
-    ? (fallback.providerLabel ?? (fallback.labelKey ? t(fallback.labelKey) : ""))
+    ? (fallback.providerLabel ?? t(fallback.labelKey))
     : "";
   if (fallback) {
     const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
