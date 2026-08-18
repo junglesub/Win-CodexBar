@@ -172,6 +172,12 @@ installer에는 desktop app, CLI, VC++ runtime bootstrapper, WebView2 bootstrapp
 
 `personal` 브랜치에 push하면 GitHub Actions가 같은 네 파일을 빌드하고 `personal-latest` prerelease를 자동으로 교체한다. 설정과 재실행 방법은 `docs/release/ci-cd.md`를 참고한다.
 
+`personal-latest` 테스트 빌드를 설치하거나 업데이트하려면 다음 명령을 실행한다. 이 저장소의 변경 가능한 personal 릴리스를 신뢰할 때만 사용한다.
+
+```powershell
+irm https://raw.githubusercontent.com/junglesub/Win-CodexBar/personal/scripts/install-personal.ps1 | iex
+```
+
 ## 관련 파일
 
 | 파일 | 역할 |
