@@ -231,7 +231,7 @@ export interface SettingsSnapshot {
   floatBarProviderIds: string[];
   /** When true, render with dark text/glass for light desktops. */
   floatBarDarkText: boolean;
-  /** When true, render the next primary reset inline in each provider pill. */
+  /** When true, append each quota window's compact reset beside its percentage. */
   floatBarShowResetInline: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;

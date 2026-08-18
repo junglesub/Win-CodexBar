@@ -97,12 +97,8 @@ function compactResetTime(resetsAt: string): string | null {
   if (diffMs <= 0) return "now";
   const totalMinutes = Math.floor(diffMs / 60_000);
   if (totalMinutes < 60) return `${totalMinutes}m`;
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  const minutes = totalMinutes % 60;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  if (totalMinutes >= 1440) return `${Math.floor(totalMinutes / 1440)}d`;
+  return `${Math.floor(totalMinutes / 60)}h`;
 }
 
 type FloatBarCostSummary = {
@@ -213,9 +209,7 @@ function UsageMetric({
   const visible =
     used == null || providerError
       ? "—"
-      : showResetInline && compactReset
-        ? compactReset
-        : `${Math.round(used)}%`;
+      : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
   return (
     <span className="floatbar__metric" data-tauri-drag-region>

@@ -32,9 +32,9 @@ If multiple canonical windows resolve to the same cadence, keep the first match.
 
 When `floatBarShowResetInline` is disabled, every available slot displays its percentage.
 
-When it is enabled, independently replace each slot's percentage with a compact relative countdown if that window has a parseable `resetsAt` strictly in the future. Multiple slots may display countdowns simultaneously, for example `2h 5m / 1d 4h / 12d 3h`. A missing, invalid, or expired timestamp leaves the percentage visible. Backend `resetDescription` alone is not enough to replace a percentage because it cannot guarantee a live relative countdown.
+When it is enabled, append one compact locale-independent countdown unit beside each slot's percentage if that window has a parseable `resetsAt` strictly in the future, for example `75% 30m`, `75% 1h`, or `75% 1d`. Use floor semantics and never combine units: under 60 minutes renders `Xm`, under 24 hours renders `Xh`, and 24 hours or more renders `Xd`. A missing, invalid, or expired timestamp leaves the percentage visible without a countdown. Backend `resetDescription` alone is not enough to add a countdown because it cannot guarantee a live relative value.
 
-The tooltip and accessible name retain the used percentage even while the visible value is a countdown.
+The tooltip and accessible name keep the full localized reset detail alongside the used percentage.
 
 ## Ordering and Status
 
@@ -56,6 +56,6 @@ The tooltip and accessible name retain the used percentage even while the visibl
 1. Every enabled provider renders exactly three fixed usage positions.
 2. Known 5-hour, weekly, and monthly canonical windows appear in the correct positions regardless of whether the provider stored them as primary, secondary, or tertiary.
 3. Unsupported, informational, or missing windows appear as `—`.
-4. Inline reset mode replaces every eligible slot with its own live relative countdown while retaining full tooltip/accessibility context.
+4. Inline reset mode appends a single largest-unit countdown beside each eligible percentage while retaining full localized reset detail in the tooltip/accessibility context.
 5. Sorting and status color use the highest recognized used percentage.
 6. Existing provider filtering, cost pills, dragging, orientation, scaling, and refresh behavior remain unchanged.

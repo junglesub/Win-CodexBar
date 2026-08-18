@@ -16,7 +16,7 @@ Float Bar의 provider pill은 항상 다음 순서로 표시된다.
 - 해당 주기의 quota가 없거나 informational window이면 `—`를 표시한다.
 - provider 오류가 있으면 `— / — / —`와 critical 상태를 표시한다.
 - provider 정렬과 경고 색상은 세 값 중 가장 높은 사용률을 기준으로 한다.
-- inline reset을 켜면 각 slot의 퍼센트를 `2h 5m`, `1d 4h` 같은 짧은 countdown으로 독립적으로 바꿀 수 있다.
+- inline reset을 켜면 각 slot의 퍼센트 옆에 `30m`, `1h`, `1d`처럼 가장 큰 단위 하나로 줄인 countdown을 표시한다.
 - hover tooltip과 접근성 이름에는 provider 이름, 주기, 사용률, 초기화 시간이 모두 남는다.
 
 ### 숫자의 근거

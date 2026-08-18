@@ -227,6 +227,7 @@ describe("FloatBar", () => {
     tauriMocks.getProviderLocalUsageSummary.mockResolvedValue(null);
     tauriMocks.getLocaleStrings.mockResolvedValue(
       buildBundle({
+        ResetsInMinutes: "Resets in {}m",
         ResetsInHoursMinutes: "Resets in {}h {}m",
         ResetsInDaysHours: "Resets in {}d {}h",
         TrayResetsDueNow: "Resetting",
@@ -808,22 +809,22 @@ describe("FloatBar", () => {
     }
   });
 
-  it("replaces every eligible percentage with its own relative reset", async () => {
+  it("appends each reset using only its largest time unit", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 100, {
-        resetsAt: "2026-08-18T02:05:00Z",
+        resetsAt: "2026-08-18T00:30:00Z",
         primaryWindowMinutes: 300,
         secondary: {
           used: 41,
           windowMinutes: 10_080,
-          resetsAt: "2026-08-19T04:00:00Z",
+          resetsAt: "2026-08-18T01:30:00Z",
         },
         tertiary: {
           used: 60,
           windowMinutes: 43_200,
-          resetsAt: "2026-08-30T12:00:00Z",
+          resetsAt: "2026-08-19T12:00:00Z",
         },
       }),
     ]);
@@ -836,16 +837,16 @@ describe("FloatBar", () => {
     );
     await act(async () => vi.runOnlyPendingTimersAsync());
 
-    // Every eligible slot independently shows its own relative countdown.
+    // Every eligible slot keeps its percentage and shows one largest unit.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["2h 5m", "1d 4h", "12d 12h"]);
+    ).toEqual(["100% 30m", "41% 1h", "60% 1d"]);
     // The pill accessibility detail retains cadence, used percentage, and the
     // localized reset for each slot.
     const pillLabel = container.querySelector(".floatbar__pill")?.getAttribute("aria-label");
-    expect(pillLabel).toMatch(/5h: 100% used\nResets in 2h 5m/);
-    expect(pillLabel).toMatch(/weekly: 41% used\nResets in 1d 4h/);
-    expect(pillLabel).toMatch(/monthly: 60% used\nResets in 12d 12h/);
+    expect(pillLabel).toMatch(/5h: 100% used\nResets in 30m/);
+    expect(pillLabel).toMatch(/weekly: 41% used\nResets in 1h 30m/);
+    expect(pillLabel).toMatch(/monthly: 60% used\nResets in 1d 12h/);
   });
 
   it("keeps the visible countdown locale-independent under a non-English locale", async () => {
@@ -879,7 +880,7 @@ describe("FloatBar", () => {
     // English-stripped or localized prose.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["2h 5m", "—", "—"]);
+    ).toEqual(["100% 2h", "—", "—"]);
     // The tooltip/accessibility keeps the localized prose.
     expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
       /5h: 100% 使用済み\nリセットまで 2時間 5分/,
