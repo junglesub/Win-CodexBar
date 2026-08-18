@@ -147,7 +147,6 @@ fn test_parse_quota_summary_rejects_non_finite_fraction() {
         remaining_fraction: Some(f64::NAN),
         remaining: None,
         reset_time: None,
-        disabled: false,
     };
     assert!(nan_bucket.usable_fraction().is_none());
     assert!(

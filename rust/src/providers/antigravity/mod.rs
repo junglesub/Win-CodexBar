@@ -437,14 +437,13 @@ impl AntigravityProvider {
             }
 
             let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
             tracing::debug!(
                 "Antigravity quota summary unavailable (HTTP {}); falling back to GetUserStatus",
                 status
             );
             return Err(ProviderError::Other(format!(
-                "Quota summary API error {}: {}",
-                status, text
+                "Quota summary API error HTTP {}",
+                status
             )));
         }
 
@@ -851,14 +850,12 @@ struct QuotaSummaryBucket {
     remaining: Option<QuotaSummaryRemaining>,
     #[serde(default)]
     reset_time: Option<String>,
-    #[serde(default)]
-    disabled: bool,
 }
 
 impl QuotaSummaryBucket {
-    /// The effective remaining fraction (direct or nested), validated to a
-    /// finite value clamped to `0..=1`. `None` for NaN/±inf or out-of-range
-    /// values, which makes the bucket unusable.
+    /// The effective remaining fraction (direct or nested), clamped to
+    /// `0.0..=1.0` for any finite value. Returns `None` if missing or
+    /// non-finite (NaN/±inf), which makes the bucket unusable.
     fn usable_fraction(&self) -> Option<f64> {
         let raw = self
             .remaining_fraction
