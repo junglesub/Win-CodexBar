@@ -92,6 +92,7 @@ impl SettingsUpdate {
             || self.show_as_used.is_some()
             || self.reset_time_relative.is_some()
             || self.show_reset_when_exhausted.is_some()
+            || self.provider_metrics.is_some()
     }
 
     fn rebuilds_tray_menu(&self) -> bool {
@@ -509,6 +510,21 @@ mod tests {
                 ..Default::default()
             }
             .refreshes_tray_presentation()
+        );
+    }
+
+    #[test]
+    fn provider_metric_changes_notify_the_float_bar() {
+        assert!(
+            SettingsUpdate {
+                provider_metrics: Some(
+                    [("antigravity".to_string(), "session".to_string())]
+                        .into_iter()
+                        .collect(),
+                ),
+                ..Default::default()
+            }
+            .notifies_float_bar()
         );
     }
 

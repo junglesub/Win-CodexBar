@@ -37,6 +37,7 @@ import { LocaleProvider } from "../i18n/LocaleProvider";
 import { buildBundle } from "../test/localeHarness";
 import type {
   BootstrapState,
+  MetricPreference,
   ProviderUsageSnapshot,
   RateWindowSnapshot,
   SettingsSnapshot,
@@ -337,177 +338,121 @@ describe("FloatBar", () => {
     });
   }
 
-  it("shows the model-specific window for a cadence-less provider in automatic mode", async () => {
-    tauriMocks.getCachedProviders.mockResolvedValue([cadenceless("antigravity", "Antigravity")]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(
-      settings({ enabledProviders: ["antigravity"] }),
-    );
-
-    const { container } = renderFloatBar(bootstrap({ enabledProviders: ["antigravity"] }));
-    await waitFor(() => {
-      // Automatic picks modelSpecific first (amended order), shown as one
-      // visibly labeled metric instead of three dashes.
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
+  it.each([
+    ["automatic", undefined, "55%", /Model/],
+    ["session", "session", "10%", /Session/],
+    ["weekly", "weekly", "35%", /Weekly/],
+    ["model", "model", "55%", /Model/],
+    ["unsupported", "credits", "55%", /Model/],
+  ] as const)(
+    "shows the %s fallback metric for a cadence-less provider",
+    async (_prefName, preference, expectedValue, expectedLabel) => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        cadenceless("antigravity", "Antigravity"),
+      ]);
+      const providerMetrics: Record<string, MetricPreference> = preference
+        ? { antigravity: preference }
+        : {};
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ enabledProviders: ["antigravity"], providerMetrics }),
       );
-      expect(metrics.some((text) => text?.includes("55%"))).toBe(true);
-      expect(metrics.some((text) => /Model/.test(text ?? ""))).toBe(true);
-    });
-  });
 
-  it("explicit session preference selects the primary window", async () => {
-    tauriMocks.getCachedProviders.mockResolvedValue([cadenceless("antigravity", "Antigravity")]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(
-      settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "session" },
-      }),
-    );
-
-    const { container } = renderFloatBar(
-      bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "session" },
-      }),
-    );
-    await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
+      const { container } = renderFloatBar(
+        bootstrap({ enabledProviders: ["antigravity"], providerMetrics }),
       );
-      // Session selects the primary window (default 10% in the fixture).
-      expect(metrics.some((text) => text?.includes("10%"))).toBe(true);
-      expect(metrics.some((text) => /Session/.test(text ?? ""))).toBe(true);
-    });
-  });
+      await waitFor(() => {
+        const metrics = Array.from(
+          container.querySelectorAll(".floatbar__metric"),
+          (node) => node.textContent,
+        );
+        expect(metrics.some((text) => text?.includes(expectedValue))).toBe(true);
+        expect(metrics.some((text) => expectedLabel.test(text ?? ""))).toBe(true);
+      });
+    },
+  );
 
-  it("explicit weekly preference selects the secondary window", async () => {
-    tauriMocks.getCachedProviders.mockResolvedValue([cadenceless("antigravity", "Antigravity")]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(
-      settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "weekly" },
-      }),
-    );
-
-    const { container } = renderFloatBar(
-      bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "weekly" },
-      }),
-    );
-    await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
+  it.each([
+    ["absent", null, "10%"],
+    ["informational", { used: 55, windowMinutes: null, informational: true }, "10%"],
+  ] as const)(
+    "falls back to the automatic order when the requested %s window is unavailable",
+    async (_kind, modelOverride, expectedValue) => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        cadenceless("antigravity", "Antigravity", {
+          modelSpecific: modelOverride as never,
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({
+          enabledProviders: ["antigravity"],
+          providerMetrics: { antigravity: "model" },
+        }),
       );
-      expect(metrics.some((text) => text?.includes("35%"))).toBe(true);
-      expect(metrics.some((text) => /Weekly/.test(text ?? ""))).toBe(true);
-    });
-  });
 
-  it("explicit model preference selects the model-specific window", async () => {
-    tauriMocks.getCachedProviders.mockResolvedValue([cadenceless("antigravity", "Antigravity")]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(
-      settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
-      }),
-    );
-
-    const { container } = renderFloatBar(
-      bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
-      }),
-    );
-    await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
+      const { container } = renderFloatBar(
+        bootstrap({
+          enabledProviders: ["antigravity"],
+          providerMetrics: { antigravity: "model" },
+        }),
       );
-      expect(metrics.some((text) => text?.includes("55%"))).toBe(true);
-      expect(metrics.some((text) => /Model/.test(text ?? ""))).toBe(true);
-    });
-  });
+      await waitFor(() => {
+        const metrics = Array.from(
+          container.querySelectorAll(".floatbar__metric"),
+          (node) => node.textContent,
+        );
+        // modelSpecific unavailable -> automatic picks primary (10%).
+        expect(metrics.some((text) => text?.includes(expectedValue))).toBe(true);
+      });
+    },
+  );
 
-  it("falls back to automatic order when the requested preference window is absent", async () => {
+  it("prefers provider.primaryLabel for the session fallback label", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
-      cadenceless("antigravity", "Antigravity", { modelSpecific: null }),
+      cadenceless("claude", "Claude", { primaryLabel: "Claude" }),
     ]);
     tauriMocks.getSettingsSnapshot.mockResolvedValue(
       settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
+        enabledProviders: ["claude"],
+        providerMetrics: { claude: "session" },
       }),
     );
 
     const { container } = renderFloatBar(
       bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
+        enabledProviders: ["claude"],
+        providerMetrics: { claude: "session" },
       }),
     );
     await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
-      );
-      // modelSpecific absent -> automatic picks primary (10%).
-      expect(metrics.some((text) => text?.includes("10%"))).toBe(true);
+      const pill = container.querySelector(".floatbar__pill");
+      expect(pill?.getAttribute("aria-label")).toContain("Claude: Claude: 10% used");
+      // The generic "Session" label is NOT used.
+      expect(pill?.getAttribute("aria-label")).not.toContain("ProviderSessionLabel");
     });
   });
 
-  it("falls back to automatic order when the requested preference window is informational", async () => {
+  it("prefers provider.secondaryLabel for the weekly fallback label", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
-      cadenceless("antigravity", "Antigravity", {
-        modelSpecific: { used: 55, windowMinutes: null, informational: true },
-      }),
+      cadenceless("gemini", "Gemini", { secondaryLabel: "Gemini Pro" }),
     ]);
     tauriMocks.getSettingsSnapshot.mockResolvedValue(
       settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
+        enabledProviders: ["gemini"],
+        providerMetrics: { gemini: "weekly" },
       }),
     );
 
     const { container } = renderFloatBar(
       bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "model" },
+        enabledProviders: ["gemini"],
+        providerMetrics: { gemini: "weekly" },
       }),
     );
     await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
-      );
-      expect(metrics.some((text) => text?.includes("10%"))).toBe(true);
-    });
-  });
-
-  it("falls back to automatic order for an unsupported preference", async () => {
-    tauriMocks.getCachedProviders.mockResolvedValue([cadenceless("antigravity", "Antigravity")]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(
-      settings({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "credits" },
-      }),
-    );
-
-    const { container } = renderFloatBar(
-      bootstrap({
-        enabledProviders: ["antigravity"],
-        providerMetrics: { antigravity: "credits" },
-      }),
-    );
-    await waitFor(() => {
-      const metrics = Array.from(
-        container.querySelectorAll(".floatbar__metric"),
-        (node) => node.textContent,
-      );
-      expect(metrics.some((text) => text?.includes("55%"))).toBe(true);
+      const pill = container.querySelector(".floatbar__pill");
+      expect(pill?.getAttribute("aria-label")).toContain("Gemini: Gemini Pro: 35% used");
+      // The generic "Weekly" label is NOT used.
+      expect(pill?.getAttribute("aria-label")).not.toContain("ProviderWeeklyLabel");
     });
   });
 

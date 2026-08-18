@@ -99,12 +99,15 @@ function maxFloatBarUsedPercent(
 
 /**
  * A single fallback metric for providers whose canonical windows carry no
- * recognizable cadence. `labelKey` names the window identity in the UI so the
- * shown value is visibly labeled.
+ * recognizable cadence. The visible label prefers the provider's own window
+ * label (primaryLabel/secondaryLabel/tertiaryLabel) and only falls back to a
+ * generic localized identity when the provider did not supply one.
+ * Model-specific has no bridge label, so it always uses the generic key.
  */
 type FallbackMetric = {
   window: RateWindowSnapshot;
-  labelKey: LocaleKey;
+  providerLabel: string | null;
+  labelKey: LocaleKey | null;
 };
 
 function fallbackFor(
@@ -115,35 +118,91 @@ function fallbackFor(
   // informational. Anything else (automatic, unsupported, absent,
   // informational) falls through to the amended automatic order:
   // modelSpecific -> primary -> secondary -> tertiary.
-  const explicit: Array<{ window: RateWindowSnapshot | null; key: LocaleKey }> = [
+  const explicit: Array<{
+    window: RateWindowSnapshot | null;
+    providerLabel: string | null;
+    labelKey: LocaleKey | null;
+  }> = [
     ...(preference === "session"
-      ? [{ window: provider.primary, key: "ProviderSessionLabel" as LocaleKey }]
+      ? [
+          {
+            window: provider.primary,
+            providerLabel: provider.primaryLabel ?? null,
+            labelKey: "ProviderSessionLabel" as LocaleKey | null,
+          },
+        ]
       : []),
     ...(preference === "weekly"
-      ? [{ window: provider.secondary, key: "ProviderWeeklyLabel" as LocaleKey }]
+      ? [
+          {
+            window: provider.secondary,
+            providerLabel: provider.secondaryLabel ?? null,
+            labelKey: "ProviderWeeklyLabel" as LocaleKey | null,
+          },
+        ]
       : []),
     ...(preference === "model"
-      ? [{ window: provider.modelSpecific, key: "DetailWindowModelSpecific" as LocaleKey }]
+      ? [
+          {
+            window: provider.modelSpecific,
+            providerLabel: null,
+            labelKey: "DetailWindowModelSpecific" as LocaleKey | null,
+          },
+        ]
       : []),
     ...(preference === "tertiary"
-      ? [{ window: provider.tertiary, key: "DetailWindowTertiary" as LocaleKey }]
+      ? [
+          {
+            window: provider.tertiary,
+            providerLabel: provider.tertiaryLabel ?? null,
+            labelKey: "DetailWindowTertiary" as LocaleKey | null,
+          },
+        ]
       : []),
   ];
   for (const candidate of explicit) {
     if (candidate.window && !candidate.window.isInformational) {
-      return { window: candidate.window, labelKey: candidate.key };
+      return {
+        window: candidate.window,
+        providerLabel: candidate.providerLabel,
+        labelKey: candidate.labelKey,
+      };
     }
   }
 
-  const automatic: Array<{ window: RateWindowSnapshot | null; key: LocaleKey }> = [
-    { window: provider.modelSpecific, key: "DetailWindowModelSpecific" },
-    { window: provider.primary, key: "ProviderSessionLabel" },
-    { window: provider.secondary, key: "ProviderWeeklyLabel" },
-    { window: provider.tertiary, key: "DetailWindowTertiary" },
+  const automatic: Array<{
+    window: RateWindowSnapshot | null;
+    providerLabel: string | null;
+    labelKey: LocaleKey | null;
+  }> = [
+    {
+      window: provider.modelSpecific,
+      providerLabel: null,
+      labelKey: "DetailWindowModelSpecific",
+    },
+    {
+      window: provider.primary,
+      providerLabel: provider.primaryLabel ?? null,
+      labelKey: "ProviderSessionLabel",
+    },
+    {
+      window: provider.secondary,
+      providerLabel: provider.secondaryLabel ?? null,
+      labelKey: "ProviderWeeklyLabel",
+    },
+    {
+      window: provider.tertiary,
+      providerLabel: provider.tertiaryLabel ?? null,
+      labelKey: "DetailWindowTertiary",
+    },
   ];
   for (const candidate of automatic) {
     if (candidate.window && !candidate.window.isInformational) {
-      return { window: candidate.window, labelKey: candidate.key };
+      return {
+        window: candidate.window,
+        providerLabel: candidate.providerLabel,
+        labelKey: candidate.labelKey,
+      };
     }
   }
   return null;
@@ -352,11 +411,14 @@ function ProviderPill({
     return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
   });
   let pillDetail: string;
+  const fallbackLabel = fallback
+    ? (fallback.providerLabel ?? (fallback.labelKey ? t(fallback.labelKey) : ""))
+    : "";
   if (fallback) {
     const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
     pillDetail = hasError
-      ? `${provider.displayName}: ${t(fallback.labelKey)}: —`
-      : `${provider.displayName}: ${t(fallback.labelKey)}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
+      ? `${provider.displayName}: ${fallbackLabel}: —`
+      : `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
   } else {
     pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
   }
@@ -382,7 +444,7 @@ function ProviderPill({
             window={fallback.window}
             providerError={hasError}
             showResetInline={showResetInline}
-            label={t(fallback.labelKey)}
+            label={fallbackLabel}
           />
         ) : (
           USAGE_CADENCES.map((cadence, index) => (
