@@ -21,7 +21,7 @@ Float Bar의 provider pill은 항상 다음 순서로 표시된다.
 
 ### 숫자의 근거
 
-Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate window만 순서대로 확인한다. 비용 데이터와 로컬 30일 추정치는 사용하지 않는다.
+Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate window만 순서대로 확인한다(주기 없는 provider의 단일 폴백에서만 `modelSpecific`이 추가로 사용된다). 비용 데이터와 로컬 30일 추정치는 사용하지 않는다.
 
 `windowMinutes`가 있으면 다음 기준으로 분류한다.
 
@@ -181,5 +181,5 @@ installer에는 desktop app, CLI, VC++ runtime bootstrapper, WebView2 bootstrapp
 
 - provider가 canonical window에 월간 quota를 제공하지 않으면 monthly 위치는 `—`다.
 - 비용이나 로컬 30일 사용량을 월간 quota처럼 대신 표시하지 않는다.
-- 모델별·추가 quota window는 이 compact overlay의 범위가 아니다.
+- 모델별 window는 주기 없는(세 고정 슬롯이 모두 빈) provider의 단일 폴백 메트릭으로만 표시된다. 추가(extra) quota window는 이 compact overlay의 범위가 아니다.
 - UI 동작 검증은 Windows-native WebView2 환경이 필요하다.

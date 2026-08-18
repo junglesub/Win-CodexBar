@@ -361,7 +361,7 @@ git commit -m "Show Float Bar reset countdowns"
 Extend `docs/ARCHITECTURE.md` section `Data flow > Float bar` with:
 
 ```markdown
-The provider pill reads canonical `primary`, `secondary`, and `tertiary` rate windows and renders fixed 5-hour / weekly / monthly positions. Values are consumed percentages; missing or informational windows render as `—`. When inline resets are enabled, a slot with a valid future reset appends a compact countdown using only its largest unit (`m`, `h`, or `d`) beside the percentage. Each displayed metric colors itself from its own percentage while the pill stays neutral; sorting follows the highest recognized usage value. Cost, model-specific, and extra windows remain separate from these quota positions.
+The provider pill reads canonical `primary`, `secondary`, and `tertiary` rate windows and renders fixed 5-hour / weekly / monthly positions. Values are consumed percentages; missing or informational windows render as `—`. When inline resets are enabled, a slot with a valid future reset appends a compact countdown using only its largest unit (`m`, `h`, or `d`) beside the percentage. Each displayed metric colors itself from its own percentage while the pill stays neutral; sorting follows the highest recognized usage value. Cost and extra rate windows remain separate from these quota positions; `modelSpecific` is used only as the single cadence-less fallback metric.
 ```
 
 - [ ] **Step 2: Run focused frontend verification**

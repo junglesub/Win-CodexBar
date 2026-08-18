@@ -68,7 +68,7 @@ The tooltip and accessible name keep the full localized reset detail alongside t
 
 ## Acceptance Criteria
 
-1. Every enabled provider renders exactly three fixed usage positions.
+1. Every enabled provider with recognized cadences renders exactly three fixed usage positions; cadence-less providers render the single fallback metric per criterion 7.
 2. Known 5-hour, weekly, and monthly canonical windows appear in the correct positions regardless of whether the provider stored them as primary, secondary, or tertiary.
 3. Unsupported, informational, or missing windows appear as `—`.
 4. Inline reset mode appends a single largest-unit countdown beside each eligible percentage while retaining full localized reset detail in the tooltip/accessibility context.
