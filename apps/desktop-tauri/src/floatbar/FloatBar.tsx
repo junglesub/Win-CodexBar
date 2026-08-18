@@ -43,7 +43,8 @@ const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
 
 function cadenceFromMinutes(minutes: number): UsageCadence | null {
   if (minutes === 300) return "5h";
-  if (minutes >= 43_200) return "monthly";
+  // Real Gregorian months run 28-31 days (40,320-44,640 minutes).
+  if (minutes >= 40_320) return "monthly";
   if (minutes >= 10_080) return "weekly";
   return null;
 }
@@ -84,15 +85,23 @@ function maxFloatBarUsedPercent(provider: ProviderUsageSnapshot): number {
   );
 }
 
-function inlineResetTime(resetText: string): string {
-  const normalized = resetText.trim();
-  if (/^reset(?:s|ting)?(?:\s+due)?\s*(?:now)?$/i.test(normalized)) {
-    return "now";
-  }
-  return normalized
-    .replace(/^resets?\s+in\s+/i, "")
-    .replace(/^resets?\s+/i, "")
-    .trim();
+/**
+ * Locale-independent compact countdown for the visible Float Bar slot value.
+ * Never derives from localized prose, so it stays compact in every language.
+ */
+function compactResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "now";
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  const minutes = totalMinutes % 60;
+  if (minutes === 0) return `${hours}h`;
+  return `${hours}h ${minutes}m`;
 }
 
 type FloatBarCostSummary = {
@@ -182,39 +191,33 @@ function CostPill({
 /**
  * One fixed quota slot in the Float Bar provider pill.
  *
- * Values are always consumed percentages; the global `showAsUsed` setting
- * does not apply. Missing or informational windows render as `—`, and the
- * tooltip/accessible name always carries the cadence, percentage, and reset.
+ * Renders only the compact visible value. The pill itself carries the full
+ * cadence/used/reset detail on its title and accessible name, because pill
+ * children intentionally have `pointer-events: none`.
  */
 function UsageMetric({
-  cadence,
   window: rateWindow,
   providerError,
   showResetInline,
-  usedSuffix,
 }: {
-  cadence: UsageCadence;
   window: RateWindowSnapshot | null;
   providerError: boolean;
   showResetInline: boolean;
-  usedSuffix: string;
 }) {
-  const resetText = useFormattedResetTime(rateWindow?.resetsAt ?? null, null, true);
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
   const hasFutureReset = Number.isFinite(target) && target > Date.now();
+  const compactReset =
+    hasFutureReset && rateWindow?.resetsAt ? compactResetTime(rateWindow.resetsAt) : null;
   const visible =
     used == null || providerError
       ? "—"
-      : showResetInline && hasFutureReset && resetText
-        ? inlineResetTime(resetText)
+      : showResetInline && compactReset
+        ? compactReset
         : `${Math.round(used)}%`;
-  const detail = used == null || providerError
-    ? `${cadence}: —`
-    : `${cadence}: ${Math.round(used)}% ${usedSuffix}${resetText ? `\n${resetText}` : ""}`;
 
   return (
-    <span className="floatbar__metric" title={detail} aria-label={detail} data-tauri-drag-region>
+    <span className="floatbar__metric" data-tauri-drag-region>
       {visible}
     </span>
   );
@@ -225,7 +228,9 @@ function UsageMetric({
  *
  * Renders fixed 5-hour / weekly / monthly usage slots. Color follows usage:
  * green default, amber at/above the high-usage threshold, red at/above the
- * critical threshold or when the provider is exhausted.
+ * critical threshold or when the provider is exhausted. The full per-slot
+ * detail (cadence, used percentage, localized reset) lives on the pill
+ * `title` and `aria-label` so it stays hoverable/accessible.
  */
 function ProviderPill({
   provider,
@@ -233,6 +238,7 @@ function ProviderPill({
   critUsage,
   scale,
   showResetInline,
+  resetRelative,
   usedSuffix,
 }: {
   provider: ProviderUsageSnapshot;
@@ -240,26 +246,41 @@ function ProviderPill({
   critUsage: number;
   scale: number;
   showResetInline: boolean;
+  resetRelative: boolean;
   usedSuffix: string;
 }) {
   const slots = selectFloatBarUsageSlots(provider);
   const maxUsed = maxFloatBarUsedPercent(provider);
   const exhausted = provider.primary.isExhausted || provider.error;
+  const hasError = Boolean(provider.error);
   let tone: "ok" | "warn" | "crit" = "ok";
   if (exhausted || maxUsed >= critUsage) tone = "crit";
   else if (maxUsed >= highUsage) tone = "warn";
 
+  // One reset hook per fixed slot, called unconditionally in stable order.
+  const reset5h = useFormattedResetTime(slots["5h"]?.resetsAt ?? null, null, resetRelative);
+  const resetWeekly = useFormattedResetTime(slots.weekly?.resetsAt ?? null, null, resetRelative);
+  const resetMonthly = useFormattedResetTime(slots.monthly?.resetsAt ?? null, null, resetRelative);
+  const resetTexts = [reset5h, resetWeekly, resetMonthly];
+
+  const slotDetails = USAGE_CADENCES.map((cadence, index) => {
+    if (hasError) return `${cadence}: —`;
+    const window = slots[cadence];
+    if (!window) return `${cadence}: —`;
+    const used = Math.round(Math.max(0, Math.min(100, window.usedPercent)));
+    const reset = resetTexts[index];
+    return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
+  });
+  const pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
-  const pillSummary = USAGE_CADENCES.map((cadence) => {
-    const window = slots[cadence];
-    return window ? `${Math.round(Math.max(0, Math.min(100, window.usedPercent)))}%` : "—";
-  }).join(" / ");
 
   return (
     <div
       className={`floatbar__pill floatbar__pill--${tone}`}
-      title={`${provider.displayName}: ${pillSummary} used`}
+      title={pillDetail}
+      aria-label={pillDetail}
       data-tauri-drag-region
       style={{ "--brand": brand } as CSSProperties}
     >
@@ -271,11 +292,9 @@ function ProviderPill({
           <Fragment key={cadence}>
             {index > 0 && <span className="floatbar__metric-separator">/</span>}
             <UsageMetric
-              cadence={cadence}
               window={slots[cadence]}
-              providerError={Boolean(provider.error)}
+              providerError={hasError}
               showResetInline={showResetInline}
-              usedSuffix={usedSuffix}
             />
           </Fragment>
         ))}
@@ -523,6 +542,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               critUsage={settings.criticalUsageThreshold}
               scale={scale}
               showResetInline={showResetInline}
+              resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
             />
           ))}

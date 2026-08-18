@@ -20,8 +20,8 @@ Inspect canonical windows in order: `primary`, `secondary`, then `tertiary`. Inf
 Classify a window by `windowMinutes` when present:
 
 - exactly `300`: 5-hour
-- `10,080` through `43,199`: weekly
-- `43,200` or greater: monthly
+- `10,080` through `40,319`: weekly
+- `40,320` or greater: monthly (covers real Gregorian months of 28-31 days)
 - every other known duration: unsupported
 
 Only when `windowMinutes` is absent, use the corresponding provider label as a fallback. Recognize labels that explicitly identify a 5-hour (`5h`, `5-hour`, or `5 hour`), weekly (`weekly` or `7-day`), or monthly cadence. Do not infer cadence from generic labels such as `Session`, `Usage`, or `Quota`.

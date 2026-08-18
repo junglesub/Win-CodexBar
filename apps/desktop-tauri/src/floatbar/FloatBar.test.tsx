@@ -258,9 +258,9 @@ describe("FloatBar", () => {
     const titles = Array.from(container.querySelectorAll(".floatbar__pill")).map(
       (el) => el.getAttribute("title") ?? "",
     );
-    // Highest used (codex, 75%) shows first.
-    expect(titles[0]).toMatch(/Codex: 75% \/ — \/ — used/);
-    expect(titles[1]).toMatch(/Claude: 20% \/ — \/ — used/);
+    // Highest used (codex, 75%) shows first; pill carries full slot detail.
+    expect(titles[0]).toMatch(/Codex: 5h: 75% used\nweekly: —\nmonthly: —/);
+    expect(titles[1]).toMatch(/Claude: 5h: 20% used\nweekly: —\nmonthly: —/);
   });
 
   it("renders canonical 5h, weekly, and monthly windows in fixed order", async () => {
@@ -278,6 +278,45 @@ describe("FloatBar", () => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["23%", "41%", "8%"]);
+    });
+  });
+
+  it.each([
+    ["28 days", 40_320],
+    ["29 days", 41_760],
+    ["30 days", 43_200],
+    ["31 days", 44_640],
+  ])("classifies a %s window as monthly", async (_label, windowMinutes) => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 10, {
+        informational: true,
+        tertiary: { used: 8, windowMinutes },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—", "—", "8%"]);
+    });
+  });
+
+  it("classifies a window just below 28 days as weekly, not monthly", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 10, {
+        informational: true,
+        secondary: { used: 41, windowMinutes: 40_319 },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—", "41%", "—"]);
     });
   });
 
@@ -400,6 +439,10 @@ describe("FloatBar", () => {
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["—", "—", "—"]);
       expect(container.querySelector(".floatbar__pill--crit")).not.toBeNull();
+      // The pill detail must show three dashes, not stale percentages.
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toBe(
+        "Claude: 5h: —\nweekly: —\nmonthly: —",
+      );
     });
   });
 
@@ -465,8 +508,11 @@ describe("FloatBar", () => {
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["—", "80%", "—"]);
       expect(container.querySelector(".floatbar__pill--warn")).not.toBeNull();
-      // resetDescription alone is not enough for an inline countdown.
-      expect(container.querySelector('[aria-label^="weekly: 80% used"]')).not.toBeNull();
+      // resetDescription alone is not enough for an inline countdown; the
+      // pill accessibility detail still carries the weekly used percentage.
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
+        /weekly: 80% used/,
+      );
     });
   });
 
@@ -518,7 +564,10 @@ describe("FloatBar", () => {
       const titles = Array.from(container.querySelectorAll(".floatbar__pill")).map(
         (pill) => pill.getAttribute("title"),
       );
-      expect(titles).toEqual(["Codex: 50% / — / — used", "Claude: — / 20% / — used"]);
+      expect(titles).toEqual([
+        "Codex: 5h: 50% used\nweekly: —\nmonthly: —",
+        "Claude: 5h: —\nweekly: 20% used\nmonthly: —",
+      ]);
     });
   });
 
@@ -747,13 +796,50 @@ describe("FloatBar", () => {
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
     ).toEqual(["2h 5m", "1d 4h", "12d 12h"]);
-    // Tooltip/accessibility retains the cadence, used percentage, and reset.
-    expect(container.querySelector('[aria-label^="5h: 100% used"]')?.getAttribute("aria-label"))
-      .toContain("100% used");
-    expect(container.querySelector('[aria-label^="weekly: 41% used"]')?.getAttribute("aria-label"))
-      .toContain("41% used");
-    expect(container.querySelector('[aria-label^="monthly: 60% used"]')?.getAttribute("aria-label"))
-      .toContain("60% used");
+    // The pill accessibility detail retains cadence, used percentage, and the
+    // localized reset for each slot.
+    const pillLabel = container.querySelector(".floatbar__pill")?.getAttribute("aria-label");
+    expect(pillLabel).toMatch(/5h: 100% used\nResets in 2h 5m/);
+    expect(pillLabel).toMatch(/weekly: 41% used\nResets in 1d 4h/);
+    expect(pillLabel).toMatch(/monthly: 60% used\nResets in 12d 12h/);
+  });
+
+  it("keeps the visible countdown locale-independent under a non-English locale", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        resetsAt: "2026-08-18T02:05:00Z",
+        primaryWindowMinutes: 300,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarShowResetInline: true }),
+    );
+    tauriMocks.getLocaleStrings.mockResolvedValue(
+      buildBundle(
+        {
+          ResetsInHoursMinutes: "リセットまで {}時間 {}分",
+          ResetsInDaysHours: "リセットまで {}日 {}時間",
+          TrayResetsDueNow: "リセット中",
+          PanelUsedSuffix: "使用済み",
+        },
+        "japanese",
+      ),
+    );
+
+    const { container } = renderFloatBar(bootstrap({ floatBarShowResetInline: true }));
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    // The visible value is the compact locale-independent countdown, never
+    // English-stripped or localized prose.
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual(["2h 5m", "—", "—"]);
+    // The tooltip/accessibility keeps the localized prose.
+    expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
+      /5h: 100% 使用済み\nリセットまで 2時間 5分/,
+    );
   });
 
   it("keeps percentages visible when inline resets are disabled", async () => {
@@ -769,9 +855,10 @@ describe("FloatBar", () => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["20%", "—", "—"]);
-      // The tooltip retains the localized reset text.
-      expect(container.querySelector('[aria-label^="5h: 20% used"]')?.getAttribute("aria-label"))
-        .toMatch(/Resets in [12]h/);
+      // The pill tooltip/accessibility retains the localized reset text.
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
+        /5h: 20% used\nResets in [12]h/,
+      );
     });
   });
 
