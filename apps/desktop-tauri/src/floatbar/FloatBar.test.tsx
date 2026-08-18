@@ -318,6 +318,28 @@ describe("FloatBar", () => {
     });
   });
 
+  it.each(["5h", "5-hour", "5 hour", "5-Hour"])(
+    "classifies a 5-hour window from the label %s when duration is absent",
+    async (label) => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("claude", "Claude", 10, {
+          informational: true,
+          secondary: { used: 41 },
+          tertiary: { used: 8 },
+          tertiaryLabel: label,
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+      const { container } = renderFloatBar(bootstrap());
+      await waitFor(() => {
+        expect(
+          Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+        ).toEqual(["8%", "41%", "—"]);
+      });
+    },
+  );
+
   it("refuses label fallback for an unsupported known duration", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, {
@@ -339,9 +361,11 @@ describe("FloatBar", () => {
 
   it("keeps the first match when duplicate cadence candidates exist", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
+      // Two canonical windows both resolve to the 5-hour cadence; the earlier
+      // (primary) candidate must win so its used value is the one rendered.
       snapshot("claude", "Claude", 10, {
         primaryWindowMinutes: 300,
-        secondary: { used: 41, windowMinutes: 10_080 },
+        secondary: { used: 41, windowMinutes: 300 },
         tertiary: { used: 90, windowMinutes: 43_200 },
       }),
     ]);
@@ -351,22 +375,26 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["10%", "41%", "90%"]);
+      ).toEqual(["10%", "—", "90%"]);
     });
   });
 
-  it("renders three dashes for provider errors", async () => {
+  it("renders three dashes for provider errors even with future resets and inline mode", async () => {
+    const resetsAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, {
         error: "boom",
+        resetsAt,
         primaryWindowMinutes: 300,
-        secondary: { used: 41, windowMinutes: 10_080 },
-        tertiary: { used: 8, windowMinutes: 43_200 },
+        secondary: { used: 41, windowMinutes: 10_080, resetsAt },
+        tertiary: { used: 8, windowMinutes: 43_200, resetsAt },
       }),
     ]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarShowResetInline: true }),
+    );
 
-    const { container } = renderFloatBar(bootstrap());
+    const { container } = renderFloatBar(bootstrap({ floatBarShowResetInline: true }));
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
@@ -692,13 +720,18 @@ describe("FloatBar", () => {
     vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 100, {
+        resetsAt: "2026-08-18T02:05:00Z",
         primaryWindowMinutes: 300,
         secondary: {
           used: 41,
           windowMinutes: 10_080,
           resetsAt: "2026-08-19T04:00:00Z",
         },
-        tertiary: { used: 60, windowMinutes: 43_200 },
+        tertiary: {
+          used: 60,
+          windowMinutes: 43_200,
+          resetsAt: "2026-08-30T12:00:00Z",
+        },
       }),
     ]);
     tauriMocks.getSettingsSnapshot.mockResolvedValue(
@@ -710,11 +743,17 @@ describe("FloatBar", () => {
     );
     await act(async () => vi.runOnlyPendingTimersAsync());
 
+    // Every eligible slot independently shows its own relative countdown.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["100%", "1d 4h", "60%"]);
+    ).toEqual(["2h 5m", "1d 4h", "12d 12h"]);
+    // Tooltip/accessibility retains the cadence, used percentage, and reset.
+    expect(container.querySelector('[aria-label^="5h: 100% used"]')?.getAttribute("aria-label"))
+      .toContain("100% used");
     expect(container.querySelector('[aria-label^="weekly: 41% used"]')?.getAttribute("aria-label"))
       .toContain("41% used");
+    expect(container.querySelector('[aria-label^="monthly: 60% used"]')?.getAttribute("aria-label"))
+      .toContain("60% used");
   });
 
   it("keeps percentages visible when inline resets are disabled", async () => {

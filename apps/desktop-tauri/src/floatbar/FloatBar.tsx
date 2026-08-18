@@ -50,7 +50,7 @@ function cadenceFromMinutes(minutes: number): UsageCadence | null {
 
 function cadenceFromLabel(label: string | undefined): UsageCadence | null {
   const normalized = label?.trim().toLowerCase() ?? "";
-  if (/(^|[^a-z0-9])5\s*(?:h|hour)(?:s)?([^a-z0-9]|$)/.test(normalized)) return "5h";
+  if (/(^|[^a-z0-9])5\s*(?:-|\s)?(?:h|hour)(?:s)?([^a-z0-9]|$)/.test(normalized)) return "5h";
   if (/(^|[^a-z0-9])(?:weekly|7[ -]?day)([^a-z0-9]|$)/.test(normalized)) return "weekly";
   if (/(^|[^a-z0-9])monthly([^a-z0-9]|$)/.test(normalized)) return "monthly";
   return null;
@@ -203,11 +203,12 @@ function UsageMetric({
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
   const hasFutureReset = Number.isFinite(target) && target > Date.now();
-  const visible = showResetInline && hasFutureReset && resetText
-    ? inlineResetTime(resetText)
-    : used == null || providerError
+  const visible =
+    used == null || providerError
       ? "—"
-      : `${Math.round(used)}%`;
+      : showResetInline && hasFutureReset && resetText
+        ? inlineResetTime(resetText)
+        : `${Math.round(used)}%`;
   const detail = used == null || providerError
     ? `${cadence}: —`
     : `${cadence}: ${Math.round(used)}% ${usedSuffix}${resetText ? `\n${resetText}` : ""}`;
