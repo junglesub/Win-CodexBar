@@ -125,9 +125,10 @@ const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
 
 function cadenceFromMinutes(minutes: number): UsageCadence | null {
   if (minutes === 300) return "5h";
-  // Real Gregorian months run 28-31 days (40,320-44,640 minutes).
-  if (minutes >= 40_320) return "monthly";
-  if (minutes >= 10_080) return "weekly";
+  // Actual Gregorian months run 28-31 days (40,320-44,640 minutes); anything
+  // above that range is unsupported rather than weekly or monthly.
+  if (minutes >= 40_320 && minutes <= 44_640) return "monthly";
+  if (minutes >= 10_080 && minutes < 40_320) return "weekly";
   return null;
 }
 

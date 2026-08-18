@@ -21,7 +21,7 @@ Classify a window by `windowMinutes` when present:
 
 - exactly `300`: 5-hour
 - `10,080` through `40,319`: weekly
-- `40,320` or greater: monthly (covers real Gregorian months of 28-31 days)
+- `40,320` through `44,640`: monthly (actual 28-31 day Gregorian months)
 - every other known duration: unsupported
 
 Only when `windowMinutes` is absent, use the corresponding provider label as a fallback. Recognize labels that explicitly identify a 5-hour (`5h`, `5-hour`, or `5 hour`), weekly (`weekly` or `7-day`), or monthly cadence. Do not infer cadence from generic labels such as `Session`, `Usage`, or `Quota`.

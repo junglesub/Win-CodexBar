@@ -1,4 +1,4 @@
-import { act, render, waitFor } from "@testing-library/react";
+import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriMocks = vi.hoisted(() => ({
@@ -263,6 +263,33 @@ describe("FloatBar", () => {
     expect(titles[1]).toMatch(/Claude: 5h: 20% used\nweekly: —\nmonthly: —/);
   });
 
+  it("exposes the float bar and each provider pill as named semantic groups", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 20),
+      snapshot("codex", "Codex", 75),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    renderFloatBar(bootstrap());
+
+    // The outer bar is a group named by the app label, not a button.
+    const bar = await screen.findByRole("group", { name: "AppName" });
+    expect(bar).not.toBeNull();
+    expect(screen.queryByRole("button", { name: "AppName" })).toBeNull();
+
+    // Each provider pill is a semantically exposed named group.
+    await waitFor(() => {
+      const codex = screen.getByRole("group", {
+        name: /Codex: 5h: 75% used\nweekly: —\nmonthly: —/,
+      });
+      const claude = screen.getByRole("group", {
+        name: /Claude: 5h: 20% used\nweekly: —\nmonthly: —/,
+      });
+      expect(codex).not.toBeNull();
+      expect(claude).not.toBeNull();
+    });
+  });
+
   it("renders canonical 5h, weekly, and monthly windows in fixed order", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 23, {
@@ -317,6 +344,23 @@ describe("FloatBar", () => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["—", "41%", "—"]);
+    });
+  });
+
+  it("does not classify a window above 31 days as monthly", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 10, {
+        informational: true,
+        tertiary: { used: 8, windowMinutes: 44_641 },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—", "—", "—"]);
     });
   });
 
