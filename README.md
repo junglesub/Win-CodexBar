@@ -170,6 +170,8 @@ C:\code\Win-CodexBar-feat-overlay\assets\CodexBar-<version>-portable.exe.sha256
 
 installer에는 desktop app, CLI, VC++ runtime bootstrapper, WebView2 bootstrapper가 포함된다. 로컬 결과물은 서명되지 않을 수 있으므로 배포 전에 `.sha256` 파일과 Authenticode 상태를 별도로 확인한다.
 
+`personal` 브랜치에 push하면 GitHub Actions가 같은 네 파일을 빌드하고 `personal-latest` prerelease를 자동으로 교체한다. 설정과 재실행 방법은 `docs/release/ci-cd.md`를 참고한다.
+
 ## 관련 파일
 
 | 파일 | 역할 |

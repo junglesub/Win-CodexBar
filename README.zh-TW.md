@@ -159,8 +159,8 @@ Winget 分發已透過 [microsoft/winget-pkgs](https://github.com/microsoft/wing
 .\scripts\release-doctor.ps1 -Version X.Y.Z
 ```
 
-構建指令碼不再上傳 GitHub Release。釋出僅透過需要人工核准的 CircleCI
-Windows 草稿釋出流程完成；它會校驗 SHA-256，絕不覆蓋已有資產。
+構建指令碼本身不會上傳 GitHub Release。推送到 `personal` 分支後，GitHub
+Actions 會構建這些檔案並取代 `personal-latest` 預發佈版本。
 
 ## 首次執行
 

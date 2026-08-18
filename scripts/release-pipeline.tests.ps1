@@ -66,10 +66,31 @@ try {
 
 $builderText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'windows-release-build.ps1')
 $legacySwitch = 'Upload' + 'Release'
-$clobberFlag = '--' + 'clobber'
 Assert-True ($builderText -notmatch $legacySwitch) 'legacy upload parameter removed'
-Assert-True ($builderText -notmatch $clobberFlag) 'builder has no clobber upload path'
-$publisherText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'publish-github-release.ps1')
-Assert-True ($publisherText -notmatch $clobberFlag) 'publisher has no clobber flag'
+
+$workflowPath = Join-Path (Split-Path -Parent $scriptRoot) '.github\workflows\personal-release.yml'
+$workflowText = Get-Content -Raw -LiteralPath $workflowPath
+Assert-True ($workflowText -match 'branches:\s*\[personal\]') 'personal pushes trigger release'
+Assert-True ($workflowText -match 'permissions:\s*\r?\n\s+contents:\s*read') 'build defaults to read-only contents'
+Assert-True ($workflowText -match 'publish:[\s\S]+permissions:\s*\r?\n\s+contents:\s*write') 'only publish job can write releases'
+Assert-True ($workflowText -match 'GH_REPO:\s*\$\{\{ github\.repository \}\}') 'checkout-free publisher identifies its repository'
+Assert-True ($workflowText -match "github\.ref == 'refs/heads/personal'") 'manual runs are restricted to personal'
+Assert-True ($workflowText -match 'persist-credentials:\s*false') 'build checkout does not retain write credentials'
+Assert-True ($workflowText -match 'windows-release-build\.ps1') 'workflow reuses Windows release builder'
+Assert-True ($workflowText -match 'Expected four release assets') 'workflow checks the complete asset set'
+Assert-True ($workflowText -match 'actions/upload-artifact@v4') 'build passes assets without a write token'
+Assert-True ($workflowText -match 'personal-staging-') 'workflow stages assets before switching releases'
+Assert-True ($workflowText -match '--tag personal-latest') 'workflow promotes staging to rolling release'
+Assert-True ($workflowText -match '--target \$personalHead') 'release edits target the current default branch head'
+Assert-True ($workflowText -match 'observedTagSha') 'ambiguous tag updates are checked before rollback'
+Assert-True ($workflowText -match '::error title=Personal release') 'publish failures expose actionable annotations'
+Assert-True ($workflowText -match 'git/ref/heads/personal') 'workflow rejects stale builds before publication'
+Assert-True ($workflowText -notmatch 'release delete personal-latest') 'workflow keeps the previous release during replacement'
+Assert-True ($workflowText -notmatch '--clobber') 'workflow never replaces assets in place'
+Assert-True ($workflowText -match '--prerelease') 'personal release cannot become canonical latest'
+Assert-True (-not (Test-Path (Join-Path (Split-Path -Parent $scriptRoot) '.circleci\config.yml'))) 'CircleCI config removed'
+foreach ($removedScript in @('circleci-release-build.ps1', 'emit-release-manifest.ps1', 'publish-github-release.ps1', 'release-preflight.ps1')) {
+    Assert-True (-not (Test-Path (Join-Path $scriptRoot $removedScript))) "$removedScript removed"
+}
 
 Write-Host 'Release pipeline focused tests passed.'

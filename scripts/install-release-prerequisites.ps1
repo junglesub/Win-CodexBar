@@ -51,7 +51,7 @@ function Install-WingetPackage {
     }
     $winget = Get-CommandPath 'winget'
     if (-not $winget) {
-        throw "Missing '$Id' and winget is unavailable. Install the pinned package on the CircleCI Windows image."
+        throw "Missing '$Id' and winget is unavailable. Install the pinned package on the Windows release machine."
     }
     Write-Host "Installing winget package $Id"
     $arguments = @(

@@ -159,8 +159,8 @@ Winget 分发已通过 [microsoft/winget-pkgs](https://github.com/microsoft/wing
 .\scripts\release-doctor.ps1 -Version X.Y.Z
 ```
 
-构建脚本不再上传 GitHub Release。发布仅通过需要人工批准的 CircleCI
-Windows 草稿发布流程完成；它会校验 SHA-256，绝不会覆盖已有资产。
+构建脚本本身不会上传 GitHub Release。推送到 `personal` 分支后，GitHub
+Actions 会构建这些文件并替换 `personal-latest` 预发布版本。
 
 ## 首次运行
 
