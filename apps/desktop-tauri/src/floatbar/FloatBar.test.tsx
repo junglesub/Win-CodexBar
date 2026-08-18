@@ -513,7 +513,9 @@ describe("FloatBar", () => {
         (node) => node.textContent,
       );
       expect(metrics.some((text) => text?.includes("—"))).toBe(true);
-      expect(container.querySelector(".floatbar__pill--crit")).not.toBeNull();
+      // The pill stays neutral; the displayed fallback dash metric is critical.
+      expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
+      expect(container.querySelector(".floatbar__metric--crit")).not.toBeNull();
       // Pill detail must not show stale percentages.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
         /DetailWindowModelSpecific: —/,
@@ -757,7 +759,9 @@ describe("FloatBar", () => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["—", "—", "—"]);
-      expect(container.querySelector(".floatbar__pill--crit")).not.toBeNull();
+      // The pill stays neutral; every displayed error dash metric is critical.
+      expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
+      expect(container.querySelectorAll(".floatbar__metric--crit").length).toBe(3);
       // The pill detail must show three dashes, not stale percentages.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toBe(
         "Claude: 5h: —\nweekly: —\nmonthly: —",
@@ -786,7 +790,11 @@ describe("FloatBar", () => {
       // codex peaks at 80% (warn); claude peaks at 75% (warn) → codex first.
       expect(titles[0]).toMatch(/Codex/);
       expect(titles[1]).toMatch(/Claude/);
-      expect(container.querySelectorAll(".floatbar__pill--warn").length).toBe(2);
+      // Each metric colors itself: 75% and 80% are warn, 40% and 20% neutral;
+      // the pills themselves stay neutral.
+      expect(container.querySelectorAll(".floatbar__metric--warn").length).toBe(2);
+      expect(container.querySelectorAll(".floatbar__pill--warn").length).toBe(0);
+      expect(container.querySelectorAll(".floatbar__pill").length).toBe(2);
     });
   });
 
@@ -826,7 +834,9 @@ describe("FloatBar", () => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["—", "80%", "—"]);
-      expect(container.querySelector(".floatbar__pill--warn")).not.toBeNull();
+      // The pill stays neutral; the weekly 80% metric is warn.
+      expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
+      expect(container.querySelectorAll(".floatbar__metric--warn").length).toBe(1);
       // resetDescription alone is not enough for an inline countdown; the
       // pill accessibility detail still carries the weekly used percentage.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
@@ -951,7 +961,9 @@ describe("FloatBar", () => {
 
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
-      expect(container.querySelector(".floatbar__pill--warn")).not.toBeNull();
+      // The pill stays neutral; the 75% used metric itself is warn.
+      expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
+      expect(container.querySelector(".floatbar__metric--warn")).not.toBeNull();
     });
   });
 
@@ -963,7 +975,9 @@ describe("FloatBar", () => {
 
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
-      expect(container.querySelector(".floatbar__pill--crit")).not.toBeNull();
+      // The pill stays neutral; the exhausted 100% used metric itself is critical.
+      expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
+      expect(container.querySelector(".floatbar__metric--crit")).not.toBeNull();
     });
   });
 
