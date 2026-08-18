@@ -153,16 +153,6 @@ body.floatbar-window #root {
   flex-direction: column;
   gap: calc(2px * var(--floatbar-scale, 1));
 }
-.floatbar__pill--warn {
-  background: rgba(250, 221, 171, 0.84);
-  border-color: rgba(255, 246, 219, 0.62);
-  color: #7a4c05;
-}
-.floatbar__pill--crit {
-  background: rgba(255, 194, 194, 0.86);
-  border-color: rgba(255, 236, 236, 0.66);
-  color: #7f1d1d;
-}
 .floatbar__metrics {
   display: inline-flex;
   align-items: center;
@@ -173,6 +163,14 @@ body.floatbar-window #root {
 .floatbar__metric {
   min-width: 2.4em;
   text-align: center;
+}
+.floatbar__metric--warn {
+  color: #7a4c05;
+  font-weight: 700;
+}
+.floatbar__metric--crit {
+  color: #7f1d1d;
+  font-weight: 700;
 }
 .floatbar__metric-label {
   font-size: 0.78em;
@@ -216,12 +214,10 @@ body.floatbar-window #root {
   border-color: rgba(255, 255, 255, 0.64);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
-.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
+.floatbar--light-bg .floatbar__metric--warn {
   color: #92400e;
 }
-.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
+.floatbar--light-bg .floatbar__metric--crit {
   color: #991b1b;
 }
 .floatbar--light-bg .floatbar__handle {
@@ -280,14 +276,10 @@ body.floatbar-window #root {
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.22));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-.floatbar--floating .floatbar__pill--warn {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #f59e0b;
+.floatbar--floating .floatbar__metric--warn {
   color: #fbbf24;
 }
-.floatbar--floating .floatbar__pill--crit {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #ef4444;
+.floatbar--floating .floatbar__metric--crit {
   color: #fca5a5;
 }
 .floatbar--floating .floatbar__empty {
@@ -306,12 +298,10 @@ body.floatbar-window #root {
   border-color: var(--brand, rgba(20, 22, 26, 0.25));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
-.floatbar--floating.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
+.floatbar--floating.floatbar--light-bg .floatbar__metric--warn {
   color: #92400e;
 }
-.floatbar--floating.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
+.floatbar--floating.floatbar--light-bg .floatbar__metric--crit {
   color: #991b1b;
 }
 .floatbar--floating.floatbar--light-bg .floatbar__handle {

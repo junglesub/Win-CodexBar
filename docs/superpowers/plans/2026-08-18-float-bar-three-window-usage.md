@@ -169,7 +169,7 @@ function maxFloatBarUsedPercent(provider: ProviderUsageSnapshot): number {
 }
 ```
 
-Import `RateWindowSnapshot` as a TypeScript type. Use `maxFloatBarUsedPercent` for provider sorting and the existing warning/critical threshold checks. Preserve critical status for provider errors.
+Import `RateWindowSnapshot` as a TypeScript type. Use `maxFloatBarUsedPercent` for provider sorting. Color each displayed metric independently from its own percentage using the existing warning/critical thresholds; the pill stays neutral. Preserve critical status for provider errors.
 
 - [ ] **Step 5: Run the focused tests**
 

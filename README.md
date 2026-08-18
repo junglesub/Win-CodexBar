@@ -15,7 +15,7 @@ Float Bar의 provider pill은 항상 다음 순서로 표시된다.
 - `showAsUsed` 전역 설정과 관계없이 같은 기준을 사용한다.
 - 해당 주기의 quota가 없거나 informational window이면 `—`를 표시한다.
 - provider 오류가 있으면 `— / — / —`와 critical 상태를 표시한다.
-- provider 정렬과 경고 색상은 세 값 중 가장 높은 사용률을 기준으로 한다.
+- provider 정렬은 세 값 중 가장 높은 사용률을 기준으로 한다. 각 메트릭(5h/weekly/monthly 또는 폴백)은 자신의 사용률로 독립적으로 색이 칠해진다. pill과 아이콘은 중립을 유지한다.
 - inline reset을 켜면 각 slot의 퍼센트를 `2h 5m`, `1d 4h` 같은 짧은 countdown으로 독립적으로 바꿀 수 있다.
 - hover tooltip과 접근성 이름에는 provider 이름, 주기, 사용률, 초기화 시간이 모두 남는다.
 

@@ -54,9 +54,9 @@ The tooltip and accessible name retain the used percentage even while the visibl
 ## Ordering and Status
 
 - Sort providers descending by the highest available used percentage across the three slots (or the fallback metric when cadence-less).
-- Derive warning and critical tones from the same highest percentage using the existing thresholds.
-- Preserve critical styling for provider errors and render `— / — / —`.
-- Providers with no recognized canonical window show the cadence-less fallback (or `—` when no window exists at all).
+- Color each displayed usage metric independently from its own consumed percentage using the existing thresholds: red at/above the critical threshold, amber at/above the high-usage threshold, otherwise neutral. The provider pill, icon, and container stay neutral.
+- Provider errors render `— / — / —` with the dash metrics red. A window's own exhaustion makes only that metric red.
+- Providers with no recognized canonical window show the cadence-less fallback (or `—` when no window exists at all); the fallback colors only its selected metric.
 
 ## Scope and Constraints
 
@@ -72,6 +72,6 @@ The tooltip and accessible name retain the used percentage even while the visibl
 2. Known 5-hour, weekly, and monthly canonical windows appear in the correct positions regardless of whether the provider stored them as primary, secondary, or tertiary.
 3. Unsupported, informational, or missing windows appear as `—`.
 4. Inline reset mode replaces every eligible slot with its own live relative countdown while retaining full tooltip/accessibility context.
-5. Sorting and status color use the highest recognized used percentage.
+5. Sorting uses the highest recognized used percentage; each displayed metric colors itself from its own percentage.
 6. Existing provider filtering, cost pills, dragging, orientation, scaling, and refresh behavior remain unchanged.
 7. Cadence-less providers render one visibly labeled fallback metric honoring `providerMetrics` (session/weekly/model/tertiary), with automatic falling back to modelSpecific → primary → secondary → tertiary.

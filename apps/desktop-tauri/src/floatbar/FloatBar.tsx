@@ -287,17 +287,24 @@ function CostPill({
  *
  * Renders only the compact visible value. The pill itself carries the full
  * cadence/used/reset detail on its title and accessible name, because pill
- * children intentionally have `pointer-events: none`.
+ * children intentionally have `pointer-events: none`. Each metric colors
+ * itself from its own consumed percentage: red at/above the critical
+ * threshold (or on provider error / exhaustion), amber at/above the
+ * high-usage threshold, otherwise neutral.
  */
 function UsageMetric({
   window: rateWindow,
   providerError,
   showResetInline,
+  highUsage,
+  critUsage,
   label,
 }: {
   window: RateWindowSnapshot | null;
   providerError: boolean;
   showResetInline: boolean;
+  highUsage: number;
+  critUsage: number;
   label?: string;
 }) {
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
@@ -312,8 +319,22 @@ function UsageMetric({
         ? compactReset
         : `${Math.round(used)}%`;
 
+  const tone =
+    providerError || rateWindow?.isExhausted || (used != null && used >= critUsage)
+      ? "crit"
+      : used != null && used >= highUsage
+        ? "warn"
+        : "ok";
+
   return (
-    <span className="floatbar__metric" data-tauri-drag-region>
+    <span
+      className={
+        tone === "ok"
+          ? "floatbar__metric"
+          : `floatbar__metric floatbar__metric--${tone}`
+      }
+      data-tauri-drag-region
+    >
       {label ? <span className="floatbar__metric-label">{label} </span> : null}
       {visible}
     </span>
@@ -323,11 +344,11 @@ function UsageMetric({
 /**
  * The capacity pill shown for a single provider.
  *
- * Renders fixed 5-hour / weekly / monthly usage slots. Color follows usage:
- * green default, amber at/above the high-usage threshold, red at/above the
- * critical threshold or when the provider is exhausted. The full per-slot
- * detail (cadence, used percentage, localized reset) lives on the pill
- * `title` and `aria-label` so it stays hoverable/accessible.
+ * Renders fixed 5-hour / weekly / monthly usage slots (or the cadence-less
+ * fallback metric). The pill, icon, and container stay visually neutral;
+ * each usage metric colors itself from its own consumed percentage. The
+ * full per-slot detail (cadence, used percentage, localized reset) lives on
+ * the pill `title` and `aria-label` so it stays hoverable/accessible.
  */
 function ProviderPill({
   provider,
@@ -354,12 +375,7 @@ function ProviderPill({
   const fallback = Object.values(slots).some((window) => window !== null)
     ? null
     : fallbackFor(provider, preference);
-  const maxUsed = maxFloatBarUsedPercent(provider, preference);
-  const exhausted = provider.primary.isExhausted || provider.error;
   const hasError = Boolean(provider.error);
-  let tone: "ok" | "warn" | "crit" = "ok";
-  if (exhausted || maxUsed >= critUsage) tone = "crit";
-  else if (maxUsed >= highUsage) tone = "warn";
 
   // One reset hook per fixed slot plus one for the fallback, all called
   // unconditionally in stable order.
@@ -400,7 +416,7 @@ function ProviderPill({
   return (
     <div
       role="group"
-      className={`floatbar__pill floatbar__pill--${tone}`}
+      className="floatbar__pill"
       title={pillDetail}
       aria-label={pillDetail}
       data-tauri-drag-region
@@ -415,6 +431,8 @@ function ProviderPill({
             window={fallback.window}
             providerError={hasError}
             showResetInline={showResetInline}
+            highUsage={highUsage}
+            critUsage={critUsage}
             label={fallbackLabel}
           />
         ) : (
@@ -425,6 +443,8 @@ function ProviderPill({
                 window={slots[cadence]}
                 providerError={hasError}
                 showResetInline={showResetInline}
+                highUsage={highUsage}
+                critUsage={critUsage}
               />
             </Fragment>
           ))
