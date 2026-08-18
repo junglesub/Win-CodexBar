@@ -83,33 +83,13 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
         run: |
-          trap {
-            $message = $_.Exception.Message -replace '[\r\n]+', ' '
-            Write-Output "::error title=Personal release::$message"
-            exit 1
-          }
-
-          function Stop-Publish([string]$Message) {
-            Write-Output "::error title=Personal release::$Message"
-            throw $Message
-          }
-
-          function Remove-Staging([string]$Tag) {
-            try { gh release delete $Tag --cleanup-tag --yes 2>$null } catch {}
-            try {
-              gh api --method DELETE `
-                "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$Tag" 2>$null
-            } catch {}
-            $global:LASTEXITCODE = 0
-          }
-
           $assets = @(Get-ChildItem "$env:GITHUB_WORKSPACE\release-assets\CodexBar-*" -File |
             Where-Object Name -Match '^(CodexBar-.+-(Setup|portable)\.exe)(\.sha256)?$' |
             ForEach-Object FullName)
-          if ($assets.Count -ne 4) { Stop-Publish "Expected four release assets, found $($assets.Count)." }
+          if ($assets.Count -ne 4) { throw "Expected four release assets, found $($assets.Count)." }
 
-          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha' 2>&1
-          if ($LASTEXITCODE -ne 0) { Stop-Publish "Could not read the current personal branch head: $personalHead" }
+          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the current personal branch head.' }
           if ($personalHead -ne $env:GITHUB_SHA) {
             Write-Host "Skipping stale build $env:GITHUB_SHA; personal is now $personalHead."
             exit 0
@@ -121,22 +101,21 @@ jobs:
           $title = "Personal build ($shortSha)"
           $notes = "Automated build of the personal branch at commit $env:GITHUB_SHA."
 
-          $stageOutput = gh release create $stagingTag @assets `
+          gh release create $stagingTag @assets `
             --target $env:GITHUB_SHA `
             --title "Staging $title" `
             --notes $notes `
             --prerelease `
-            --latest=false 2>&1
+            --latest=false
           if ($LASTEXITCODE -ne 0) {
-            Remove-Staging $stagingTag
-            Stop-Publish "Could not stage the personal release: $stageOutput"
+            gh release delete $stagingTag --cleanup-tag --yes 2>$null
+            throw 'Could not stage the personal release.'
           }
 
-          $stagedNames = @(gh release view $stagingTag --json assets --jq '.assets[].name' 2>&1)
-          $stagedViewExit = $LASTEXITCODE
-          if ($stagedViewExit -ne 0 -or $stagedNames.Count -ne 4) {
-            Remove-Staging $stagingTag
-            Stop-Publish "Staged release verification failed (exit $stagedViewExit): $($stagedNames -join ' ')"
+          $stagedNames = @(gh release view $stagingTag --json assets --jq '.assets[].name')
+          if ($LASTEXITCODE -ne 0 -or $stagedNames.Count -ne 4) {
+            gh release delete $stagingTag --cleanup-tag --yes 2>$null
+            throw "Staged release contains $($stagedNames.Count) assets instead of four."
           }
 
           $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
@@ -148,7 +127,7 @@ jobs:
             exit 0
           }
 
-          gh release view personal-latest *> $null
+          gh release view personal-latest 1>$null 2>$null
           $hadPreviousRelease = $LASTEXITCODE -eq 0
           $previousTagSha = gh api `
             "repos/$env:GITHUB_REPOSITORY/git/ref/tags/personal-latest" `
