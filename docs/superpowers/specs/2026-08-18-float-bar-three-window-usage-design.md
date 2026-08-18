@@ -9,9 +9,24 @@ Make every Float Bar provider pill explain its quota basis by reserving three fi
 - Render slots in the fixed order `5h / weekly / monthly`.
 - Show rounded consumed quota percentages, for example `23% / 41% / 8%`.
 - Show `—` when the provider does not expose a matching quota window.
-- Ignore cost data, local 30-day estimates, model-specific windows, and extra rate windows.
+- Ignore cost data, local 30-day estimates, and extra rate windows.
 - Ignore the global `showAsUsed` setting: these three values are always used percentages.
 - Keep cadence names out of the compact visible text. Each slot's tooltip and accessible name must identify its cadence, used percentage, and reset time.
+
+## Cadence-Less Fallback
+
+When a provider's canonical windows carry no recognizable cadence (all three fixed slots are empty), render one visibly labeled fallback metric instead of `— / — / —`.
+
+The fallback honors the per-provider `providerMetrics` preference in `settings` when that window exists and is not informational:
+
+- `session` → `primary`
+- `weekly` → `secondary`
+- `model` → `modelSpecific`
+- `tertiary` → `tertiary`
+
+`automatic` (the default), a missing/informational requested window, or an unsupported preference falls back to the automatic order: `modelSpecific` → `primary` → `secondary` → `tertiary` (first non-informational window). No provider is hardcoded; this makes a provider such as Antigravity default to its model-specific window (e.g. Gemini Flash) while explicit Session/Weekly/Model selections pick primary/secondary/modelSpecific respectively.
+
+The fallback metric is labeled with the window identity (Session / Weekly / Model-specific / Tertiary) using existing localized strings, participates in inline reset countdowns, and drives effective sorting/tone/error behavior like a normal slot.
 
 ## Window Selection
 
@@ -38,10 +53,10 @@ The tooltip and accessible name retain the used percentage even while the visibl
 
 ## Ordering and Status
 
-- Sort providers descending by the highest available used percentage across the three slots.
+- Sort providers descending by the highest available used percentage across the three slots (or the fallback metric when cadence-less).
 - Derive warning and critical tones from the same highest percentage using the existing thresholds.
 - Preserve critical styling for provider errors and render `— / — / —`.
-- Providers with no recognized canonical window remain visible with `— / — / —`.
+- Providers with no recognized canonical window show the cadence-less fallback (or `—` when no window exists at all).
 
 ## Scope and Constraints
 
@@ -59,3 +74,4 @@ The tooltip and accessible name retain the used percentage even while the visibl
 4. Inline reset mode replaces every eligible slot with its own live relative countdown while retaining full tooltip/accessibility context.
 5. Sorting and status color use the highest recognized used percentage.
 6. Existing provider filtering, cost pills, dragging, orientation, scaling, and refresh behavior remain unchanged.
+7. Cadence-less providers render one visibly labeled fallback metric honoring `providerMetrics` (session/weekly/model/tertiary), with automatic falling back to modelSpecific → primary → secondary → tertiary.

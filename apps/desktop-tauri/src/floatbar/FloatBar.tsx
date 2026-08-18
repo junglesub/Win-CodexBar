@@ -22,11 +22,13 @@ import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
   BootstrapState,
+  MetricPreference,
   ProviderLocalUsageSummary,
   ProviderUsageSnapshot,
   RateWindowSnapshot,
   SettingsSnapshot,
 } from "../types/bridge";
+import type { LocaleKey } from "../i18n/keys";
 import { FLOAT_BAR_CONFIG_CHANGED_EVENT, resizeFloatBar } from "./api";
 import "./FloatBar.css";
 
@@ -77,13 +79,74 @@ function selectFloatBarUsageSlots(provider: ProviderUsageSnapshot): UsageSlots {
   return slots;
 }
 
-function maxFloatBarUsedPercent(provider: ProviderUsageSnapshot): number {
-  return Math.max(
-    0,
-    ...Object.values(selectFloatBarUsageSlots(provider))
-      .filter((window): window is RateWindowSnapshot => window !== null)
-      .map((window) => Math.max(0, Math.min(100, window.usedPercent))),
+function maxFloatBarUsedPercent(
+  provider: ProviderUsageSnapshot,
+  preference?: MetricPreference | undefined,
+): number {
+  const slots = Object.values(selectFloatBarUsageSlots(provider)).filter(
+    (window): window is RateWindowSnapshot => window !== null,
   );
+  if (slots.length > 0) {
+    return Math.max(
+      0,
+      ...slots.map((window) => Math.max(0, Math.min(100, window.usedPercent))),
+    );
+  }
+  const fallback = fallbackFor(provider, preference);
+  if (!fallback) return 0;
+  return Math.max(0, Math.min(100, fallback.window.usedPercent));
+}
+
+/**
+ * A single fallback metric for providers whose canonical windows carry no
+ * recognizable cadence. `labelKey` names the window identity in the UI so the
+ * shown value is visibly labeled.
+ */
+type FallbackMetric = {
+  window: RateWindowSnapshot;
+  labelKey: LocaleKey;
+};
+
+function fallbackFor(
+  provider: ProviderUsageSnapshot,
+  preference: MetricPreference | undefined,
+): FallbackMetric | null {
+  // Explicit preference -> the matching window, when present and not
+  // informational. Anything else (automatic, unsupported, absent,
+  // informational) falls through to the amended automatic order:
+  // modelSpecific -> primary -> secondary -> tertiary.
+  const explicit: Array<{ window: RateWindowSnapshot | null; key: LocaleKey }> = [
+    ...(preference === "session"
+      ? [{ window: provider.primary, key: "ProviderSessionLabel" as LocaleKey }]
+      : []),
+    ...(preference === "weekly"
+      ? [{ window: provider.secondary, key: "ProviderWeeklyLabel" as LocaleKey }]
+      : []),
+    ...(preference === "model"
+      ? [{ window: provider.modelSpecific, key: "DetailWindowModelSpecific" as LocaleKey }]
+      : []),
+    ...(preference === "tertiary"
+      ? [{ window: provider.tertiary, key: "DetailWindowTertiary" as LocaleKey }]
+      : []),
+  ];
+  for (const candidate of explicit) {
+    if (candidate.window && !candidate.window.isInformational) {
+      return { window: candidate.window, labelKey: candidate.key };
+    }
+  }
+
+  const automatic: Array<{ window: RateWindowSnapshot | null; key: LocaleKey }> = [
+    { window: provider.modelSpecific, key: "DetailWindowModelSpecific" },
+    { window: provider.primary, key: "ProviderSessionLabel" },
+    { window: provider.secondary, key: "ProviderWeeklyLabel" },
+    { window: provider.tertiary, key: "DetailWindowTertiary" },
+  ];
+  for (const candidate of automatic) {
+    if (candidate.window && !candidate.window.isInformational) {
+      return { window: candidate.window, labelKey: candidate.key };
+    }
+  }
+  return null;
 }
 
 /**
@@ -200,10 +263,12 @@ function UsageMetric({
   window: rateWindow,
   providerError,
   showResetInline,
+  label,
 }: {
   window: RateWindowSnapshot | null;
   providerError: boolean;
   showResetInline: boolean;
+  label?: string;
 }) {
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
@@ -219,6 +284,7 @@ function UsageMetric({
 
   return (
     <span className="floatbar__metric" data-tauri-drag-region>
+      {label ? <span className="floatbar__metric-label">{label} </span> : null}
       {visible}
     </span>
   );
@@ -241,6 +307,8 @@ function ProviderPill({
   showResetInline,
   resetRelative,
   usedSuffix,
+  preference,
+  t,
 }: {
   provider: ProviderUsageSnapshot;
   highUsage: number;
@@ -249,19 +317,30 @@ function ProviderPill({
   showResetInline: boolean;
   resetRelative: boolean;
   usedSuffix: string;
+  preference: MetricPreference | undefined;
+  t: (key: LocaleKey) => string;
 }) {
   const slots = selectFloatBarUsageSlots(provider);
-  const maxUsed = maxFloatBarUsedPercent(provider);
+  const fallback = Object.values(slots).some((window) => window !== null)
+    ? null
+    : fallbackFor(provider, preference);
+  const maxUsed = maxFloatBarUsedPercent(provider, preference);
   const exhausted = provider.primary.isExhausted || provider.error;
   const hasError = Boolean(provider.error);
   let tone: "ok" | "warn" | "crit" = "ok";
   if (exhausted || maxUsed >= critUsage) tone = "crit";
   else if (maxUsed >= highUsage) tone = "warn";
 
-  // One reset hook per fixed slot, called unconditionally in stable order.
+  // One reset hook per fixed slot plus one for the fallback, all called
+  // unconditionally in stable order.
   const reset5h = useFormattedResetTime(slots["5h"]?.resetsAt ?? null, null, resetRelative);
   const resetWeekly = useFormattedResetTime(slots.weekly?.resetsAt ?? null, null, resetRelative);
   const resetMonthly = useFormattedResetTime(slots.monthly?.resetsAt ?? null, null, resetRelative);
+  const resetFallback = useFormattedResetTime(
+    fallback?.window.resetsAt ?? null,
+    null,
+    resetRelative,
+  );
   const resetTexts = [reset5h, resetWeekly, resetMonthly];
 
   const slotDetails = USAGE_CADENCES.map((cadence, index) => {
@@ -272,7 +351,15 @@ function ProviderPill({
     const reset = resetTexts[index];
     return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
   });
-  const pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+  let pillDetail: string;
+  if (fallback) {
+    const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
+    pillDetail = hasError
+      ? `${provider.displayName}: ${t(fallback.labelKey)}: —`
+      : `${provider.displayName}: ${t(fallback.labelKey)}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
+  } else {
+    pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+  }
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
@@ -290,16 +377,25 @@ function ProviderPill({
         <ProviderIcon providerId={provider.providerId} size={iconSize} />
       </span>
       <span className="floatbar__metrics" data-tauri-drag-region>
-        {USAGE_CADENCES.map((cadence, index) => (
-          <Fragment key={cadence}>
-            {index > 0 && <span className="floatbar__metric-separator">/</span>}
-            <UsageMetric
-              window={slots[cadence]}
-              providerError={hasError}
-              showResetInline={showResetInline}
-            />
-          </Fragment>
-        ))}
+        {fallback ? (
+          <UsageMetric
+            window={fallback.window}
+            providerError={hasError}
+            showResetInline={showResetInline}
+            label={t(fallback.labelKey)}
+          />
+        ) : (
+          USAGE_CADENCES.map((cadence, index) => (
+            <Fragment key={cadence}>
+              {index > 0 && <span className="floatbar__metric-separator">/</span>}
+              <UsageMetric
+                window={slots[cadence]}
+                providerError={hasError}
+                showResetInline={showResetInline}
+              />
+            </Fragment>
+          ))
+        )}
       </span>
     </div>
   );
@@ -383,9 +479,11 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
       list = list.filter((p) => wanted.has(p.providerId));
     }
     return [...list].sort(
-      (a, b) => maxFloatBarUsedPercent(b) - maxFloatBarUsedPercent(a),
+      (a, b) =>
+        maxFloatBarUsedPercent(b, settings.providerMetrics[b.providerId]) -
+        maxFloatBarUsedPercent(a, settings.providerMetrics[a.providerId]),
     );
-  }, [providers, settings.enabledProviders, filterIds]);
+  }, [providers, settings.enabledProviders, filterIds, settings.providerMetrics]);
 
   const visibleCostTargets = useMemo<FloatBarCostTarget[]>(
     () =>
@@ -546,6 +644,8 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               showResetInline={showResetInline}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
+              preference={settings.providerMetrics[p.providerId]}
+              t={t}
             />
           ))}
           {visibleCosts.map((summary) => (

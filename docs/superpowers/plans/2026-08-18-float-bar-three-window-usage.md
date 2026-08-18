@@ -14,8 +14,9 @@
 
 - Visible slot order is always `5h / weekly / monthly`.
 - Values are always consumed percentages; `showAsUsed` does not apply.
-- Only `primary`, `secondary`, and `tertiary` participate.
-- No backend, bridge, settings-schema, dependency, model-specific, extra-window, cost, or local-estimate changes.
+- Only `primary`, `secondary`, and `tertiary` participate in cadence classification.
+- Cadence-less providers (all three slots empty) render one visibly labeled fallback metric honoring the per-provider `providerMetrics` preference; automatic uses `modelSpecific` → `primary` → `secondary` → `tertiary`.
+- No backend, bridge, settings-schema, dependency, extra-window, cost, or local-estimate changes.
 - Missing or informational quotas render as `—`.
 - Do not run a build or CUA proof without separate user authorization.
 

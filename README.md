@@ -21,7 +21,7 @@ Float Bar의 provider pill은 항상 다음 순서로 표시된다.
 
 ### 숫자의 근거
 
-Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate window만 순서대로 확인한다. 모델별 추가 window, 비용 데이터, 로컬 30일 추정치는 사용하지 않는다.
+Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate window만 순서대로 확인한다. 비용 데이터와 로컬 30일 추정치는 사용하지 않는다.
 
 `windowMinutes`가 있으면 다음 기준으로 분류한다.
 
@@ -32,6 +32,10 @@ Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate w
 | monthly | 실제 달력 기준 28~31일인 `40,320`~`44,640`분 |
 
 알려진 duration이 이 범위에 없으면 표시하지 않는다. `windowMinutes` 자체가 없을 때만 `5h`, `5-hour`, `weekly`, `7-day`, `monthly` 같은 명시적 label을 보조 기준으로 사용한다. 같은 주기로 분류되는 window가 여러 개면 canonical 순서에서 먼저 나온 값을 유지한다.
+
+### 주기 없는 provider의 폴백
+
+세 고정 슬롯이 모두 비는 provider(주기로 분류할 수 없는 window만 있는 경우)는 `— / — / —` 대신 **하나의 라벨이 붙은 폴백 메트릭**을 표시한다. 설정의 `providerMetrics` 값(`session` → primary, `weekly` → secondary, `model` → modelSpecific, `tertiary` → tertiary)을 따르며, `automatic`(기본값)이거나 요청한 window가 없거나 informational이거나 지원하지 않는 값이면 **modelSpecific → primary → secondary → tertiary** 순서로 자동 선택한다. 특정 provider를 하드코딩하지 않으므로 Antigravity 같은 provider는 기본적으로 모델별 window(예: Gemini Flash)를 보여주고, Session/Weekly/Model을 명시적으로 고르면 각각 primary/secondary/modelSpecific를 보여준다.
 
 ## 개발 환경 준비
 
