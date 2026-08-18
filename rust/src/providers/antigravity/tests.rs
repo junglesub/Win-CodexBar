@@ -1,5 +1,227 @@
 use super::*;
 
+fn make_summary(groups: Vec<serde_json::Value>) -> String {
+    serde_json::json!({ "response": { "groups": groups } }).to_string()
+}
+
+fn gemini_group(buckets: Vec<serde_json::Value>) -> serde_json::Value {
+    serde_json::json!({ "displayName": "Gemini Models", "buckets": buckets })
+}
+
+fn bucket(bucket_id: &str, display_name: &str, remaining_fraction: f64) -> serde_json::Value {
+    serde_json::json!({
+        "bucketId": bucket_id,
+        "displayName": display_name,
+        "remainingFraction": remaining_fraction
+    })
+}
+
+#[test]
+fn test_parse_quota_summary_maps_five_hour_and_weekly() {
+    // Observed agy 1.1.5 shape: weekly first, then 5h — order must not matter.
+    let text = make_summary(vec![
+        gemini_group(vec![
+            bucket("gemini-weekly", "Weekly Limit", 0.958),
+            bucket("gemini-5h", "Five Hour Limit", 0.749),
+        ]),
+        serde_json::json!({
+            "displayName": "Claude and GPT models",
+            "buckets": [
+                bucket("3p-weekly", "Weekly Limit", 1.0),
+                bucket("3p-5h", "Five Hour Limit", 1.0),
+            ]
+        }),
+    ]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    assert!((snap.primary.used_percent - 25.1).abs() < 0.1);
+    assert_eq!(snap.primary.window_minutes, Some(300));
+    let sec = snap.secondary.unwrap();
+    assert!((sec.used_percent - 4.2).abs() < 0.1);
+    assert_eq!(sec.window_minutes, Some(10_080));
+    assert!(snap.model_specific.is_none());
+    assert!(snap.extra_rate_windows.is_empty());
+}
+
+#[test]
+fn test_parse_quota_summary_accepts_nested_remaining_fraction() {
+    let text = make_summary(vec![gemini_group(vec![
+        serde_json::json!({
+            "bucketId": "gemini-weekly",
+            "displayName": "Weekly Limit",
+            "window": "weekly",
+            "remaining": { "remainingFraction": 0.5 }
+        }),
+        serde_json::json!({
+            "bucketId": "gemini-5h",
+            "displayName": "Five Hour Limit",
+            "window": "5h",
+            "remaining": { "remainingFraction": 0.25 }
+        }),
+    ])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    assert!((snap.primary.used_percent - 75.0).abs() < 0.1);
+    assert!((snap.secondary.unwrap().used_percent - 50.0).abs() < 0.1);
+}
+
+#[test]
+fn test_parse_quota_summary_prefers_explicit_window_field() {
+    // Explicit `window` wins over bucketId/displayName inference.
+    let text = make_summary(vec![gemini_group(vec![
+        serde_json::json!({
+            "bucketId": "anything-weekly",
+            "displayName": "Weekly Limit",
+            "window": "weekly",
+            "remainingFraction": 0.1
+        }),
+        serde_json::json!({
+            "bucketId": "anything-5h",
+            "displayName": "Five Hour Limit",
+            "window": "5h",
+            "remainingFraction": 0.2
+        }),
+    ])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    assert!((snap.primary.used_percent - 80.0).abs() < 0.1);
+    assert_eq!(snap.primary.window_minutes, Some(300));
+    assert!((snap.secondary.unwrap().used_percent - 90.0).abs() < 0.1);
+}
+
+#[test]
+fn test_parse_quota_summary_weekly_only_is_partial_but_usable() {
+    let text = make_summary(vec![gemini_group(vec![bucket(
+        "gemini-weekly",
+        "Weekly Limit",
+        0.4,
+    )])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    // Weekly-only: the weekly bucket becomes primary (classified by minutes),
+    // and is not duplicated into secondary.
+    assert!((snap.primary.used_percent - 60.0).abs() < 0.1);
+    assert_eq!(snap.primary.window_minutes, Some(10_080));
+    assert!(snap.secondary.is_none());
+}
+
+#[test]
+fn test_parse_quota_summary_most_constrained_bucket_wins() {
+    let text = make_summary(vec![gemini_group(vec![
+        bucket("gemini-5h-a", "Five Hour Limit", 0.9),
+        bucket("gemini-5h-b", "Five Hour Limit", 0.5),
+    ])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    // Lowest remaining (most constrained) represents the cadence.
+    assert!((snap.primary.used_percent - 50.0).abs() < 0.1);
+}
+
+#[test]
+fn test_parse_quota_summary_rejects_fifteen_hour_as_five_hour() {
+    let text = make_summary(vec![gemini_group(vec![
+        bucket("gemini-15h", "Fifteen Hour Limit", 0.5),
+        bucket("gemini-weekly", "Weekly Limit", 0.9),
+    ])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    // 15h is not five-hour; weekly still surfaces.
+    assert_eq!(snap.primary.window_minutes, Some(10_080));
+    assert!(snap.secondary.is_none());
+}
+
+#[test]
+fn test_parse_quota_summary_rejects_non_finite_fraction() {
+    // serde_json cannot represent NaN, so build the bucket struct directly.
+    let nan_bucket = QuotaSummaryBucket {
+        bucket_id: "gemini-5h".to_string(),
+        display_name: "Five Hour Limit".to_string(),
+        description: None,
+        window: None,
+        remaining_fraction: Some(f64::NAN),
+        remaining: None,
+        reset_time: None,
+        disabled: false,
+    };
+    assert!(nan_bucket.usable_fraction().is_none());
+    assert!(
+        QuotaSummaryBucket {
+            remaining_fraction: Some(f64::INFINITY),
+            ..nan_bucket
+        }
+        .usable_fraction()
+        .is_none()
+    );
+}
+
+#[test]
+fn test_parse_quota_summary_clamps_fraction() {
+    let text = make_summary(vec![gemini_group(vec![
+        bucket("gemini-5h", "Five Hour Limit", 1.5),
+        bucket("gemini-weekly", "Weekly Limit", -0.5),
+    ])]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    assert!((snap.primary.used_percent - 0.0).abs() < 0.1);
+    assert!((snap.secondary.unwrap().used_percent - 100.0).abs() < 0.1);
+}
+
+#[test]
+fn test_parse_quota_summary_no_gemini_group_fails() {
+    let text = make_summary(vec![serde_json::json!({
+        "displayName": "Claude and GPT models",
+        "buckets": [
+            bucket("3p-weekly", "Weekly Limit", 0.5),
+            bucket("3p-5h", "Five Hour Limit", 0.5),
+        ]
+    })]);
+    let provider = AntigravityProvider::new();
+    assert!(provider.parse_quota_summary(&text).is_err());
+}
+
+#[test]
+fn test_parse_quota_summary_ignores_claude_group_capitalization() {
+    // "Claude and GPT models" must not be selected as the Gemini group.
+    let text = make_summary(vec![
+        gemini_group(vec![bucket("gemini-5h", "Five Hour Limit", 0.2)]),
+        serde_json::json!({
+            "displayName": "CLAUDE AND GPT MODELS",
+            "buckets": [bucket("3p-5h", "Five Hour Limit", 0.0)]
+        }),
+    ]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    assert_eq!(snap.primary.window_minutes, Some(300));
+    assert!((snap.primary.used_percent - 80.0).abs() < 0.1);
+}
+
+#[test]
+fn test_parse_quota_summary_missing_payload_fails() {
+    let provider = AntigravityProvider::new();
+    assert!(provider.parse_quota_summary(r#"{"code": 0}"#).is_err());
+    assert!(provider.parse_quota_summary("not json").is_err());
+}
+
+#[test]
+fn test_parse_quota_summary_parses_reset_time() {
+    let mut g = gemini_group(vec![bucket("gemini-5h", "Five Hour Limit", 0.2)]);
+    g["buckets"][0]["resetTime"] = serde_json::json!("2026-07-23T17:05:10Z");
+    let text = make_summary(vec![g]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_quota_summary(&text).unwrap();
+
+    let resets = snap.primary.resets_at.unwrap();
+    assert_eq!(resets.to_rfc3339(), "2026-07-23T17:05:10+00:00");
+}
+
 #[test]
 fn test_classify_model_families() {
     assert_eq!(classify_model("Claude 3.5 Sonnet"), ModelFamily::Claude);

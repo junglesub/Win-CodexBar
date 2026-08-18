@@ -2,6 +2,12 @@
 //!
 //! Fetches usage data from Antigravity's local language server probe
 //! Uses Windows process detection to find CSRF token
+//!
+//! Quota preference: the internal `RetrieveUserQuotaSummary` endpoint is
+//! preferred (Antigravity 2.x app and `agy` CLI expose Gemini shared-pool
+//! five-hour + weekly buckets there), falling back to the legacy
+//! `GetUserStatus` / `clientModelConfigs` model-level parse unchanged when the
+//! summary is unavailable or unusable.
 
 use async_trait::async_trait;
 use regex_lite::Regex;
@@ -297,8 +303,11 @@ impl AntigravityProvider {
         Vec::new()
     }
 
-    /// Fetch user status from Antigravity API
-    async fn fetch_user_status(&self) -> Result<UsageSnapshot, ProviderError> {
+    /// Fetch usage from the local Antigravity language server.
+    ///
+    /// Prefers the Antigravity 2.x `RetrieveUserQuotaSummary` payload and falls
+    /// back to the legacy `GetUserStatus` model-level parse unchanged.
+    async fn fetch_usage_snapshot(&self) -> Result<UsageSnapshot, ProviderError> {
         let process_info = Self::detect_process_info()?;
         let api_port = Self::find_api_port(process_info.extension_port, process_info.pid).await?;
 
@@ -309,20 +318,6 @@ impl AntigravityProvider {
             .redirect(reqwest::redirect::Policy::none())
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
-
-        let url = format!(
-            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
-            api_port
-        );
-
-        let body = serde_json::json!({
-            "metadata": {
-                "ideName": "antigravity",
-                "extensionName": "antigravity",
-                "ideVersion": "unknown",
-                "locale": "en"
-            }
-        });
 
         // The `agy` CLI serves the quota endpoints without a CSRF token; the
         // desktop IDE/app server requires one. Only attach the CSRF header when
@@ -336,11 +331,219 @@ impl AntigravityProvider {
         } else {
             ""
         };
+
+        let body = serde_json::json!({
+            "metadata": {
+                "ideName": "antigravity",
+                "extensionName": "antigravity",
+                "ideVersion": "unknown",
+                "locale": "en"
+            }
+        });
+
+        // Preferred: Antigravity 2.x quota summary (Gemini shared-pool 5h +
+        // weekly buckets). Any transport error, non-success status (including
+        // the known IDE 404), parse failure, missing Gemini group, or unusable
+        // Gemini bucket falls back to the legacy GetUserStatus parse unchanged.
+        if let Ok(summary) = self
+            .fetch_quota_summary(
+                &client,
+                &process_info,
+                requires_csrf,
+                csrf_token,
+                api_port,
+                &body,
+            )
+            .await
+        {
+            return Ok(summary);
+        }
+
+        self.fetch_user_status(
+            &client,
+            &process_info,
+            requires_csrf,
+            csrf_token,
+            api_port,
+            &body,
+        )
+        .await
+    }
+
+    /// POST `RetrieveUserQuotaSummary` and map the Gemini five-hour/weekly
+    /// buckets into a usage snapshot. Returns an error (and logs only a safe
+    /// reason) whenever the summary is unavailable or has no usable Gemini
+    /// bucket, so the caller falls back to the legacy `GetUserStatus` path.
+    async fn fetch_quota_summary(
+        &self,
+        client: &reqwest::Client,
+        process_info: &ProcessInfo,
+        requires_csrf: bool,
+        csrf_token: &str,
+        api_port: u16,
+        body: &serde_json::Value,
+    ) -> Result<UsageSnapshot, ProviderError> {
+        let url = format!(
+            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
+            api_port
+        );
+
         let mut request = client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Connect-Protocol-Version", "1")
-            .json(&body);
+            .json(body);
+        if requires_csrf {
+            request = request.header("X-Codeium-Csrf-Token", csrf_token);
+        }
+        let resp = match request.send().await {
+            Ok(resp) => resp,
+            Err(e) => {
+                tracing::debug!("Antigravity quota summary request failed: {}", e);
+                return Err(ProviderError::Other(format!(
+                    "Quota summary request failed: {}",
+                    e
+                )));
+            }
+        };
+
+        if !resp.status().is_success() {
+            // Retry with the language-server CSRF token if the extension-server
+            // token failed, mirroring the legacy GetUserStatus token order.
+            if requires_csrf && process_info.extension_server_csrf_token.is_some() {
+                let retry_resp = client
+                    .post(&url)
+                    .header("Content-Type", "application/json")
+                    .header("Connect-Protocol-Version", "1")
+                    .header("X-Codeium-Csrf-Token", &process_info.csrf_token)
+                    .json(body)
+                    .send()
+                    .await;
+
+                if let Ok(retry) = retry_resp
+                    && retry.status().is_success()
+                {
+                    let text = retry.text().await.unwrap_or_default();
+                    match self.parse_quota_summary(&text) {
+                        Ok(snapshot) => return Ok(snapshot),
+                        Err(e) => {
+                            tracing::debug!(
+                                "Antigravity quota summary retry parse failed; falling back: {}",
+                                e
+                            );
+                        }
+                    }
+                }
+            }
+
+            let status = resp.status();
+            let text = resp.text().await.unwrap_or_default();
+            tracing::debug!(
+                "Antigravity quota summary unavailable (HTTP {}); falling back to GetUserStatus",
+                status
+            );
+            return Err(ProviderError::Other(format!(
+                "Quota summary API error {}: {}",
+                status, text
+            )));
+        }
+
+        let text = resp.text().await.unwrap_or_default();
+        match self.parse_quota_summary(&text) {
+            Ok(snapshot) => Ok(snapshot),
+            Err(e) => {
+                tracing::debug!(
+                    "Antigravity quota summary parse failed; falling back to GetUserStatus: {}",
+                    e
+                );
+                Err(e)
+            }
+        }
+    }
+
+    /// Parse a `RetrieveUserQuotaSummary` response into a usage snapshot.
+    ///
+    /// Maps the **Gemini Models** group's five-hour bucket to primary (300
+    /// minutes) and its weekly bucket to secondary (10 080 minutes). Monthly
+    /// stays absent and `model_specific` is never populated from a successful
+    /// summary. Returns an error when the summary has no usable Gemini bucket,
+    /// so callers fall back to the legacy `GetUserStatus` parse.
+    fn parse_quota_summary(&self, text: &str) -> Result<UsageSnapshot, ProviderError> {
+        let response: QuotaSummaryResponse = serde_json::from_str(text)
+            .map_err(|e| ProviderError::Parse(format!("Failed to parse quota summary: {}", e)))?;
+
+        let groups: &[QuotaSummaryGroup] = response
+            .response
+            .as_ref()
+            .and_then(|p| p.groups.as_deref())
+            .or_else(|| response.summary.as_ref().and_then(|p| p.groups.as_deref()))
+            .or_else(|| response.root_groups())
+            .unwrap_or_default();
+
+        let gemini_buckets = groups
+            .iter()
+            .filter(|group| is_gemini_group(group))
+            .flat_map(|group| group.buckets.iter())
+            .collect::<Vec<_>>();
+
+        // Five-hour and weekly buckets by explicit `window` first, then by
+        // normalized bucketId/displayName. Never depend on array position. For
+        // multiple buckets of the same cadence, the most constrained one (lowest
+        // remaining fraction) represents the group, mirroring upstream.
+        let five_hour = gemini_buckets
+            .iter()
+            .copied()
+            .filter(|bucket| bucket.usable_fraction().is_some())
+            .filter(|bucket| is_bucket_cadence(bucket, BucketCadence::FiveHour))
+            .min_by(|a, b| bucket_fraction_cmp(a, b))
+            .map(rate_window_from_bucket);
+        let weekly = gemini_buckets
+            .iter()
+            .copied()
+            .filter(|bucket| bucket.usable_fraction().is_some())
+            .filter(|bucket| is_bucket_cadence(bucket, BucketCadence::Weekly))
+            .min_by(|a, b| bucket_fraction_cmp(a, b))
+            .map(rate_window_from_bucket);
+
+        // Five-hour is primary; weekly is secondary. A partial summary with
+        // only a usable weekly bucket still surfaces it (as primary, which the
+        // UI classifies by windowMinutes), without duplicating it.
+        let primary = five_hour
+            .as_ref()
+            .or(weekly.as_ref())
+            .cloned()
+            .ok_or_else(|| {
+                ProviderError::Parse("Quota summary has no usable Gemini bucket".to_string())
+            })?;
+
+        let mut snapshot = UsageSnapshot::new(primary);
+        if five_hour.is_some()
+            && let Some(weekly) = weekly
+        {
+            snapshot = snapshot.with_secondary(weekly);
+        }
+        Ok(snapshot)
+    }
+
+    async fn fetch_user_status(
+        &self,
+        client: &reqwest::Client,
+        process_info: &ProcessInfo,
+        requires_csrf: bool,
+        csrf_token: &str,
+        api_port: u16,
+        body: &serde_json::Value,
+    ) -> Result<UsageSnapshot, ProviderError> {
+        let url = format!(
+            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
+            api_port
+        );
+
+        let mut request = client
+            .post(&url)
+            .header("Content-Type", "application/json")
+            .header("Connect-Protocol-Version", "1")
+            .json(body);
         if requires_csrf {
             request = request.header("X-Codeium-Csrf-Token", csrf_token);
         }
@@ -357,7 +560,7 @@ impl AntigravityProvider {
                     .header("Content-Type", "application/json")
                     .header("Connect-Protocol-Version", "1")
                     .header("X-Codeium-Csrf-Token", &process_info.csrf_token)
-                    .json(&body)
+                    .json(body)
                     .send()
                     .await;
 
@@ -505,7 +708,7 @@ impl Provider for AntigravityProvider {
 
         tracing::debug!("Fetching Antigravity usage via local probe");
 
-        match self.fetch_user_status().await {
+        match self.fetch_usage_snapshot().await {
             Ok(usage) => Ok(ProviderFetchResult::new(usage, "local")),
             Err(e) => {
                 tracing::warn!("Antigravity probe failed: {}", e);
@@ -586,6 +789,177 @@ struct ModelConfig {
 struct QuotaInfo {
     remaining_fraction: Option<f64>,
     reset_time: Option<String>,
+}
+
+// ── Quota summary (RetrieveUserQuotaSummary) ────────────────────────
+
+/// Top-level `RetrieveUserQuotaSummary` response.
+///
+/// Observed servers wrap the payload under `response` (app/CLI) or `summary`;
+/// groups at the root are accepted as well. All fields are optional so a shape
+/// mismatch falls back to the legacy `GetUserStatus` parse instead of failing
+/// the whole fetch.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaSummaryResponse {
+    response: Option<QuotaSummaryPayload>,
+    summary: Option<QuotaSummaryPayload>,
+    #[serde(default)]
+    groups: Option<Vec<QuotaSummaryGroup>>,
+}
+
+impl QuotaSummaryResponse {
+    fn root_groups(&self) -> Option<&[QuotaSummaryGroup]> {
+        self.groups.as_deref()
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaSummaryPayload {
+    #[serde(default)]
+    groups: Option<Vec<QuotaSummaryGroup>>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaSummaryGroup {
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    buckets: Vec<QuotaSummaryBucket>,
+}
+
+/// A quota bucket. `remainingFraction` may appear directly or nested under
+/// `remaining.remainingFraction` (different observed server versions), so both
+/// are accepted. `window` is an explicit cadence when the server provides one;
+/// otherwise the cadence is inferred from `bucketId` / `displayName`.
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaSummaryBucket {
+    #[serde(default)]
+    bucket_id: String,
+    #[serde(default)]
+    display_name: String,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    window: Option<String>,
+    #[serde(default)]
+    remaining_fraction: Option<f64>,
+    #[serde(default)]
+    remaining: Option<QuotaSummaryRemaining>,
+    #[serde(default)]
+    reset_time: Option<String>,
+    #[serde(default)]
+    disabled: bool,
+}
+
+impl QuotaSummaryBucket {
+    /// The effective remaining fraction (direct or nested), validated to a
+    /// finite value clamped to `0..=1`. `None` for NaN/±inf or out-of-range
+    /// values, which makes the bucket unusable.
+    fn usable_fraction(&self) -> Option<f64> {
+        let raw = self
+            .remaining_fraction
+            .or_else(|| self.remaining.as_ref().and_then(|r| r.remaining_fraction))?;
+        if !raw.is_finite() {
+            return None;
+        }
+        Some(raw.clamp(0.0, 1.0))
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct QuotaSummaryRemaining {
+    remaining_fraction: Option<f64>,
+}
+
+/// Cadence of a quota-summary bucket.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum BucketCadence {
+    FiveHour,
+    Weekly,
+}
+
+/// True when the group is the Gemini Models group. Matches case-insensitively
+/// on a normalized display name and requires the "gemini" token so Claude/GPT
+/// groups are never selected.
+fn is_gemini_group(group: &QuotaSummaryGroup) -> bool {
+    let lower = group.display_name.to_lowercase();
+    lower.contains("gemini") && !lower.contains("claude") && !lower.contains("gpt")
+}
+
+/// Classify a bucket cadence: explicit `window` wins, then normalized
+/// `bucketId`/`displayName` (e.g. `gemini-5h` / `Five Hour Limit` => 5h,
+/// `gemini-weekly` / `Weekly Limit` => weekly).
+fn is_bucket_cadence(bucket: &QuotaSummaryBucket, cadence: BucketCadence) -> bool {
+    if let Some(window) = bucket.window.as_deref() {
+        let normalized = window.trim().to_lowercase();
+        return match cadence {
+            BucketCadence::FiveHour => FIVE_HOUR_ALIASES.contains(&normalized.as_str()),
+            BucketCadence::Weekly => normalized == "weekly",
+        };
+    }
+
+    // Tokenize on separators so `gemini-5h` -> ["gemini","5h"] and `15h`
+    // cannot match the five-hour cadence.
+    let combined = format!("{} {}", bucket.bucket_id, bucket.display_name).to_lowercase();
+    let tokens = combined
+        .split(|ch: char| !ch.is_ascii_alphanumeric())
+        .filter(|t| !t.is_empty())
+        .collect::<Vec<_>>();
+
+    match cadence {
+        BucketCadence::FiveHour => {
+            tokens.iter().any(|t| FIVE_HOUR_TOKENS.contains(t))
+                || tokens
+                    .windows(2)
+                    .any(|pair| pair[0] == "five" && matches!(pair[1], "hour" | "hours"))
+                || tokens.iter().any(|t| *t == "session")
+        }
+        BucketCadence::Weekly => tokens.iter().any(|t| *t == "weekly"),
+    }
+}
+
+/// Token aliases accepted for an explicit `window` value.
+const FIVE_HOUR_ALIASES: &[&str] = &["5h", "5-hour", "five hour", "five-hour", "session"];
+
+/// Tokens (after separator splitting) that identify a five-hour cadence.
+const FIVE_HOUR_TOKENS: &[&str] = &["5h", "5hour", "5hours"];
+
+/// Order two usable buckets by remaining fraction ascending (most constrained
+/// first). Callers filter to usable buckets first, so `unwrap_or` here only
+/// covers ordering ties.
+fn bucket_fraction_cmp(a: &QuotaSummaryBucket, b: &QuotaSummaryBucket) -> std::cmp::Ordering {
+    a.usable_fraction()
+        .unwrap_or(0.0)
+        .partial_cmp(&b.usable_fraction().unwrap_or(0.0))
+        .unwrap_or(std::cmp::Ordering::Equal)
+}
+
+fn rate_window_from_bucket(bucket: &QuotaSummaryBucket) -> RateWindow {
+    let used_percent = bucket
+        .usable_fraction()
+        .map(|remaining| (1.0 - remaining) * 100.0)
+        .unwrap_or(0.0);
+    let window_minutes = if is_bucket_cadence(bucket, BucketCadence::FiveHour) {
+        Some(300)
+    } else {
+        Some(10_080)
+    };
+    let resets_at = bucket
+        .reset_time
+        .as_deref()
+        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
+        .map(|dt| dt.with_timezone(&chrono::Utc));
+    RateWindow::with_details(
+        used_percent,
+        window_minutes,
+        resets_at,
+        bucket.description.clone(),
+    )
 }
 
 // ── Model-family classification ──────────────────────────────────────

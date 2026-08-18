@@ -71,6 +71,19 @@ Upstream `docs/providers.md` is a large auto-strategy matrix (60+ providers) for
 2. `rust/src/providers/<id>/`
 3. `codexbar usage -p <id> -v` / desktop provider detail errors
 
+## Provider-specific notes
+
+- **Antigravity** (2.x): the local language-server probe prefers the internal
+  `RetrieveUserQuotaSummary` endpoint (`response.groups[].buckets[]`, direct or
+  nested `remaining.remainingFraction`). The **Gemini Models** group maps its
+  five-hour bucket to primary (300 min) and weekly to secondary (10 080 min);
+  monthly is not available and `model_specific` is left empty on a successful
+  summary. `agy` stays tokenless; desktop matches keep the CSRF header + retry.
+  Unsupported/non-success responses (including the IDE's known 404), parse
+  failures, a missing Gemini group, or no usable Gemini bucket fall back to the
+  legacy `GetUserStatus` / `clientModelConfigs` parse unchanged. The endpoint is
+  reverse-engineered and version-sensitive.
+
 ## Related
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)

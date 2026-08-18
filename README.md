@@ -35,7 +35,11 @@ Float Bar는 각 provider의 canonical `primary`, `secondary`, `tertiary` rate w
 
 ### 주기 없는 provider의 폴백
 
-세 고정 슬롯이 모두 비는 provider(주기로 분류할 수 없는 window만 있는 경우)는 `— / — / —` 대신 **하나의 라벨이 붙은 폴백 메트릭**을 표시한다. 설정의 `providerMetrics` 값(`session` → primary, `weekly` → secondary, `model` → modelSpecific, `tertiary` → tertiary)을 따르며, `automatic`(기본값)이거나 요청한 window가 없거나 informational이거나 지원하지 않는 값이면 **modelSpecific → primary → secondary → tertiary** 순서로 자동 선택한다. 특정 provider를 하드코딩하지 않으므로 Antigravity 같은 provider는 기본적으로 모델별 window(예: Gemini Flash)를 보여주고, Session/Weekly/Model을 명시적으로 고르면 각각 primary/secondary/modelSpecific를 보여준다.
+세 고정 슬롯이 모두 비는 provider(주기로 분류할 수 없는 window만 있는 경우)는 `— / — / —` 대신 **하나의 라벨이 붙은 폴백 메트릭**을 표시한다. 설정의 `providerMetrics` 값(`session` → primary, `weekly` → secondary, `model` → modelSpecific, `tertiary` → tertiary)을 따르며, `automatic`(기본값)이거나 요청한 window가 없거나 informational이거나 지원하지 않는 값이면 **modelSpecific → primary → secondary → tertiary** 순서로 자동 선택한다. 특정 provider를 하드코딩하지 않으므로 폴백이 필요한 provider는 기본적으로 모델별 window를 보여주고, Session/Weekly/Model을 명시적으로 고르면 각각 primary/secondary/modelSpecific를 보여준다.
+
+### Antigravity의 quota summary 우선
+
+Antigravity 2.x는 내부 `RetrieveUserQuotaSummary` 엔드포인트로 Gemini 공유 풀의 **5시간(primary, 300분)**과 **주간(secondary, 10,080분)** bucket을 노출한다. summary가 성공하면 이 두 값을 사용하고 **monthly는 제공하지 않으며**(없음 → `—`), `modelSpecific`도 채우지 않는다. summary를 사용할 수 없거나(비성공 상태, IDE의 알려진 404 포함) 파싱에 실패하거나 Gemini bucket이 없으면 기존 `GetUserStatus` / `clientModelConfigs` 모델 단위 파싱으로 그대로 폴백한다(모델별 window만 있는 경우). 이 엔드포인트는 내부/역분석된 스키마라 서버 버전에 따라 달라질 수 있다.
 
 ## 개발 환경 준비
 
