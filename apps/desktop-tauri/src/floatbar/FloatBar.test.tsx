@@ -76,6 +76,7 @@ function snapshot(
     resetDescription?: string | null;
     informational?: boolean;
     windowMinutes?: number | null;
+    updatedAt?: string;
     primaryLabel?: string;
     primaryWindowMinutes?: number | null;
     secondary?: {
@@ -146,7 +147,7 @@ function snapshot(
     planName: null,
     accountEmail: null,
     sourceLabel: "auto",
-    updatedAt: "2026-05-15T00:00:00Z",
+    updatedAt: opts.updatedAt ?? "2026-05-15T00:00:00Z",
     error: opts.error ?? null,
     pace: null,
     accountOrganization: null,
@@ -248,9 +249,15 @@ describe("FloatBar", () => {
     tauriMocks.getProviderLocalUsageSummary.mockResolvedValue(null);
     tauriMocks.getLocaleStrings.mockResolvedValue(
       buildBundle({
+        ResetsInMinutes: "Resets in {}m",
         ResetsInHoursMinutes: "Resets in {}h {}m",
         ResetsInDaysHours: "Resets in {}d {}h",
         TrayResetsDueNow: "Resetting",
+        LastUpdated: "Updated",
+        UpdatedJustNow: "Updated just now",
+        UpdatedMinutesAgo: "{} minutes ago",
+        UpdatedHoursAgo: "{} hours ago",
+        UpdatedDaysAgo: "{} days ago",
         PanelToday: "Today",
         PanelUsedSuffix: "used",
         FloatBarThirtyDayShort: "30d",
@@ -547,7 +554,9 @@ describe("FloatBar", () => {
       container.querySelectorAll(".floatbar__metric"),
       (node) => node.textContent,
     );
-    expect(metrics.some((text) => text?.includes("2h 5m"))).toBe(true);
+    // 2h 5m future reset appends its single largest unit.
+    expect(metrics.some((text) => text?.includes("2h"))).toBe(true);
+    expect(metrics.some((text) => text?.includes("2h 5m"))).toBe(false);
   });
 
   it("exposes the labeled fallback metric in the pill accessible name", async () => {
@@ -763,8 +772,8 @@ describe("FloatBar", () => {
       expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
       expect(container.querySelectorAll(".floatbar__metric--crit").length).toBe(3);
       // The pill detail must show three dashes, not stale percentages.
-      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toBe(
-        "Claude: 5h: —\nweekly: —\nmonthly: —",
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
+        /^Claude: 5h: —\nweekly: —\nmonthly: —\nUpdated: /,
       );
     });
   });
@@ -889,14 +898,13 @@ describe("FloatBar", () => {
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
       // claude's informational primary is absent → max used is 20 (weekly);
-      // codex primary 5h 50% sorts first.
+      // codex primary 5h 50% sorts first. Assert only the slot portion so
+      // the relative last-updated line stays out of this test's scope.
       const titles = Array.from(container.querySelectorAll(".floatbar__pill")).map(
         (pill) => pill.getAttribute("title"),
       );
-      expect(titles).toEqual([
-        "Codex: 5h: 50% used\nweekly: —\nmonthly: —",
-        "Claude: 5h: —\nweekly: 20% used\nmonthly: —",
-      ]);
+      expect(titles[0]).toMatch(/^Codex: 5h: 50% used\nweekly: —\nmonthly: —/);
+      expect(titles[1]).toMatch(/^Claude: 5h: —\nweekly: 20% used\nmonthly: —/);
     });
   });
 
@@ -1097,22 +1105,22 @@ describe("FloatBar", () => {
     }
   });
 
-  it("replaces every eligible percentage with its own relative reset", async () => {
+  it("appends each reset using only its largest time unit", async () => {
     vi.useFakeTimers();
     vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 100, {
-        resetsAt: "2026-08-18T02:05:00Z",
+        resetsAt: "2026-08-18T00:30:00Z",
         primaryWindowMinutes: 300,
         secondary: {
           used: 41,
           windowMinutes: 10_080,
-          resetsAt: "2026-08-19T04:00:00Z",
+          resetsAt: "2026-08-18T01:30:00Z",
         },
         tertiary: {
           used: 60,
           windowMinutes: 43_200,
-          resetsAt: "2026-08-30T12:00:00Z",
+          resetsAt: "2026-08-19T12:00:00Z",
         },
       }),
     ]);
@@ -1125,16 +1133,16 @@ describe("FloatBar", () => {
     );
     await act(async () => vi.runOnlyPendingTimersAsync());
 
-    // Every eligible slot independently shows its own relative countdown.
+    // Every eligible slot keeps its percentage and shows one largest unit.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["2h 5m", "1d 4h", "12d 12h"]);
+    ).toEqual(["100% 30m", "41% 1h", "60% 1d"]);
     // The pill accessibility detail retains cadence, used percentage, and the
     // localized reset for each slot.
     const pillLabel = container.querySelector(".floatbar__pill")?.getAttribute("aria-label");
-    expect(pillLabel).toMatch(/5h: 100% used\nResets in 2h 5m/);
-    expect(pillLabel).toMatch(/weekly: 41% used\nResets in 1d 4h/);
-    expect(pillLabel).toMatch(/monthly: 60% used\nResets in 12d 12h/);
+    expect(pillLabel).toMatch(/5h: 100% used\nResets in 30m/);
+    expect(pillLabel).toMatch(/weekly: 41% used\nResets in 1h 30m/);
+    expect(pillLabel).toMatch(/monthly: 60% used\nResets in 1d 12h/);
   });
 
   it("keeps the visible countdown locale-independent under a non-English locale", async () => {
@@ -1168,11 +1176,56 @@ describe("FloatBar", () => {
     // English-stripped or localized prose.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["2h 5m", "—", "—"]);
+    ).toEqual(["100% 2h", "—", "—"]);
     // The tooltip/accessibility keeps the localized prose.
     expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
       /5h: 100% 使用済み\nリセットまで 2時間 5分/,
     );
+  });
+
+  it("appends a localized relative last-updated line to every pill detail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      // Provider A: parseable past updatedAt → localized relative text that
+      // advances on the shared 30-second clock even with no reset timestamp.
+      snapshot("claude", "Claude", 20, {
+        updatedAt: "2026-08-17T23:54:00Z",
+        primaryWindowMinutes: 300,
+        secondary: { used: 41, windowMinutes: 10_080 },
+      }),
+      // Provider B: unparseable updatedAt → raw value preserved after label.
+      // Codex (50% used) sorts before Claude (max 41% weekly).
+      snapshot("codex", "Codex", 50, {
+        updatedAt: "unknown-source-time",
+        primaryWindowMinutes: 300,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    const pills = Array.from(container.querySelectorAll(".floatbar__pill"));
+    expect(pills.length).toBe(2);
+    const codexLabel = pills[0].getAttribute("aria-label");
+    const claudeLabel = pills[1].getAttribute("aria-label");
+    // Title and aria-label stay identical for every pill.
+    expect(pills[0].getAttribute("title")).toBe(codexLabel);
+    expect(pills[1].getAttribute("title")).toBe(claudeLabel);
+    // Unparseable updatedAt keeps its raw value after the localized label.
+    expect(codexLabel).toMatch(
+      /^Codex: 5h: 50% used\nweekly: —\nmonthly: —\nUpdated: unknown-source-time$/,
+    );
+    // Relative text is localized and appended after the full slot detail.
+    expect(claudeLabel).toMatch(
+      /^Claude: 5h: 20% used\nweekly: 41% used\nmonthly: —\nUpdated: 6 minutes ago$/,
+    );
+
+    // The shared 30-second clock advances relative text even though neither
+    // provider has a reset timestamp; crossing a minute boundary updates it.
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(pills[1].getAttribute("aria-label")).toMatch(/Updated: 7 minutes ago/);
   });
 
   it("keeps percentages visible when inline resets are disabled", async () => {
@@ -1234,8 +1287,11 @@ describe("FloatBar", () => {
       const initialCalls = tauriMocks.refreshProvidersIfStale.mock.calls.length;
 
       // Advance the timer past the 60-second interval — the floatbar tick
-      // should fire again.
-      await vi.advanceTimersByTimeAsync(60_000);
+      // should fire again. Wrapped in act because the shared 30s now clock
+      // also fires during the advance.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
       expect(tauriMocks.refreshProvidersIfStale.mock.calls.length).toBeGreaterThan(
         initialCalls,
       );

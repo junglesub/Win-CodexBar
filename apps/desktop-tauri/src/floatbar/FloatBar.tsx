@@ -18,6 +18,8 @@ import {
   getSettingsSnapshot,
   refreshProvidersIfStale,
 } from "../lib/tauri";
+import { formatRelativeUpdated } from "../lib/relativeTime";
+import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
@@ -28,7 +30,6 @@ import type {
   RateWindowSnapshot,
   SettingsSnapshot,
 } from "../types/bridge";
-import type { LocaleKey } from "../i18n/keys";
 import { FLOAT_BAR_CONFIG_CHANGED_EVENT, resizeFloatBar } from "./api";
 import "./FloatBar.css";
 
@@ -190,12 +191,8 @@ function compactResetTime(resetsAt: string): string | null {
   if (diffMs <= 0) return "now";
   const totalMinutes = Math.floor(diffMs / 60_000);
   if (totalMinutes < 60) return `${totalMinutes}m`;
-  const days = Math.floor(totalMinutes / 1440);
-  const hours = Math.floor((totalMinutes % 1440) / 60);
-  if (days > 0) return `${days}d ${hours}h`;
-  const minutes = totalMinutes % 60;
-  if (minutes === 0) return `${hours}h`;
-  return `${hours}h ${minutes}m`;
+  if (totalMinutes >= 1440) return `${Math.floor(totalMinutes / 1440)}d`;
+  return `${Math.floor(totalMinutes / 60)}h`;
 }
 
 type FloatBarCostSummary = {
@@ -315,9 +312,7 @@ function UsageMetric({
   const visible =
     used == null || providerError
       ? "—"
-      : showResetInline && compactReset
-        ? compactReset
-        : `${Math.round(used)}%`;
+      : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
   const tone =
     providerError || rateWindow?.isExhausted || (used != null && used >= critUsage)
@@ -359,6 +354,7 @@ function ProviderPill({
   resetRelative,
   usedSuffix,
   preference,
+  now,
   t,
 }: {
   provider: ProviderUsageSnapshot;
@@ -369,6 +365,7 @@ function ProviderPill({
   resetRelative: boolean;
   usedSuffix: string;
   preference: MetricPreference | undefined;
+  now: number;
   t: (key: LocaleKey) => string;
 }) {
   const slots = selectFloatBarUsageSlots(provider);
@@ -409,6 +406,15 @@ function ProviderPill({
   } else {
     pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
   }
+  // Relative last-refresh line for the hover/accessibility detail. A single
+  // shared 30-second clock at the FloatBar surface re-renders all pills, so
+  // the text advances even when no slot has a future reset timestamp. An
+  // unparseable `updatedAt` keeps its raw value after the localized label.
+  const updatedAtMs = Date.parse(provider.updatedAt);
+  const updatedDetail = Number.isNaN(updatedAtMs)
+    ? `${t("LastUpdated")}: ${provider.updatedAt}`
+    : `${t("LastUpdated")}: ${formatRelativeUpdated(updatedAtMs, t, now)}`;
+  pillDetail = `${pillDetail}\n${updatedDetail}`;
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
@@ -489,6 +495,14 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     setSettings(state.settings);
   }
   const [localCosts, setLocalCosts] = useState<Record<string, FloatBarCostSummary>>({});
+
+  // Single shared 30-second clock so relative "updated N ago" hover text
+  // advances for every provider without a per-pill timer.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // The detached floatbar should keep usage fresh, but it must not open or
   // focus any other surface. Refresh data only; provider-updated events feed
@@ -698,6 +712,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
               preference={settings.providerMetrics[p.providerId]}
+              now={now}
               t={t}
             />
           ))}

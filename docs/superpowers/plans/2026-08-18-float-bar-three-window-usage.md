@@ -188,34 +188,38 @@ git commit -m "Show Float Bar usage windows"
 
 ---
 
-### Task 2: Render percentages and per-slot live reset countdowns
+### Task 2: Render percentages and per-slot single-unit reset countdowns
 
 **Files:**
 - Modify: `apps/desktop-tauri/src/floatbar/FloatBar.tsx`
-- Modify: `apps/desktop-tauri/src/floatbar/FloatBar.css`
 - Modify: `apps/desktop-tauri/src/floatbar/FloatBar.test.tsx`
 
 **Interfaces:**
-- Consumes: `UsageCadence`, `UsageSlots`, `useFormattedResetTime`, `inlineResetTime`
-- Produces: local `UsageMetric` component with `{ cadence, window, providerError, showResetInline, usedSuffix }` props
+- Consumes: `UsageCadence`, `UsageSlots`, `useFormattedResetTime`, `compactResetTime`
+- Produces: local `UsageMetric` component with `{ window, providerError, showResetInline }` props
 
 - [ ] **Step 1: Write failing countdown and accessibility tests**
 
 Use fake timers with a fixed system time. Cover the representative mixed display:
 
 ```tsx
-it("replaces every eligible percentage with its own relative reset", async () => {
+it("appends each reset using only its largest time unit", async () => {
   vi.useFakeTimers();
   vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
   tauriMocks.getCachedProviders.mockResolvedValue([
     snapshot("claude", "Claude", 100, {
+      resetsAt: "2026-08-18T00:30:00Z",
       primaryWindowMinutes: 300,
       secondary: {
         used: 41,
         windowMinutes: 10_080,
-        resetsAt: "2026-08-19T04:00:00Z",
+        resetsAt: "2026-08-18T01:30:00Z",
       },
-      tertiary: { used: 60, windowMinutes: 43_200 },
+      tertiary: {
+        used: 60,
+        windowMinutes: 43_200,
+        resetsAt: "2026-08-19T12:00:00Z",
+      },
     }),
   ]);
   tauriMocks.getSettingsSnapshot.mockResolvedValue(
@@ -229,13 +233,13 @@ it("replaces every eligible percentage with its own relative reset", async () =>
 
   expect(
     Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-  ).toEqual(["100%", "1d 4h", "60%"]);
-  expect(container.querySelector('[aria-label^="weekly:"]')?.getAttribute("aria-label"))
-    .toContain("41% used");
+  ).toEqual(["100% 30m", "41% 1h", "60% 1d"]);
+  expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label"))
+    .toMatch(/weekly: 41% used\nResets in 1h 30m/);
 });
 ```
 
-Add cases proving that all valid future resets replace their matching percentages, invalid/expired/absent timestamps leave percentages visible, disabling inline reset leaves percentages visible, and tooltip/accessibility text retains cadence, percentage, and reset. Add `afterEach(() => vi.useRealTimers())` to prevent timer leakage.
+Add cases proving that all valid future resets append a single largest-unit countdown beside their percentages (floor semantics: `30m`, `1h` for 90 minutes, `1d` for 36 hours; never combined units), invalid/expired/absent timestamps leave percentages visible, disabling inline reset leaves percentages visible, and tooltip/accessibility text retains cadence, percentage, and the full localized reset. Add `afterEach(() => vi.useRealTimers())` to prevent timer leakage.
 
 - [ ] **Step 2: Run the countdown tests and verify failure**
 
@@ -243,65 +247,52 @@ Add cases proving that all valid future resets replace their matching percentage
 pnpm test -- src/floatbar/FloatBar.test.tsx
 ```
 
-Expected: FAIL because slots do not independently format or replace their values.
+Expected: FAIL because slots do not independently format or append their values.
 
 - [ ] **Step 3: Add the fixed three-slot renderer**
 
-Create a child component so every fixed slot can safely call the existing reset hook. Pass `null` as the fallback because visible replacement requires a parseable timestamp.
+Create a child component so every fixed slot can safely compute its compact reset. Pass the raw timestamp because the appended countdown must never derive from localized prose.
 
 ```tsx
+function compactResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "now";
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  if (totalMinutes >= 1440) return `${Math.floor(totalMinutes / 1440)}d`;
+  return `${Math.floor(totalMinutes / 60)}h`;
+}
+
 function UsageMetric({
-  cadence,
   window: rateWindow,
   providerError,
   showResetInline,
-  usedSuffix,
 }: {
-  cadence: UsageCadence;
   window: RateWindowSnapshot | null;
   providerError: boolean;
   showResetInline: boolean;
-  usedSuffix: string;
 }) {
-  const resetText = useFormattedResetTime(rateWindow?.resetsAt ?? null, null, true);
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
   const hasFutureReset = Number.isFinite(target) && target > Date.now();
-  const visible = showResetInline && hasFutureReset && resetText
-    ? inlineResetTime(resetText)
-    : used == null || providerError
+  const compactReset =
+    hasFutureReset && rateWindow?.resetsAt ? compactResetTime(rateWindow.resetsAt) : null;
+  const visible =
+    used == null || providerError
       ? "—"
-      : `${Math.round(used)}%`;
-  const detail = used == null || providerError
-    ? `${cadence}: —`
-    : `${cadence}: ${Math.round(used)}% ${usedSuffix}${resetText ? `\n${resetText}` : ""}`;
+      : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
   return (
-    <span className="floatbar__metric" title={detail} aria-label={detail} data-tauri-drag-region>
+    <span className="floatbar__metric" data-tauri-drag-region>
       {visible}
     </span>
   );
 }
 ```
 
-In `ProviderPill`, compute the slots and render three metrics with separators. Remove the obsolete single-window, remaining-percentage, reset-icon, and appended-reset paths while preserving the icon, brand, drag behavior, and tone classes.
-
-```tsx
-<span className="floatbar__metrics" data-tauri-drag-region>
-  {USAGE_CADENCES.map((cadence, index) => (
-    <Fragment key={cadence}>
-      {index > 0 && <span className="floatbar__metric-separator">/</span>}
-      <UsageMetric
-        cadence={cadence}
-        window={slots[cadence]}
-        providerError={Boolean(provider.error)}
-        showResetInline={showResetInline}
-        usedSuffix={usedSuffix}
-      />
-    </Fragment>
-  ))}
-</span>
-```
+In `ProviderPill`, compute the slots and render three metrics with separators. The full per-slot detail (cadence, used percentage, localized reset) lives on the pill `title` and `aria-label`. Remove the obsolete single-window, remaining-percentage, reset-icon, and per-metric detail paths while preserving the icon, brand, drag behavior, and tone classes.
 
 Import `Fragment` from React. Remove unused props only from Float Bar call sites; do not delete global settings or translation keys used elsewhere.
 
@@ -370,7 +361,7 @@ git commit -m "Show Float Bar reset countdowns"
 Extend `docs/ARCHITECTURE.md` section `Data flow > Float bar` with:
 
 ```markdown
-The provider pill reads canonical `primary`, `secondary`, and `tertiary` rate windows and renders fixed 5-hour / weekly / monthly positions. Values are consumed percentages; missing or informational windows render as `—`. When inline resets are enabled, a slot with a valid future reset temporarily shows its own relative countdown while tooltip/accessibility text retains the percentage. Sorting and status color follow the highest recognized usage value. Cost, model-specific, and extra windows remain separate from these quota positions.
+The provider pill reads canonical `primary`, `secondary`, and `tertiary` rate windows and renders fixed 5-hour / weekly / monthly positions. Values are consumed percentages; missing or informational windows render as `—`. When inline resets are enabled, a slot with a valid future reset appends a compact countdown using only its largest unit (`m`, `h`, or `d`) beside the percentage. Each displayed metric colors itself from its own percentage while the pill stays neutral; sorting follows the highest recognized usage value. Cost, model-specific, and extra windows remain separate from these quota positions.
 ```
 
 - [ ] **Step 2: Run focused frontend verification**
