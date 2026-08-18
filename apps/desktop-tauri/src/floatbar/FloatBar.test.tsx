@@ -75,6 +75,7 @@ function snapshot(
     resetDescription?: string | null;
     informational?: boolean;
     windowMinutes?: number | null;
+    updatedAt?: string;
     primaryLabel?: string;
     primaryWindowMinutes?: number | null;
     secondary?: {
@@ -125,7 +126,7 @@ function snapshot(
     planName: null,
     accountEmail: null,
     sourceLabel: "auto",
-    updatedAt: "2026-05-15T00:00:00Z",
+    updatedAt: opts.updatedAt ?? "2026-05-15T00:00:00Z",
     error: opts.error ?? null,
     pace: null,
     accountOrganization: null,
@@ -231,6 +232,11 @@ describe("FloatBar", () => {
         ResetsInHoursMinutes: "Resets in {}h {}m",
         ResetsInDaysHours: "Resets in {}d {}h",
         TrayResetsDueNow: "Resetting",
+        LastUpdated: "Updated",
+        UpdatedJustNow: "Updated just now",
+        UpdatedMinutesAgo: "{} minutes ago",
+        UpdatedHoursAgo: "{} hours ago",
+        UpdatedDaysAgo: "{} days ago",
         PanelToday: "Today",
         PanelUsedSuffix: "used",
         FloatBarThirtyDayShort: "30d",
@@ -485,8 +491,8 @@ describe("FloatBar", () => {
       ).toEqual(["—", "—", "—"]);
       expect(container.querySelector(".floatbar__pill--crit")).not.toBeNull();
       // The pill detail must show three dashes, not stale percentages.
-      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toBe(
-        "Claude: 5h: —\nweekly: —\nmonthly: —",
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
+        /^Claude: 5h: —\nweekly: —\nmonthly: —\nUpdated: /,
       );
     });
   });
@@ -605,14 +611,13 @@ describe("FloatBar", () => {
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
       // claude's informational primary is absent → max used is 20 (weekly);
-      // codex primary 5h 50% sorts first.
+      // codex primary 5h 50% sorts first. Assert only the slot portion so
+      // the relative last-updated line stays out of this test's scope.
       const titles = Array.from(container.querySelectorAll(".floatbar__pill")).map(
         (pill) => pill.getAttribute("title"),
       );
-      expect(titles).toEqual([
-        "Codex: 5h: 50% used\nweekly: —\nmonthly: —",
-        "Claude: 5h: —\nweekly: 20% used\nmonthly: —",
-      ]);
+      expect(titles[0]).toMatch(/^Codex: 5h: 50% used\nweekly: —\nmonthly: —/);
+      expect(titles[1]).toMatch(/^Claude: 5h: —\nweekly: 20% used\nmonthly: —/);
     });
   });
 
@@ -887,6 +892,51 @@ describe("FloatBar", () => {
     );
   });
 
+  it("appends a localized relative last-updated line to every pill detail", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      // Provider A: parseable past updatedAt → localized relative text that
+      // advances on the shared 30-second clock even with no reset timestamp.
+      snapshot("claude", "Claude", 20, {
+        updatedAt: "2026-08-17T23:54:00Z",
+        primaryWindowMinutes: 300,
+        secondary: { used: 41, windowMinutes: 10_080 },
+      }),
+      // Provider B: unparseable updatedAt → raw value preserved after label.
+      // Codex (50% used) sorts before Claude (max 41% weekly).
+      snapshot("codex", "Codex", 50, {
+        updatedAt: "unknown-source-time",
+        primaryWindowMinutes: 300,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    const pills = Array.from(container.querySelectorAll(".floatbar__pill"));
+    expect(pills.length).toBe(2);
+    const codexLabel = pills[0].getAttribute("aria-label");
+    const claudeLabel = pills[1].getAttribute("aria-label");
+    // Title and aria-label stay identical for every pill.
+    expect(pills[0].getAttribute("title")).toBe(codexLabel);
+    expect(pills[1].getAttribute("title")).toBe(claudeLabel);
+    // Unparseable updatedAt keeps its raw value after the localized label.
+    expect(codexLabel).toMatch(
+      /^Codex: 5h: 50% used\nweekly: —\nmonthly: —\nUpdated: unknown-source-time$/,
+    );
+    // Relative text is localized and appended after the full slot detail.
+    expect(claudeLabel).toMatch(
+      /^Claude: 5h: 20% used\nweekly: 41% used\nmonthly: —\nUpdated: 6 minutes ago$/,
+    );
+
+    // The shared 30-second clock advances relative text even though neither
+    // provider has a reset timestamp; crossing a minute boundary updates it.
+    await act(async () => vi.advanceTimersByTimeAsync(60_000));
+    expect(pills[1].getAttribute("aria-label")).toMatch(/Updated: 7 minutes ago/);
+  });
+
   it("keeps percentages visible when inline resets are disabled", async () => {
     const resetsAt = new Date(Date.now() + 2 * 60 * 60_000).toISOString();
     tauriMocks.getCachedProviders.mockResolvedValue([
@@ -946,8 +996,11 @@ describe("FloatBar", () => {
       const initialCalls = tauriMocks.refreshProvidersIfStale.mock.calls.length;
 
       // Advance the timer past the 60-second interval — the floatbar tick
-      // should fire again.
-      await vi.advanceTimersByTimeAsync(60_000);
+      // should fire again. Wrapped in act because the shared 30s now clock
+      // also fires during the advance.
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(60_000);
+      });
       expect(tauriMocks.refreshProvidersIfStale.mock.calls.length).toBeGreaterThan(
         initialCalls,
       );

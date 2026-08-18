@@ -18,6 +18,8 @@ import {
   getSettingsSnapshot,
   refreshProvidersIfStale,
 } from "../lib/tauri";
+import { formatRelativeUpdated } from "../lib/relativeTime";
+import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
@@ -235,6 +237,8 @@ function ProviderPill({
   showResetInline,
   resetRelative,
   usedSuffix,
+  now,
+  t,
 }: {
   provider: ProviderUsageSnapshot;
   highUsage: number;
@@ -243,6 +247,8 @@ function ProviderPill({
   showResetInline: boolean;
   resetRelative: boolean;
   usedSuffix: string;
+  now: number;
+  t: (key: LocaleKey) => string;
 }) {
   const slots = selectFloatBarUsageSlots(provider);
   const maxUsed = maxFloatBarUsedPercent(provider);
@@ -266,7 +272,15 @@ function ProviderPill({
     const reset = resetTexts[index];
     return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
   });
-  const pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+  // Relative last-refresh line for the hover/accessibility detail. A single
+  // shared 30-second clock at the FloatBar surface re-renders all pills, so
+  // the text advances even when no slot has a future reset timestamp. An
+  // unparseable `updatedAt` keeps its raw value after the localized label.
+  const updatedAtMs = Date.parse(provider.updatedAt);
+  const updatedDetail = Number.isNaN(updatedAtMs)
+    ? `${t("LastUpdated")}: ${provider.updatedAt}`
+    : `${t("LastUpdated")}: ${formatRelativeUpdated(updatedAtMs, t, now)}`;
+  const pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}\n${updatedDetail}`;
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
@@ -334,6 +348,14 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     setSettings(state.settings);
   }
   const [localCosts, setLocalCosts] = useState<Record<string, FloatBarCostSummary>>({});
+
+  // Single shared 30-second clock so relative "updated N ago" hover text
+  // advances for every provider without a per-pill timer.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // The detached floatbar should keep usage fresh, but it must not open or
   // focus any other surface. Refresh data only; provider-updated events feed
@@ -540,6 +562,8 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               showResetInline={showResetInline}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
+              now={now}
+              t={t}
             />
           ))}
           {visibleCosts.map((summary) => (
