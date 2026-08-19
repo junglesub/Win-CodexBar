@@ -79,6 +79,8 @@ Assert-True ($workflowText -match 'git/matching-refs/tags/personal-latest') 'rol
 Assert-True ($workflowText -match "Where-Object tagName -EQ 'personal-latest'") 'release probe filters with PowerShell'
 Assert-True ($workflowText -match "Where-Object ref -EQ 'refs/tags/personal-latest'") 'tag probes select the exact ref with PowerShell'
 Assert-True ($workflowText -notmatch '--jq\s+''[^'']*"personal-latest"') 'native gh arguments do not contain PowerShell-stripped jq quotes'
+Assert-True ($workflowText -match '\$previousReleaseMoved') 'publisher waits for the old release tag name to become available'
+Assert-True ($workflowText -match 'Start-Sleep -Seconds 5') 'release rename polling uses a bounded delay'
 Assert-True ($workflowText -notmatch 'gh release view personal-latest') 'publisher does not probe a missing release with a failing command'
 Assert-True ($workflowText -notmatch 'git/ref/tags/personal-latest') 'publisher does not probe a missing tag with a failing command'
 Assert-True ($workflowText -match "github\.ref == 'refs/heads/personal'") 'manual runs are restricted to personal'

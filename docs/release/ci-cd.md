@@ -25,6 +25,10 @@ the staged replacement is complete. The title contains the short commit SHA
 and its notes contain the full SHA. Runs are serialized, and stale reruns skip
 publication.
 
+GitHub's release index can briefly retain the old tag name after a release is
+renamed. The publisher waits until `personal-latest` is absent from the release
+list before assigning that name to the staged release.
+
 The rolling prerelease is intentionally separate from canonical `vX.Y.Z`
 releases and Winget. Do not use `personal-latest` as a Winget source because
 its assets and tag are mutable.
