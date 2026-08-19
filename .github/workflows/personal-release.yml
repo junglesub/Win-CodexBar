@@ -102,7 +102,8 @@ jobs:
 
           $previousReleasesJson = gh release list --limit 100 --json tagName
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal release.' }
-          $hadPreviousRelease = @($previousReleasesJson | ConvertFrom-Json |
+          $previousReleases = $previousReleasesJson | ConvertFrom-Json
+          $hadPreviousRelease = @($previousReleases |
             Where-Object tagName -EQ 'personal-latest').Count -gt 0
 
           $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
@@ -147,7 +148,8 @@ jobs:
           $previousTagRefsJson = gh api `
             "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal tag.' }
-          $previousTagSha = @($previousTagRefsJson | ConvertFrom-Json |
+          $previousTagRefs = $previousTagRefsJson | ConvertFrom-Json
+          $previousTagSha = @($previousTagRefs |
             Where-Object ref -EQ 'refs/tags/personal-latest' |
             ForEach-Object { $_.object.sha })[0]
           $hadPreviousTag = -not [string]::IsNullOrWhiteSpace("$previousTagSha")
@@ -167,7 +169,8 @@ jobs:
             $observedTagRefsJson = gh api `
               "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
             if ($LASTEXITCODE -eq 0) {
-              $observedTagSha = @($observedTagRefsJson | ConvertFrom-Json |
+              $observedTagRefs = $observedTagRefsJson | ConvertFrom-Json
+              $observedTagSha = @($observedTagRefs |
                 Where-Object ref -EQ 'refs/tags/personal-latest' |
                 ForEach-Object { $_.object.sha })[0]
               $tagMoved = $observedTagSha -eq $env:GITHUB_SHA

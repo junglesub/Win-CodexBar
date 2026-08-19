@@ -32,6 +32,10 @@ Assert-Equal (Get-NodeMajor 'v24.18.0') 24 'Node 24 major parsing'
 Assert-Equal (Assert-NodeMajor 'v24.18.0' 24) 24 'Node 24 requirement'
 Assert-Throws { Assert-NodeMajor 'v23.11.0' 24 } 'non-24 Node major rejected by release prerequisite'
 
+$jsonArray = '[{"tagName":"personal-staging"},{"tagName":"personal-latest"}]'
+$parsedArray = $jsonArray | ConvertFrom-Json
+Assert-True (@($parsedArray | Where-Object tagName -EQ 'personal-latest').Count -eq 1) 'PowerShell 5.1 enumerates an assigned JSON array'
+
 $prerequisiteText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'install-release-prerequisites.ps1')
 Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
 Assert-True ($prerequisiteText -match '10\\.18\\.1') 'release prerequisite keeps pnpm 10.18.1 pinned'
@@ -78,6 +82,9 @@ Assert-True ($workflowText -match 'gh release list --limit 100 --json tagName') 
 Assert-True ($workflowText -match 'git/matching-refs/tags/personal-latest') 'rolling tag existence uses a non-failing refs query'
 Assert-True ($workflowText -match "Where-Object tagName -EQ 'personal-latest'") 'release probe filters with PowerShell'
 Assert-True ($workflowText -match "Where-Object ref -EQ 'refs/tags/personal-latest'") 'tag probes select the exact ref with PowerShell'
+Assert-True ($workflowText -match '\$previousReleases\s*=\s*\$previousReleasesJson\s*\|\s*ConvertFrom-Json') 'release JSON is assigned before filtering'
+Assert-True ($workflowText -match '\$previousTagRefs\s*=\s*\$previousTagRefsJson\s*\|\s*ConvertFrom-Json') 'tag JSON is assigned before filtering'
+Assert-True ($workflowText -match '\$observedTagRefs\s*=\s*\$observedTagRefsJson\s*\|\s*ConvertFrom-Json') 'tag verification JSON is assigned before filtering'
 Assert-True ($workflowText -notmatch '--jq\s+''[^'']*"personal-latest"') 'native gh arguments do not contain PowerShell-stripped jq quotes'
 Assert-True ($workflowText -notmatch 'git/ref/tags/personal-latest') 'publisher does not probe a missing tag with a failing command'
 Assert-True ($workflowText -match "github\.ref == 'refs/heads/personal'") 'manual runs are restricted to personal'

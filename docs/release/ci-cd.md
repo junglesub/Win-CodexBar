@@ -30,7 +30,9 @@ its assets and tag are mutable.
 
 The Windows publisher parses `gh` JSON with PowerShell's `ConvertFrom-Json`.
 Keep quoted string filters out of `gh --jq` arguments: Windows PowerShell can
-strip those quotes before `gh` receives them.
+strip those quotes before `gh` receives them. Assign parsed JSON arrays before
+filtering them because Windows PowerShell 5.1 does not enumerate an array
+emitted directly by `ConvertFrom-Json` in this pipeline shape.
 
 ## Repository settings
 
