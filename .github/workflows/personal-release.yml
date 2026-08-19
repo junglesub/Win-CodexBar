@@ -127,13 +127,16 @@ jobs:
             exit 0
           }
 
-          $previousReleaseCount = gh release list --limit 100 --json tagName --jq 'map(select(.tagName == "personal-latest")) | length'
+          $previousReleasesJson = gh release list --limit 100 --json tagName
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal release.' }
-          $hadPreviousRelease = [int]$previousReleaseCount -gt 0
-          $previousTagSha = gh api `
-            "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest" `
-            --jq 'map(select(.ref == "refs/tags/personal-latest")) | .[0].object.sha // empty'
+          $hadPreviousRelease = @($previousReleasesJson | ConvertFrom-Json |
+            Where-Object tagName -EQ 'personal-latest').Count -gt 0
+          $previousTagRefsJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal tag.' }
+          $previousTagSha = @($previousTagRefsJson | ConvertFrom-Json |
+            Where-Object ref -EQ 'refs/tags/personal-latest' |
+            ForEach-Object { $_.object.sha })[0]
           $hadPreviousTag = -not [string]::IsNullOrWhiteSpace("$previousTagSha")
           if ($hadPreviousRelease) {
             gh release edit personal-latest --tag $backupTag --target $personalHead
@@ -168,10 +171,12 @@ jobs:
           }
           $tagMoved = $LASTEXITCODE -eq 0
           if (-not $tagMoved) {
-            $observedTagSha = gh api `
-              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest" `
-              --jq 'map(select(.ref == "refs/tags/personal-latest")) | .[0].object.sha // empty'
+            $observedTagRefsJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
             if ($LASTEXITCODE -eq 0) {
+              $observedTagSha = @($observedTagRefsJson | ConvertFrom-Json |
+                Where-Object ref -EQ 'refs/tags/personal-latest' |
+                ForEach-Object { $_.object.sha })[0]
               $tagMoved = $observedTagSha -eq $env:GITHUB_SHA
             }
           }
@@ -182,10 +187,12 @@ jobs:
               gh release edit $backupTag --tag personal-latest --target $personalHead
               if ($LASTEXITCODE -ne 0) { throw 'Tag move failed and the previous release rollback also failed.' }
             }
-            $currentTagSha = gh api `
-              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest" `
-              --jq 'map(select(.ref == "refs/tags/personal-latest")) | .[0].object.sha // empty'
+            $currentTagRefsJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
             if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the partially moved personal tag.' }
+            $currentTagSha = @($currentTagRefsJson | ConvertFrom-Json |
+              Where-Object ref -EQ 'refs/tags/personal-latest' |
+              ForEach-Object { $_.object.sha })[0]
             if ($hadPreviousTag) {
               if (-not [string]::IsNullOrWhiteSpace("$currentTagSha")) {
                 gh api --method PATCH `

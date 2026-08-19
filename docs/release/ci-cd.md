@@ -29,6 +29,10 @@ The rolling prerelease is intentionally separate from canonical `vX.Y.Z`
 releases and Winget. Do not use `personal-latest` as a Winget source because
 its assets and tag are mutable.
 
+The Windows publisher parses `gh` JSON with PowerShell's `ConvertFrom-Json`.
+Keep quoted string filters out of `gh --jq` arguments: Windows PowerShell can
+strip those quotes before `gh` receives them.
+
 ## Repository settings
 
 GitHub Actions must be allowed to create releases with `GITHUB_TOKEN`. In
