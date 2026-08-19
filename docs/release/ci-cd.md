@@ -18,16 +18,11 @@ outputs cross into the publish job through a one-day workflow artifact:
 - `CodexBar-X.Y.Z-portable.exe.sha256`
 
 After all four assets exist, the publish job verifies that `GITHUB_SHA` is
-still the head of `personal`. It uploads and verifies them on a unique staging
-prerelease, switches that release to `personal-latest`, moves the tag, then
-removes the superseded release. The previous release remains available until
-the staged replacement is complete. The title contains the short commit SHA
-and its notes contain the full SHA. Runs are serialized, and stale reruns skip
-publication.
-
-GitHub's release index can briefly retain the old tag name after a release is
-renamed. The publisher waits until `personal-latest` is absent from the release
-list before assigning that name to the staged release.
+still the head of `personal`. The workflow artifact is the staging layer. On
+the first run the publisher creates `personal-latest`; later runs replace its
+assets in place, remove assets from older versions, and verify the exact
+four-file set. It then updates the title and notes and moves the Git tag to the
+new commit. Runs are serialized, and stale reruns skip publication.
 
 The rolling prerelease is intentionally separate from canonical `vX.Y.Z`
 releases and Winget. Do not use `personal-latest` as a Winget source because
@@ -53,12 +48,14 @@ Run the dependency-free release checks locally with:
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release-pipeline.tests.ps1
 ```
 
-## Retry and rollback
+## Retry behavior
 
-Rerunning the current workflow rebuilds the same commit and updates the rolling
-prerelease. A stale rerun does not publish. A failed build leaves the previous
-release untouched because publication begins only after all assets are present;
-an upload failure also leaves the release itself available for retry.
+Rerunning the current workflow rebuilds the same commit and repairs the rolling
+prerelease idempotently. A stale rerun does not publish. A failed build leaves
+the previous release untouched because publication begins only after all assets
+are present. GitHub does not provide an atomic whole-release asset swap, so an
+upload failure can leave a partially updated asset set; rerun the workflow to
+replace and verify all four files.
 
 For a local installer build, use:
 

@@ -95,42 +95,55 @@ jobs:
             exit 0
           }
 
+          $assetNames = @($assets | ForEach-Object { Split-Path -Leaf $_ })
           $shortSha = $env:GITHUB_SHA.Substring(0, 7)
-          $stagingTag = "personal-staging-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
-          $backupTag = "personal-backup-$env:GITHUB_RUN_ID-$env:GITHUB_RUN_ATTEMPT"
           $title = "Personal build ($shortSha)"
           $notes = "Automated build of the personal branch at commit $env:GITHUB_SHA."
-
-          gh release create $stagingTag @assets `
-            --target $env:GITHUB_SHA `
-            --title "Staging $title" `
-            --notes $notes `
-            --prerelease `
-            --latest=false
-          if ($LASTEXITCODE -ne 0) {
-            gh release delete $stagingTag --cleanup-tag --yes 2>$null
-            throw 'Could not stage the personal release.'
-          }
-
-          $stagedNames = @(gh release view $stagingTag --json assets --jq '.assets[].name')
-          if ($LASTEXITCODE -ne 0 -or $stagedNames.Count -ne 4) {
-            gh release delete $stagingTag --cleanup-tag --yes 2>$null
-            throw "Staged release contains $($stagedNames.Count) assets instead of four."
-          }
-
-          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
-          if ($LASTEXITCODE -ne 0) { throw 'Could not recheck the personal branch head.' }
-          if ($personalHead -ne $env:GITHUB_SHA) {
-            gh release delete $stagingTag --cleanup-tag --yes
-            if ($LASTEXITCODE -ne 0) { throw 'Could not remove a stale staged release.' }
-            Write-Host "Skipping stale build $env:GITHUB_SHA; personal is now $personalHead."
-            exit 0
-          }
 
           $previousReleasesJson = gh release list --limit 100 --json tagName
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal release.' }
           $hadPreviousRelease = @($previousReleasesJson | ConvertFrom-Json |
             Where-Object tagName -EQ 'personal-latest').Count -gt 0
+
+          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not recheck the personal branch head.' }
+          if ($personalHead -ne $env:GITHUB_SHA) {
+            Write-Host "Skipping stale build $env:GITHUB_SHA; personal is now $personalHead."
+            exit 0
+          }
+
+          if ($hadPreviousRelease) {
+            $existingNames = @(gh release view personal-latest --json assets --jq '.assets[].name')
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing personal release assets.' }
+            gh release upload personal-latest @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the personal release assets.' }
+            foreach ($staleName in @($existingNames | Where-Object { $_ -notin $assetNames })) {
+              gh release delete-asset personal-latest $staleName --yes
+              if ($LASTEXITCODE -ne 0) { throw "Could not remove superseded asset $staleName." }
+            }
+          } else {
+            gh release create personal-latest @assets `
+              --target $env:GITHUB_SHA `
+              --title $title `
+              --notes $notes `
+              --prerelease `
+              --latest=false
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the personal release.' }
+          }
+
+          $publishedNames = @(gh release view personal-latest --json assets --jq '.assets[].name')
+          $assetDifference = @(Compare-Object $assetNames $publishedNames)
+          if ($LASTEXITCODE -ne 0 -or $publishedNames.Count -ne 4 -or $assetDifference.Count -ne 0) {
+            throw "Personal release contains $($publishedNames.Count) assets instead of the expected four."
+          }
+
+          gh release edit personal-latest `
+            --title $title `
+            --notes $notes `
+            --prerelease `
+            --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not update the personal release metadata.' }
+
           $previousTagRefsJson = gh api `
             "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
           if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal tag.' }
@@ -138,40 +151,6 @@ jobs:
             Where-Object ref -EQ 'refs/tags/personal-latest' |
             ForEach-Object { $_.object.sha })[0]
           $hadPreviousTag = -not [string]::IsNullOrWhiteSpace("$previousTagSha")
-          if ($hadPreviousRelease) {
-            gh release edit personal-latest --tag $backupTag --target $personalHead
-            if ($LASTEXITCODE -ne 0) { throw 'Could not preserve the previous personal release.' }
-            $previousReleaseMoved = $false
-            for ($attempt = 0; $attempt -lt 6; $attempt++) {
-              $releaseProbeJson = gh release list --limit 100 --json tagName
-              if ($LASTEXITCODE -ne 0) { break }
-              $previousReleaseMoved = @($releaseProbeJson | ConvertFrom-Json |
-                Where-Object tagName -EQ 'personal-latest').Count -eq 0
-              if ($previousReleaseMoved) { break }
-              if ($attempt -lt 5) { Start-Sleep -Seconds 5 }
-            }
-            if (-not $previousReleaseMoved) {
-              gh release edit $backupTag --tag personal-latest --target $personalHead
-              if ($LASTEXITCODE -ne 0) { throw 'Release rename did not settle and rollback also failed.' }
-              throw 'Release rename did not settle before promotion.'
-            }
-          }
-
-          gh release edit $stagingTag `
-            --tag personal-latest `
-            --target $personalHead `
-            --title $title `
-            --notes $notes `
-            --prerelease `
-            --latest=false
-          if ($LASTEXITCODE -ne 0) {
-            if ($hadPreviousRelease) {
-              gh release edit $backupTag --tag personal-latest --target $personalHead
-              if ($LASTEXITCODE -ne 0) { throw 'Could not restore the previous personal release.' }
-            }
-            throw 'Could not promote the staged personal release.'
-          }
-
           if ($hadPreviousTag) {
             gh api --method PATCH `
               "repos/$env:GITHUB_REPOSITORY/git/refs/tags/personal-latest" `
@@ -195,45 +174,8 @@ jobs:
             }
           }
           if (-not $tagMoved) {
-            gh release edit personal-latest --tag $stagingTag --target $personalHead
-            if ($LASTEXITCODE -ne 0) { throw 'Tag move failed and the staged release rollback also failed.' }
-            if ($hadPreviousRelease) {
-              gh release edit $backupTag --tag personal-latest --target $personalHead
-              if ($LASTEXITCODE -ne 0) { throw 'Tag move failed and the previous release rollback also failed.' }
-            }
-            $currentTagRefsJson = gh api `
-              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
-            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the partially moved personal tag.' }
-            $currentTagSha = @($currentTagRefsJson | ConvertFrom-Json |
-              Where-Object ref -EQ 'refs/tags/personal-latest' |
-              ForEach-Object { $_.object.sha })[0]
-            if ($hadPreviousTag) {
-              if (-not [string]::IsNullOrWhiteSpace("$currentTagSha")) {
-                gh api --method PATCH `
-                  "repos/$env:GITHUB_REPOSITORY/git/refs/tags/personal-latest" `
-                  -f "sha=$previousTagSha" `
-                  -F force=true *> $null
-              } else {
-                gh api --method POST `
-                  "repos/$env:GITHUB_REPOSITORY/git/refs" `
-                  -f 'ref=refs/tags/personal-latest' `
-                  -f "sha=$previousTagSha" *> $null
-              }
-              if ($LASTEXITCODE -ne 0) { throw 'Could not restore the previous personal tag.' }
-            } elseif (-not [string]::IsNullOrWhiteSpace("$currentTagSha")) {
-              gh api --method DELETE `
-                "repos/$env:GITHUB_REPOSITORY/git/refs/tags/personal-latest" 2>$null
-              if ($LASTEXITCODE -ne 0) { throw 'Could not remove the partially created personal tag.' }
-            }
             throw 'Could not move the personal release tag.'
           }
 
-          gh api --method DELETE `
-            "repos/$env:GITHUB_REPOSITORY/git/refs/tags/$stagingTag" 2>$null
-          if ($LASTEXITCODE -ne 0) { Write-Warning "Could not remove staging tag $stagingTag." }
-          if ($hadPreviousRelease) {
-            gh release delete $backupTag --yes
-            if ($LASTEXITCODE -ne 0) { throw 'Could not remove the superseded personal release.' }
-          }
           Write-Host "Published personal-latest at $env:GITHUB_SHA."
           exit 0
