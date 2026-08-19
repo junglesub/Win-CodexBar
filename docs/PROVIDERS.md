@@ -84,6 +84,11 @@ Upstream `docs/providers.md` is a large auto-strategy matrix (60+ providers) for
   legacy `GetUserStatus` / `clientModelConfigs` parse unchanged. The endpoint is
   reverse-engineered and version-sensitive.
 
+  Run `./scripts/antigravity-doctor.ps1` while Antigravity or `agy` is running
+  to test process detection, local API discovery, quota summary, and fallback
+  without printing CSRF values or raw responses. The script lists detected
+  processes and probes candidate ports in parallel with Windows `curl.exe`.
+
 ## Related
 
 - [ARCHITECTURE.md](./ARCHITECTURE.md)
