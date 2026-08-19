@@ -55,14 +55,19 @@ enum ProcessSource {
 /// language server as the IDE but under a different process name and without a
 /// `--csrf_token` flag. Match either the bare `agy` executable or the
 /// `antigravity-cli` package name; a leading path separator prevents unrelated
-/// names (e.g. `notantigravity-cli`) from matching.
+/// names (e.g. `notantigravity-cli`) from matching. The name must end at a
+/// boundary: whitespace, a closing `"` (a Windows command line where the
+/// executable path is double-quoted), or end of string. The `antigravity-cli`
+/// names also accept a path separator as the boundary; the bare `agy` name
+/// must not, so a directory segment like `C:\agy\other.exe` does not match.
 fn is_agy_cli_command(command_line: &str) -> bool {
     static CLI_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r"(^|[\\/])(antigravity-cli|antigravity_cli)([\s/\\]|$)")
+        Regex::new(r#"(^|[\\/])(antigravity-cli|antigravity_cli)(\.exe)?([\s/\\"]|$)"#)
             .expect("valid antigravity-cli pattern")
     });
-    static AGY_RE: LazyLock<Regex> =
-        LazyLock::new(|| Regex::new(r"(^|[\\/])agy(\.exe)?(\s|$)").expect("valid agy pattern"));
+    static AGY_RE: LazyLock<Regex> = LazyLock::new(|| {
+        Regex::new(r#"(^|[\\/])agy(\.exe)?([\s"]|$)"#).expect("valid agy pattern")
+    });
     let lower = command_line.to_ascii_lowercase();
     CLI_PATH_RE.is_match(&lower) || AGY_RE.is_match(&lower)
 }

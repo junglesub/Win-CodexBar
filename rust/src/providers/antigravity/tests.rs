@@ -485,10 +485,45 @@ fn is_agy_cli_command_matches_known_names() {
 }
 
 #[test]
+fn is_agy_cli_command_matches_quoted_windows_paths() {
+    // Observed real Windows command line: the executable path is double-quoted
+    // and a closing `"` immediately follows agy.exe before the arguments.
+    assert!(is_agy_cli_command(
+        "\"C:\\Users\\RyooJungsub\\AppData\\Local\\agy\\bin\\agy.exe\" --dangerously-skip-permissions"
+    ));
+    assert!(is_agy_cli_command(
+        "\"C:\\Users\\test\\AppData\\Local\\agy\\bin\\antigravity-cli.exe\" serve"
+    ));
+    assert!(is_agy_cli_command(
+        "\"C:\\Users\\test\\AppData\\Local\\agy\\bin\\antigravity_cli.exe\" serve"
+    ));
+}
+
+#[test]
+fn detects_quoted_agy_exe_command_line() {
+    // Regression: a double-quoted agy.exe path (Windows command line) must be
+    // recognized as the CLI even though a closing quote follows the name.
+    let output = "5555\t\"C:\\Users\\RyooJungsub\\AppData\\Local\\agy\\bin\\agy.exe\" --dangerously-skip-permissions";
+
+    let process = AntigravityProvider::parse_process_info(output)
+        .expect("quoted agy.exe command should be detected");
+
+    assert_eq!(process.pid, Some(5555));
+    assert_eq!(process.source, ProcessSource::Cli);
+    assert!(process.csrf_token.is_empty());
+}
+
+#[test]
 fn is_agy_cli_command_rejects_unrelated_names() {
     // A leading path separator prevents `notantigravity-cli` from matching.
     assert!(!is_agy_cli_command("notantigravity-cli status"));
     assert!(!is_agy_cli_command("C:\\Windows\\System32\\notepad.exe"));
     assert!(!is_agy_cli_command("language_server.exe --csrf_token abc"));
+    assert!(
+        !is_agy_cli_command("C:\\agy\\other.exe"),
+        "a directory segment named agy must not match the agy executable"
+    );
+    assert!(!is_agy_cli_command("\"C:\\tools\\agy-helper.exe\" run"));
+    assert!(!is_agy_cli_command("\"C:\\tools\\notagy.exe\" run"));
     assert!(!is_agy_cli_command(""));
 }

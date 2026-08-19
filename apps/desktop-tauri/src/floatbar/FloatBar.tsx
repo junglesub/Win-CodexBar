@@ -99,6 +99,17 @@ function maxFloatBarUsedPercent(
 }
 
 /**
+ * Detect the known Antigravity-not-running error so the pill can show a
+ * compact, non-identity overlay message next to the Antigravity icon.
+ */
+function isAntigravityNotRunningError(provider: ProviderUsageSnapshot): boolean {
+  return (
+    provider.providerId === "antigravity" &&
+    /antigravity language server not running/i.test(provider.error ?? "")
+  );
+}
+
+/**
  * A single fallback metric for providers whose canonical windows carry no
  * recognizable cadence. The visible label prefers the provider's own window
  * label (primaryLabel/secondaryLabel/tertiaryLabel) and only falls back to a
@@ -373,6 +384,9 @@ function ProviderPill({
     ? null
     : fallbackFor(provider, preference);
   const hasError = Boolean(provider.error);
+  const agyOverlay = isAntigravityNotRunningError(provider)
+    ? t("FloatBarAgyRunNeeded")
+    : null;
 
   // One reset hook per fixed slot plus one for the fallback, all called
   // unconditionally in stable order.
@@ -387,7 +401,6 @@ function ProviderPill({
   const resetTexts = [reset5h, resetWeekly, resetMonthly];
 
   const slotDetails = USAGE_CADENCES.map((cadence, index) => {
-    if (hasError) return `${cadence}: —`;
     const window = slots[cadence];
     if (!window) return `${cadence}: —`;
     const used = Math.round(Math.max(0, Math.min(100, window.usedPercent)));
@@ -395,14 +408,13 @@ function ProviderPill({
     return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
   });
   let pillDetail: string;
-  const fallbackLabel = fallback
-    ? (fallback.providerLabel ?? t(fallback.labelKey))
-    : "";
-  if (fallback) {
+  const fallbackLabel =
+    hasError || !fallback ? "" : (fallback.providerLabel ?? t(fallback.labelKey));
+  if (provider.error) {
+    pillDetail = `${provider.displayName}: ${provider.error}`;
+  } else if (fallback) {
     const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
-    pillDetail = hasError
-      ? `${provider.displayName}: ${fallbackLabel}: —`
-      : `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
+    pillDetail = `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
   } else {
     pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
   }
@@ -432,7 +444,14 @@ function ProviderPill({
         <ProviderIcon providerId={provider.providerId} size={iconSize} />
       </span>
       <span className="floatbar__metrics" data-tauri-drag-region>
-        {fallback ? (
+        {agyOverlay ? (
+          <span
+            className="floatbar__metric floatbar__metric--crit floatbar__agy-overlay"
+            data-tauri-drag-region
+          >
+            {agyOverlay}
+          </span>
+        ) : fallback ? (
           <UsageMetric
             window={fallback.window}
             providerError={hasError}

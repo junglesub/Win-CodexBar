@@ -177,6 +177,14 @@ body.floatbar-window #root {
   font-weight: 600;
   opacity: 0.66;
 }
+/* Compact antigravity-not-running overlay: one short localized action next to
+ * the provider icon instead of usage dashes, keeping the pill compact. */
+.floatbar__agy-overlay {
+  font-size: 0.78em;
+  font-weight: 700;
+  opacity: 0.92;
+  letter-spacing: 0.01em;
+}
 .floatbar__metric-separator {
   opacity: 0.55;
 }

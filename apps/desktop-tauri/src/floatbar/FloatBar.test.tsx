@@ -237,6 +237,10 @@ function renderFloatBar(state: BootstrapState) {
   );
 }
 
+/** The exact error text emitted by the Rust Antigravity provider probe. */
+const AGY_NOT_RUNNING_ERROR =
+  "Antigravity language server not running. Start Google Antigravity and sign in, then retry.";
+
 describe("FloatBar", () => {
   afterEach(() => {
     vi.useRealTimers();
@@ -263,6 +267,7 @@ describe("FloatBar", () => {
         FloatBarThirtyDayShort: "30d",
         FloatBarNoProviders: "No providers",
         FloatBarRemainingSuffix: "remaining",
+        FloatBarAgyRunNeeded: "Start agy",
       }),
     );
     eventMocks.listen.mockResolvedValue(() => {});
@@ -523,11 +528,107 @@ describe("FloatBar", () => {
       // The pill stays neutral; the displayed fallback dash metric is critical.
       expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
       expect(container.querySelector(".floatbar__metric--crit")).not.toBeNull();
-      // Pill detail must not show stale percentages.
+      // Pill detail must preserve the actual provider error and not show stale percentages or fallback identity.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
-        /DetailWindowModelSpecific: —/,
+        /^Antigravity: boom\nUpdated: /,
       );
     });
+  });
+
+  it("shows the compact agy-run overlay for the antigravity not-running error", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      // Realistic error snapshot from ProviderUsageSnapshot::from_error with
+      // the legacy Antigravity primaryLabel "Claude" populated.
+      snapshot("antigravity", "Antigravity", 0, {
+        error: AGY_NOT_RUNNING_ERROR,
+        primaryLabel: "Claude",
+        primaryWindowMinutes: null,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ enabledProviders: ["antigravity"] }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ enabledProviders: ["antigravity"] }),
+    );
+    await waitFor(() => {
+      const metrics = Array.from(
+        container.querySelectorAll(".floatbar__metric"),
+        (node) => node.textContent,
+      );
+      // One compact visible overlay message next to the Antigravity icon.
+      expect(metrics).toEqual(["Start agy"]);
+    });
+    // No visible Claude identity anywhere in the pill.
+    expect(container.querySelector(".floatbar__pill")?.textContent).not.toContain("Claude");
+    // The pill's hover/accessibility detail preserves the error state without
+    // showing the legacy Claude primaryLabel identity.
+    const label = container.querySelector(".floatbar__pill")?.getAttribute("aria-label") ?? "";
+    expect(label).toContain(`Antigravity: ${AGY_NOT_RUNNING_ERROR}`);
+    expect(label).not.toContain("Claude");
+    expect(label).not.toContain("Start agy");
+  });
+
+  it("keeps unrelated provider errors as dashes without the agy overlay", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("codex", "Codex", 0, {
+        error: "Some unrelated codex error",
+        primaryWindowMinutes: null,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ enabledProviders: ["codex"] }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ enabledProviders: ["codex"] }),
+    );
+    await waitFor(() => {
+      // Unrelated errors keep the existing dash behavior — no overlay text.
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—"]);
+    });
+    const pill = container.querySelector(".floatbar__pill");
+    expect(pill?.textContent).not.toContain("Start agy");
+    // The actual provider error is preserved in the detail.
+    expect(pill?.getAttribute("aria-label")).toContain("Codex: Some unrelated codex error");
+    // No identity leak in the detail either.
+    expect(pill?.getAttribute("aria-label")).not.toContain("Claude");
+  });
+
+  it("keeps normal Antigravity Claude/Gemini labels unchanged without an error", async () => {
+    // Cadence-less fallback path with the legacy session label, mirroring the
+    // existing `prefers provider.primaryLabel for the session fallback label`
+    // coverage — the visible "Claude" label must survive when there is no error.
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      cadenceless("antigravity", "Antigravity", { primaryLabel: "Claude" }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({
+        enabledProviders: ["antigravity"],
+        providerMetrics: { antigravity: "session" },
+      }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({
+        enabledProviders: ["antigravity"],
+        providerMetrics: { antigravity: "session" },
+      }),
+    );
+    await waitFor(() => {
+      const metrics = Array.from(
+        container.querySelectorAll(".floatbar__metric"),
+        (node) => node.textContent,
+      );
+      // Visible Claude label + 10% value, no overlay.
+      expect(metrics.some((text) => text?.includes("Claude 10%"))).toBe(true);
+    });
+    const pill = container.querySelector(".floatbar__pill");
+    expect(pill?.textContent).not.toContain("Start agy");
+    expect(pill?.getAttribute("aria-label")).toContain("Antigravity: Claude: 10% used");
   });
 
   it("renders a locale-independent inline reset on the fallback metric", async () => {
@@ -771,9 +872,9 @@ describe("FloatBar", () => {
       // The pill stays neutral; every displayed error dash metric is critical.
       expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
       expect(container.querySelectorAll(".floatbar__metric--crit").length).toBe(3);
-      // The pill detail must show three dashes, not stale percentages.
+      // The pill detail must show the error detail, not stale percentages.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
-        /^Claude: 5h: —\nweekly: —\nmonthly: —\nUpdated: /,
+        /^Claude: boom\nUpdated: /,
       );
     });
   });

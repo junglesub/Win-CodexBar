@@ -512,6 +512,7 @@ PanelReserveRunsOutInHours = Заканчивается через { "{}" }h
 FloatBarThirtyDayShort = 30 дней
 FloatBarNoProviders = Нет провайдеров
 FloatBarRemainingSuffix = оставшееся
+FloatBarAgyRunNeeded = Запустите agy
 BannerCheckingForUpdates = Проверка обновлений…
 BannerUpdateAvailablePrefix = Обновить
 BannerDownloadButton = Скачать

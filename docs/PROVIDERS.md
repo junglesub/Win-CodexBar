@@ -79,10 +79,20 @@ Upstream `docs/providers.md` is a large auto-strategy matrix (60+ providers) for
   five-hour bucket to primary (300 min) and weekly to secondary (10 080 min);
   monthly is not available and `model_specific` is left empty on a successful
   summary. `agy` stays tokenless; desktop matches keep the CSRF header + retry.
+  CLI detection recognizes `agy` / `agy.exe` and `antigravity-cli` /
+  `antigravity_cli` (with or without `.exe`) even when the executable path is
+  double-quoted in the Windows command line (e.g. `"C:\...\agy\bin\agy.exe"`).
   Unsupported/non-success responses (including the IDE's known 404), parse
   failures, a missing Gemini group, or no usable Gemini bucket fall back to the
   legacy `GetUserStatus` / `clientModelConfigs` parse unchanged. The endpoint is
   reverse-engineered and version-sensitive.
+
+  When the language server is not running, the desktop FloatBar shows a compact
+  localized "Start agy" overlay (`FloatBarAgyRunNeeded`) next to the Antigravity
+  icon instead of the legacy `session_label` ("Claude") identity; the full
+  not-running message stays on the pill's hover/accessibility detail. The
+  provider's legacy `session_label: "Claude"` is intentional for the Claude
+  model lane and must not be shown as the provider identity on error.
 
   Run `./scripts/antigravity-doctor.ps1` while Antigravity or `agy` is running
   to test process detection, local API discovery, quota summary, and fallback

@@ -819,6 +819,7 @@ locale_keys! {
     FloatBarThirtyDayShort,
     FloatBarNoProviders,
     FloatBarRemainingSuffix,
+    FloatBarAgyRunNeeded,
     FloatBarShowCost,
     FloatBarShowCostDescription,
 

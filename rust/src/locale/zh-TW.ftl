@@ -527,6 +527,7 @@ PanelReserveRunsOutInHours = { "{}" }小時後耗盡
 FloatBarThirtyDayShort = 30天
 FloatBarNoProviders = 無提供商
 FloatBarRemainingSuffix = 剩餘
+FloatBarAgyRunNeeded = 需啟動 agy
 BannerCheckingForUpdates = 正在檢查更新…
 BannerUpdateAvailablePrefix = 更新
 BannerDownloadButton = 下載

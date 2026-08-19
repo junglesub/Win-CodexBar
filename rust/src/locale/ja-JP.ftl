@@ -528,6 +528,7 @@ PanelReserveRunsOutInHours = 残り { "{}" }時間
 FloatBarThirtyDayShort = 30日
 FloatBarNoProviders = プロバイダーなし
 FloatBarRemainingSuffix = 残り
+FloatBarAgyRunNeeded = agy の起動が必要
 BannerCheckingForUpdates = 更新を確認中…
 BannerUpdateAvailablePrefix = 更新
 BannerDownloadButton = ダウンロード
