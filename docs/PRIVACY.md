@@ -3,9 +3,9 @@
 This is the privacy policy for **Win-CodexBar**, a Windows tray/desktop app that
 displays AI provider usage quotas on your own machine. It applies to the
 installer and portable builds published on
-[GitHub Releases](https://github.com/nesszer/Win-CodexBar/releases).
+[GitHub Releases](https://github.com/junglesub/Win-CodexBar/releases).
 
-Last updated: 2026-08-06.
+Last updated: 2026-08-19.
 
 ## Summary
 
@@ -14,8 +14,8 @@ Last updated: 2026-08-06.
 - Everything the app reads or stores stays on your device unless you
   explicitly configure a provider, in which case the app talks only to that
   provider's API using the credentials you supplied.
-- Update checks contact GitHub only (details below), with no identifiers or
-  usage data attached.
+- The in-app updater is currently disabled: the app makes no GitHub Releases
+  API or download requests.
 
 ## What the app collects
 
@@ -81,27 +81,25 @@ The app makes outbound connections only for the following purposes:
    to the corresponding provider, subject to that provider's own privacy
    policy. Optionally, provider *status pages* may be polled for incident
    status where that toggle is enabled.
-2. **Release/update checks against GitHub.** When you choose
-   "Check for Updates…" from the About tab — or if you explicitly enable
-   automatic update downloads in Settings (off by default) — the app sends a
-   plain GET request to the GitHub Releases API
-   (`https://api.github.com/repos/.../Win-CodexBar/releases`) to learn the
-   latest version. With your approval it then downloads the installer asset
-   from `github.com`. The downloaded installer is applied only after its
-   SHA-256 digest is re-verified against the digest GitHub computed for the
-   release asset. Update requests contain no identifiers, no usage data, and
-   no telemetry — they are ordinary GitHub API requests; GitHub's own privacy
-   statement applies to them.
+2. **The optional PowerShell installer, when you run it.** The
+   `scripts/install-personal.ps1` download script contacts GitHub
+   (`https://api.github.com/repos/junglesub/Win-CodexBar/...` and the release
+   asset URLs) only when you explicitly invoke it. It sends no identifiers,
+   no usage data, and no telemetry — only an ordinary GitHub API request to
+   resolve the release tag, followed by the installer download. GitHub's own
+   privacy statement applies to these requests.
 
-There is no other update or telemetry channel, and no request is made before
-you enable a provider or trigger an update check.
+There is no other update or telemetry channel. The in-app updater is currently
+disabled: the application itself does **not** contact GitHub for release
+checks or downloads, and no request is made before you enable a provider or
+run the installer script.
 
 ## Third-party data processors
 
 **None.** No analytics vendor, crash-reporting service, or other third party
 receives data from Win-CodexBar. The only external parties that ever see a
-request are (a) the AI providers you deliberately configure and (b) GitHub as
-the release host you contact for updates.
+request are (a) the AI providers you deliberately configure and (b) GitHub,
+only when you run the optional PowerShell installer script.
 
 ## Retention
 
@@ -127,4 +125,4 @@ material changes will also be noted in release notes.
 ## Contact
 
 Questions or data concerns: open an issue at
-<https://github.com/nesszer/Win-CodexBar/issues>.
+<https://github.com/junglesub/Win-CodexBar/issues>.

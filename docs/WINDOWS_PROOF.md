@@ -87,7 +87,9 @@ the list below. Check each item off in §4.
    near the tray. On multi-monitor setups it should appear on the
    display hosting the tray.
 3. **Right-click the tray icon** → native Windows context menu with
-   Pop Out / Refresh / Settings / Check for updates / Quit entries.
+   Pop Out / Refresh / Settings / About / Quit entries. The
+   **Check for updates** entry is temporarily removed while the in-app
+   updater is disabled.
 4. **Preferences window** opens from the tray menu or from the pop-out
    settings gear; all tabs render (General, Providers, Display, API
    keys, Cookies, Token accounts, Advanced, About).
@@ -105,9 +107,11 @@ the list below. Check each item off in §4.
 9. **Reset countdown** — pop-out card shows `Resets in Xh Ym` and
    re-renders at least once during a 1-minute stare (internal tick is
    30 s).
-10. **Update banner** — Advanced → Check for updates; when an update is
-    offered the banner appears at the top of the pop-out and dismiss /
-    download / install-and-restart buttons all respond.
+10. **Update banner** — temporarily disabled: the in-app updater is
+    deactivated (no startup check, no About controls, no tray
+    **Check for updates**, no banners, no install-on-quit). Verify the
+    About tab shows no update controls and the tray menu has no update
+    entry.
 
 ---
 
@@ -120,7 +124,8 @@ the list below. Check each item off in §4.
 - The following CLIs are **Windows-only** in this port and cannot be
   exercised on macOS/Linux: DPAPI-protected browser cookie import
   (Chrome/Edge), the single-instance lock via named mutex, and the
-  MSI-based auto-update channel.
+  installer-based update channel (currently dormant while the in-app
+  updater is disabled).
 - **`fSingleSessionPerUser`** (terminal-services policy): if the
   post-install tray icon does not appear on a multi-user Windows
   server, toggle
@@ -166,6 +171,6 @@ Tick each entry as it is verified on the Windows target.
 [ ] runtime.provider-order-persists
 [ ] runtime.chart-tooltip-visible
 [ ] runtime.reset-countdown-ticks
-[ ] runtime.update-banner-flow
+[ ] runtime.update-banner-flow (verify absent while updater disabled)
 [ ] runtime.single-instance-mutex
 ```

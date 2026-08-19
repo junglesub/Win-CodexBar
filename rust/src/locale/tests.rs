@@ -451,6 +451,30 @@ fn test_fluent_preserves_literal_placeholders_and_status_spacing() {
     );
 }
 
+#[test]
+fn test_about_copyright_before_identifies_junglesub_codexbar() {
+    assert_eq!(
+        get_text(Language::English, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. Based on"
+    );
+    assert_eq!(
+        get_text(Language::Japanese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。元プロジェクト："
+    );
+    assert_eq!(
+        get_text(Language::Russian, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. На основе"
+    );
+    assert_eq!(
+        get_text(Language::Chinese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。基于"
+    );
+    assert_eq!(
+        get_text(Language::ChineseTraditional, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。基於"
+    );
+}
+
 fn resource_key_names(resource: &str) -> HashSet<&str> {
     resource
         .lines()

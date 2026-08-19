@@ -36,8 +36,8 @@ $prerequisiteText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'instal
 Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
 Assert-True ($prerequisiteText -match '10\\.18\\.1') 'release prerequisite keeps pnpm 10.18.1 pinned'
 
-Assert-Equal (Normalize-GitHubRepository 'https://github.com/nesszer/Win-CodexBar.git') 'nesszer/win-codexbar' 'HTTPS canonical URL'
-Assert-Equal (Normalize-GitHubRepository 'git@github.com:nesszer/Win-CodexBar.git') 'nesszer/win-codexbar' 'SSH canonical URL'
+Assert-Equal (Normalize-GitHubRepository 'https://github.com/junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'HTTPS canonical URL'
+Assert-Equal (Normalize-GitHubRepository 'git@github.com:junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'SSH canonical URL'
 Assert-True (Test-CanonicalReleaseTag 'v1.2.3') 'canonical release tag accepted'
 Assert-True (-not (Test-CanonicalReleaseTag 'v1.2.3-rc.1')) 'prerelease tag rejected'
 Assert-True (-not (Test-CanonicalReleaseTag 'v01.2.3')) 'leading-zero tag rejected'

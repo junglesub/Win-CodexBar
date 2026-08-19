@@ -40,7 +40,7 @@
 
 param(
     [string]$Ref = "HEAD",
-    [string]$RepoUrl = "https://github.com/nesszer/Win-CodexBar.git",
+    [string]$RepoUrl = "https://github.com/junglesub/Win-CodexBar.git",
     [string]$WorkRoot = "C:\code\Win-CodexBar-release",
     [switch]$RefreshInstallerDependencies,
     [switch]$WarmCacheOnly,

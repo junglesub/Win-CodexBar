@@ -4,7 +4,9 @@ A Windows floating bar and system tray monitor for 56+ AI coding assistant quota
 
 [Website](https://junglesub.github.io/Win-CodexBar/) ·
 [Personal release](https://github.com/junglesub/Win-CodexBar/releases/tag/personal-latest) ·
-[Upstream project](https://github.com/nesszer/Win-CodexBar)
+[Repository](https://github.com/junglesub/Win-CodexBar) ·
+[Windows upstream](https://github.com/nesszer/Win-CodexBar) ·
+[Original macOS project](https://github.com/steipete/CodexBar)
 
 ![Win-CodexBar Float Bar overlay](https://github.com/user-attachments/assets/a9be3368-0a19-4890-93f9-064e80e81237)
 
@@ -97,4 +99,10 @@ pnpm --dir apps/desktop-tauri run tauri:dev
 ## More
 
 For providers, authentication, configuration, CLI usage, building, and full
-documentation, see [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar).
+documentation, see [junglesub/Win-CodexBar](https://github.com/junglesub/Win-CodexBar).
+This fork builds on the Windows port by [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar),
+originally created for macOS by [steipete/CodexBar](https://github.com/steipete/CodexBar).
+
+The in-app updater is temporarily disabled; install the latest build from the
+[personal release](https://github.com/junglesub/Win-CodexBar/releases/tag/personal-latest)
+instead.

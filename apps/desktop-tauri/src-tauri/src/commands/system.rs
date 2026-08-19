@@ -194,13 +194,16 @@ pub fn reanchor_tray_panel(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: tauri::AppHandle) {
-    let settings = Settings::load();
-    if settings.install_updates_on_quit
-        && let Some(state) = app.try_state::<std::sync::Mutex<crate::state::AppState>>()
-        && let Err(error) = super::updater::apply_ready_update(&state)
-    {
-        tracing::debug!("install-on-quit skipped: {error}");
-    }
+    // In-app updates are temporarily disabled until `personal-latest` release
+    // integration is designed. Install-on-quit is deactivated; the apply
+    // command and `install_updates_on_quit` setting remain dormant.
+    // let settings = Settings::load();
+    // if settings.install_updates_on_quit
+    //     && let Some(state) = app.try_state::<std::sync::Mutex<crate::state::AppState>>()
+    //     && let Err(error) = super::updater::apply_ready_update(&state)
+    // {
+    //     tracing::debug!("install-on-quit skipped: {error}");
+    // }
     app.exit(0);
 }
 
