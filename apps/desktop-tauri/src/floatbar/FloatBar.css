@@ -87,7 +87,6 @@ body.floatbar-window #root {
   padding: calc(1px * var(--floatbar-scale, 1)) calc(5px * var(--floatbar-scale, 1));
   min-height: calc(16px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   border: 1px solid rgba(255, 255, 255, 0.48);
@@ -115,7 +114,6 @@ body.floatbar-window #root {
   min-height: calc(16px * var(--floatbar-scale, 1));
   padding: calc(1px * var(--floatbar-scale, 1)) calc(6px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.48));
@@ -201,11 +199,23 @@ body.floatbar-window #root {
   min-height: calc(16px * var(--floatbar-scale, 1));
   padding: 0 calc(8px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   opacity: 0.75;
   font-weight: 500;
+}
+
+/* Custom pill background from Settings — authoritative for every pill
+ * surface; the later per-style `background` overrides were removed so they
+ * can't fight it. Opacity fills only the surfaces, never text/icon opacity. */
+.floatbar__pill,
+.floatbar__cost-pill,
+.floatbar__empty {
+  background: color-mix(
+    in srgb,
+    var(--floatbar-background-color) var(--floatbar-background-opacity),
+    transparent
+  );
 }
 
 /* ── Light-background mode ─────────────────────────────────────────────
@@ -218,7 +228,6 @@ body.floatbar-window #root {
 .floatbar--light-bg .floatbar__pill,
 .floatbar--light-bg .floatbar__cost-pill,
 .floatbar--light-bg .floatbar__empty {
-  background: rgba(248, 252, 255, 0.82);
   border-color: rgba(255, 255, 255, 0.64);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
@@ -278,7 +287,6 @@ body.floatbar-window #root {
 .floatbar--floating .floatbar__pill,
 .floatbar--floating .floatbar__cost-pill {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.22));
@@ -292,7 +300,6 @@ body.floatbar-window #root {
 }
 .floatbar--floating .floatbar__empty {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
@@ -302,7 +309,6 @@ body.floatbar-window #root {
 .floatbar--floating.floatbar--light-bg .floatbar__pill,
 .floatbar--floating.floatbar--light-bg .floatbar__cost-pill,
 .floatbar--floating.floatbar--light-bg .floatbar__empty {
-  background: rgba(255, 255, 255, 0.55);
   border-color: var(--brand, rgba(20, 22, 26, 0.25));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }

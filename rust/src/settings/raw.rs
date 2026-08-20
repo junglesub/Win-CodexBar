@@ -141,6 +141,10 @@ pub(super) struct RawSettings {
     float_bar_enabled: bool,
     #[serde(default = "default_float_bar_opacity")]
     float_bar_opacity: u8,
+    #[serde(default = "default_float_bar_background_color")]
+    float_bar_background_color: String,
+    #[serde(default = "default_float_bar_background_opacity")]
+    float_bar_background_opacity: u8,
     #[serde(default = "default_float_bar_scale")]
     float_bar_scale: u8,
     #[serde(default = "default_float_bar_orientation")]
@@ -249,6 +253,8 @@ impl Default for RawSettings {
             powertoys_status_pipe_enabled: s.powertoys_status_pipe_enabled,
             float_bar_enabled: s.float_bar_enabled,
             float_bar_opacity: s.float_bar_opacity,
+            float_bar_background_color: s.float_bar_background_color,
+            float_bar_background_opacity: s.float_bar_background_opacity,
             float_bar_scale: s.float_bar_scale,
             float_bar_orientation: s.float_bar_orientation,
             float_bar_style: s.float_bar_style,
@@ -533,6 +539,12 @@ impl From<RawSettings> for Settings {
             powertoys_status_pipe_enabled: raw.powertoys_status_pipe_enabled,
             float_bar_enabled: raw.float_bar_enabled,
             float_bar_opacity: clamp_float_bar_opacity(raw.float_bar_opacity),
+            float_bar_background_color: normalize_float_bar_background_color(
+                &raw.float_bar_background_color,
+            ),
+            float_bar_background_opacity: clamp_float_bar_background_opacity(
+                raw.float_bar_background_opacity,
+            ),
             float_bar_scale: clamp_float_bar_scale(raw.float_bar_scale),
             float_bar_orientation: normalize_float_bar_orientation(&raw.float_bar_orientation),
             float_bar_style: normalize_float_bar_style(&raw.float_bar_style),

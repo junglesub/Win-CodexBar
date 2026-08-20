@@ -206,6 +206,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     providerMetrics: {},
     floatBarEnabled: true,
     floatBarOpacity: 80,
+    floatBarBackgroundColor: "#FFFFFF",
+    floatBarBackgroundOpacity: 8,
     floatBarScale: 100,
     floatBarOrientation: "horizontal",
     floatBarStyle: "floating",
@@ -1163,6 +1165,42 @@ describe("FloatBar", () => {
       const bar = container.querySelector<HTMLElement>(".floatbar");
       expect(bar).not.toBeNull();
       expect(bar?.style.getPropertyValue("--floatbar-scale")).toBe("1.5");
+    });
+  });
+
+  it("applies the custom pill background as CSS variables and live-updates", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarBackgroundColor: "#123456", floatBarBackgroundOpacity: 37 }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ floatBarBackgroundColor: "#123456", floatBarBackgroundOpacity: 37 }),
+    );
+
+    await waitFor(() => {
+      const bar = container.querySelector<HTMLElement>(".floatbar");
+      expect(bar).not.toBeNull();
+      expect(bar?.style.getPropertyValue("--floatbar-background-color")).toBe("#123456");
+      expect(bar?.style.getPropertyValue("--floatbar-background-opacity")).toBe("37%");
+    });
+
+    // A settings patch broadcasts `float-bar-config-changed`; the open surface
+    // re-reads the snapshot and updates without recreating its window.
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarBackgroundColor: "#ABCDEF", floatBarBackgroundOpacity: 65 }),
+    );
+    const configHandler = eventMocks.listen.mock.calls.find(
+      ([name]) => name === "float-bar-config-changed",
+    )?.[1] as () => void;
+    await act(async () => {
+      configHandler?.();
+    });
+
+    await waitFor(() => {
+      const bar = container.querySelector<HTMLElement>(".floatbar");
+      expect(bar?.style.getPropertyValue("--floatbar-background-color")).toBe("#ABCDEF");
+      expect(bar?.style.getPropertyValue("--floatbar-background-opacity")).toBe("65%");
     });
   });
 

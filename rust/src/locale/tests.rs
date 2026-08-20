@@ -470,7 +470,10 @@ fn test_about_copyright_before_identifies_junglesub_codexbar() {
         "junglesub/CodexBar。基于"
     );
     assert_eq!(
-        get_text(Language::ChineseTraditional, LocaleKey::AboutCopyrightBefore),
+        get_text(
+            Language::ChineseTraditional,
+            LocaleKey::AboutCopyrightBefore
+        ),
         "junglesub/CodexBar。基於"
     );
 }

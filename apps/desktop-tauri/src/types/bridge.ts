@@ -222,6 +222,10 @@ export interface SettingsSnapshot {
   floatBarEnabled: boolean;
   /** 30..=100 — clamped server-side. */
   floatBarOpacity: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor: string;
+  /** 0..=100, clamped server-side. Affects only the pill surfaces. */
+  floatBarBackgroundOpacity: number;
   /** 75..=200 — clamped server-side. */
   floatBarScale: number;
   floatBarOrientation: FloatBarOrientation;
@@ -297,6 +301,10 @@ export interface SettingsUpdate {
   providerMetrics?: Record<string, MetricPreference>;
   floatBarEnabled?: boolean;
   floatBarOpacity?: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor?: string;
+  /** 0..=100, clamped server-side. */
+  floatBarBackgroundOpacity?: number;
   floatBarScale?: number;
   floatBarOrientation?: FloatBarOrientation;
   floatBarStyle?: FloatBarStyle;

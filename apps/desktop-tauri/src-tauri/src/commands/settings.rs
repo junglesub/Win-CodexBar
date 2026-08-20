@@ -58,6 +58,8 @@ pub struct SettingsUpdate {
     pub provider_metrics: Option<std::collections::HashMap<String, String>>,
     pub float_bar_enabled: Option<bool>,
     pub float_bar_opacity: Option<u8>,
+    pub float_bar_background_color: Option<String>,
+    pub float_bar_background_opacity: Option<u8>,
     pub float_bar_scale: Option<u8>,
     pub float_bar_orientation: Option<String>,
     pub float_bar_style: Option<String>,
@@ -334,6 +336,8 @@ impl SettingsUpdate {
         crate::floatbar::SettingsPatch {
             enabled: self.float_bar_enabled,
             opacity: self.float_bar_opacity,
+            background_color: self.float_bar_background_color.clone(),
+            background_opacity: self.float_bar_background_opacity,
             scale: self.float_bar_scale,
             orientation: self.float_bar_orientation.clone(),
             style: self.float_bar_style.clone(),

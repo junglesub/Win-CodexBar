@@ -667,3 +667,7 @@ DeepSeekPricingCurrent = Current local time:
 DeepSeekPricingNext = Next transition:
 DeepSeekPricingEffective = Effective local time:
 DeepSeekPricingAdvice = Official schedule: peak 01:00-04:00 and 06:00-10:00 UTC; off-peak is half-price.
+
+FloatBarBackgroundColor = 배경색
+FloatBarBackgroundOpacity = 배경 불투명도
+FloatBarResetBackground = 배경 기본값 복원

@@ -72,6 +72,26 @@ $env:CODEXBAR_PROOF_MODE = "settings:menu"
 # then launch the desktop binary
 ```
 
+## Floating Bar background (settings.json)
+
+The Floating Bar pill surfaces (provider pills, cost pills, and the empty
+state) are styled by two persisted keys independent of the whole-bar opacity:
+
+| Key | Default | Valid range | Notes |
+|-----|---------|-------------|-------|
+| `float_bar_background_color` | `#FFFFFF` | `#RRGGBB` (six hex digits, case-insensitive) | Applies to provider pills, cost pills, and the empty state in both Floating and Taskbar styles. Invalid values normalize to `#FFFFFF`; stored normalized as uppercase. |
+| `float_bar_background_opacity` | `8` | `0..=100` (integer percent) | Fills only the pill/empty surfaces — it never changes text or provider icon opacity. |
+
+`float_bar_opacity` remains the separate **whole-bar/window** opacity control
+(`30..=100`, default `80`) and affects the complete Floating Bar surface. The
+background opacity affects **only** the pill surfaces, so the two controls are
+independent and combine independently.
+
+Both background keys fall back to their defaults when absent from an existing
+`settings.json` (no migration step needed), and invalid persisted/IPC values
+are normalized/clamped server-side. Reset in Settings writes both defaults
+(`#FFFFFF`, `8`) in a single patch.
+
 ## Source mode
 
 CLI `--source` values on this port (see `codexbar usage --help`): `auto`, `web`, `cli`, `oauth`.

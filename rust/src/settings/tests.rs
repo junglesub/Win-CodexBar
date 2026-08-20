@@ -23,6 +23,8 @@ fn test_settings_default() {
     assert!(settings.promote_tray_icon);
     assert!(settings.claude_daily_routines_usage_visible);
     assert!(!settings.low_power_mode);
+    assert_eq!(settings.float_bar_background_color, "#FFFFFF");
+    assert_eq!(settings.float_bar_background_opacity, 8);
 }
 
 #[test]
@@ -281,6 +283,33 @@ fn float_bar_style_normalization_rejects_unknown_values() {
 }
 
 #[test]
+fn float_bar_background_defaults_and_normalizers() {
+    assert_eq!(Settings::default().float_bar_background_color, "#FFFFFF");
+    assert_eq!(Settings::default().float_bar_background_opacity, 8);
+
+    assert_eq!(normalize_float_bar_background_color("#12abEF"), "#12ABEF");
+    assert_eq!(normalize_float_bar_background_color("#FFF"), "#FFFFFF");
+    assert_eq!(normalize_float_bar_background_color("12ABEF"), "#FFFFFF");
+    assert_eq!(normalize_float_bar_background_color("#12ABEF80"), "#FFFFFF");
+    assert_eq!(normalize_float_bar_background_color("#GG0000"), "#FFFFFF");
+
+    assert_eq!(clamp_float_bar_background_opacity(0), 0);
+    assert_eq!(clamp_float_bar_background_opacity(8), 8);
+    assert_eq!(clamp_float_bar_background_opacity(100), 100);
+    assert_eq!(clamp_float_bar_background_opacity(255), 100);
+}
+
+#[test]
+fn float_bar_background_defaults_when_missing_from_disk() {
+    let loaded: Settings = serde_json::from_str(
+        r#"{ "enabled_providers": ["claude", "codex"], "refresh_interval_secs": 300 }"#,
+    )
+    .expect("parse settings without float bar background");
+    assert_eq!(loaded.float_bar_background_color, "#FFFFFF");
+    assert_eq!(loaded.float_bar_background_opacity, 8);
+}
+
+#[test]
 fn float_bar_settings_round_trip_through_raw() {
     // Serialize a Settings with custom float-bar values then deserialize
     // through the `from = "RawSettings"` path — values must survive intact
@@ -288,6 +317,8 @@ fn float_bar_settings_round_trip_through_raw() {
     let s = Settings {
         float_bar_enabled: true,
         float_bar_opacity: 65,
+        float_bar_background_color: "#12abEF".to_string(),
+        float_bar_background_opacity: 37,
         float_bar_scale: 140,
         float_bar_orientation: "vertical".to_string(),
         float_bar_style: "taskbar".to_string(),
@@ -303,6 +334,8 @@ fn float_bar_settings_round_trip_through_raw() {
     let back: Settings = serde_json::from_str(&json).expect("deserialize");
     assert!(back.float_bar_enabled);
     assert_eq!(back.float_bar_opacity, 65);
+    assert_eq!(back.float_bar_background_color, "#12ABEF");
+    assert_eq!(back.float_bar_background_opacity, 37);
     assert_eq!(back.float_bar_scale, 140);
     assert_eq!(back.float_bar_orientation, "vertical");
     assert_eq!(back.float_bar_style, "taskbar");
@@ -316,7 +349,7 @@ fn float_bar_settings_round_trip_through_raw() {
 #[test]
 fn float_bar_raw_clamps_out_of_range_opacity_on_load() {
     // Simulate an externally-edited settings.json with a wild opacity.
-    let json = r#"{
+    let json = r##"{
             "enabled_providers": [],
             "refresh_interval_secs": 300,
             "start_minimized": false,
@@ -333,12 +366,16 @@ fn float_bar_raw_clamps_out_of_range_opacity_on_load() {
             "disable_keychain_access": false,
             "hide_personal_info": false,
             "float_bar_opacity": 250,
+            "float_bar_background_color": "#GG0000",
+            "float_bar_background_opacity": 255,
             "float_bar_scale": 250,
             "float_bar_orientation": "diagonal",
             "float_bar_style": "glass"
-        }"#;
+        }"##;
     let loaded: Settings = serde_json::from_str(json).expect("parse");
     assert_eq!(loaded.float_bar_opacity, 100);
+    assert_eq!(loaded.float_bar_background_color, "#FFFFFF");
+    assert_eq!(loaded.float_bar_background_opacity, 100);
     assert_eq!(loaded.float_bar_scale, 200);
     assert_eq!(loaded.float_bar_orientation, "horizontal");
     assert_eq!(loaded.float_bar_style, "floating");

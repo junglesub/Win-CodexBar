@@ -8,6 +8,9 @@ import type {
   SettingsUpdate,
 } from "../types/bridge";
 
+const DEFAULT_BACKGROUND_COLOR = "#FFFFFF";
+const DEFAULT_BACKGROUND_OPACITY = 8;
+
 interface Props {
   settings: SettingsSnapshot;
   saving: boolean;
@@ -52,6 +55,12 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
   };
   const commitScale = () => {
     scale.commit(scale.draft, (value) => set({ floatBarScale: value }));
+  };
+  const backgroundOpacity = useDraftNumber(settings.floatBarBackgroundOpacity);
+  const commitBackgroundOpacity = () => {
+    backgroundOpacity.commit(backgroundOpacity.draft, (value) =>
+      set({ floatBarBackgroundOpacity: value }),
+    );
   };
 
   return (
@@ -115,6 +124,53 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
             onKeyUp={commitOpacity}
             aria-label={t("FloatBarOpacityAriaLabel")}
           />
+        </Field>
+        <Field label={t("FloatBarBackgroundColor")}>
+          <input
+            type="color"
+            value={settings.floatBarBackgroundColor}
+            disabled={saving || !settings.floatBarEnabled}
+            onChange={(e) =>
+              set({ floatBarBackgroundColor: e.target.value.toUpperCase() })
+            }
+            aria-label={t("FloatBarBackgroundColor")}
+          />
+        </Field>
+        <Field
+          label={`${t("FloatBarBackgroundOpacity")} (${backgroundOpacity.draft}%)`}
+        >
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={backgroundOpacity.draft}
+            disabled={saving || !settings.floatBarEnabled}
+            onChange={(e) => backgroundOpacity.setDraft(Number(e.target.value))}
+            onPointerUp={commitBackgroundOpacity}
+            onTouchEnd={commitBackgroundOpacity}
+            onBlur={commitBackgroundOpacity}
+            onKeyUp={commitBackgroundOpacity}
+            aria-label={t("FloatBarBackgroundOpacity")}
+          />
+          <button
+            type="button"
+            className="btn btn--ghost"
+            disabled={
+              saving ||
+              !settings.floatBarEnabled ||
+              (settings.floatBarBackgroundColor === DEFAULT_BACKGROUND_COLOR &&
+                settings.floatBarBackgroundOpacity === DEFAULT_BACKGROUND_OPACITY)
+            }
+            onClick={() =>
+              set({
+                floatBarBackgroundColor: DEFAULT_BACKGROUND_COLOR,
+                floatBarBackgroundOpacity: DEFAULT_BACKGROUND_OPACITY,
+              })
+            }
+          >
+            {t("FloatBarResetBackground")}
+          </button>
         </Field>
         <Field
           label={`${t("FloatBarSize")} (${scale.draft}%)`}

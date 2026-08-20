@@ -959,6 +959,9 @@ locale_keys! {
     FloatBarInvertColorsHelper,
     FloatBarClickThrough,
     FloatBarClickThroughHelper,
+    FloatBarBackgroundColor,
+    FloatBarBackgroundOpacity,
+    FloatBarResetBackground,
 
     // Tauri desktop shell — About / app identity
     AppName,

@@ -710,6 +710,11 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
         {
           opacity: opacityFraction,
           "--floatbar-scale": scale,
+          "--floatbar-background-color": settings.floatBarBackgroundColor,
+          "--floatbar-background-opacity": `${Math.max(
+            0,
+            Math.min(100, settings.floatBarBackgroundOpacity),
+          )}%`,
         } as CSSProperties
       }
     >
