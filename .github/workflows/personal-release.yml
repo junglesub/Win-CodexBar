@@ -3,6 +3,9 @@ name: Personal release
 on:
   push:
     branches: [personal]
+    paths-ignore:
+      - ".github/workflows/**"
+      - "**/*.md"
   workflow_dispatch:
 
 permissions:
