@@ -18,6 +18,7 @@ mod surface_target;
 mod tray_bridge;
 mod tray_menu;
 mod tray_visibility;
+mod usage_metric;
 mod window_positioner;
 
 use std::sync::Mutex;
@@ -123,6 +124,18 @@ fn main() {
 
     let mut initial_state = AppState::new();
     initial_state.proof_config = proof_config;
+    // Proof-harness seed: CODEXBAR_SEED_USAGE_JSON plants one synthetic Codex
+    // ProviderUsageSnapshot before the event loop and any WebView read. The
+    // cache timestamp makes the seeded cache count as fresh so the first
+    // frontend refresh-if-stale call does not evict the synthetic data.
+    if let Some(snapshot) = proof_harness::seed_usage_snapshot_from_env() {
+        tracing::info!(
+            "proof-harness: seeded provider snapshot for '{}'",
+            snapshot.provider_id
+        );
+        initial_state.provider_cache.push(snapshot);
+        initial_state.provider_cache_updated_at = Some(std::time::Instant::now());
+    }
 
     tauri::Builder::default()
         .manage(Mutex::new(initial_state))
@@ -190,9 +203,11 @@ fn main() {
             commands::get_provider_chart_data,
             commands::get_provider_local_usage_summary,
             commands::get_usage_spend_summary,
+            commands::get_spend_contract,
             commands::get_codex_workspaces_snapshot,
             commands::reorder_providers,
             commands::set_provider_cookie_source,
+            commands::set_provider_usage_source,
             commands::get_provider_cookie_source_options,
             commands::set_provider_region,
             commands::get_provider_region_options,

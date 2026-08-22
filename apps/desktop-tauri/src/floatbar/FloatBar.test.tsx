@@ -87,13 +87,18 @@ function snapshot(
       resetDescription?: string | null;
       windowMinutes?: number | null;
     };
+<<<<<<< HEAD
     secondaryLabel?: string;
     modelSpecific?: {
+=======
+    selected?: {
+>>>>>>> upstream/main
       used: number;
       exhausted?: boolean;
       informational?: boolean;
       resetsAt?: string | null;
       resetDescription?: string | null;
+<<<<<<< HEAD
       windowMinutes?: number | null;
     } | null;
     tertiary?: {
@@ -105,11 +110,25 @@ function snapshot(
       windowMinutes?: number | null;
     };
     tertiaryLabel?: string;
+=======
+    };
+>>>>>>> upstream/main
   } = {},
 ): ProviderUsageSnapshot {
+  const primary = rateWindow(used, opts);
+  const secondary = opts.secondary
+    ? rateWindow(opts.secondary.used, opts.secondary)
+    : null;
+  const selectedMetric = opts.selected
+    ? rateWindow(opts.selected.used, opts.selected)
+    : primary.isInformational && secondary && !secondary.isInformational
+      ? secondary
+      : primary;
+
   return {
     providerId: id,
     displayName: display,
+<<<<<<< HEAD
     primary: rateWindow(used, {
       exhausted: opts.exhausted,
       informational: opts.informational,
@@ -142,6 +161,13 @@ function snapshot(
       : null,
     tertiary: opts.tertiary ? rateWindow(opts.tertiary.used, opts.tertiary) : null,
     tertiaryLabel: opts.tertiaryLabel,
+=======
+    primary,
+    selectedMetric,
+    secondary,
+    modelSpecific: null,
+    tertiary: null,
+>>>>>>> upstream/main
     extraRateWindows: [],
     cost: null,
     planName: null,
@@ -161,7 +187,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     refreshIntervalSecs: 300,
     adaptiveRefresh: false,
     refreshAllProvidersOnMenuOpen: false,
-  lowPowerMode: false,
+    lowPowerMode: false,
     startAtLogin: false,
     startMinimized: false,
     showNotifications: true,
@@ -217,8 +243,11 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarShowResetInline: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
+    claudeAllowReadingClaudeCodeCredentials: false,
     alibabaTokenPlanRegion: "cn",
     weeklyProgressWorkDays: null,
+    costSummaryDisplayStyle: "compact",
+    providerAccentColors: {},
     ...overrides,
   };
 }
@@ -910,18 +939,44 @@ describe("FloatBar", () => {
     });
   });
 
-  it("keeps a normal primary window when a secondary window is available", async () => {
+  it("uses the selected session window when a weekly window is available", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 20, { secondary: { used: 90 } }),
     ]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ providerMetrics: { claude: "session" } }),
+    );
 
-    const { container } = renderFloatBar(bootstrap());
+    const { container } = renderFloatBar(
+      bootstrap({ providerMetrics: { claude: "session" } }),
+    );
     await waitFor(() => {
       // primary defaults to 5h; secondary defaults to weekly.
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["20%", "90%", "—"]);
+    });
+  });
+
+  it("uses the selected weekly window in the floating bar", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("codex", "Codex", 0, {
+        informational: true,
+        secondary: { used: 37 },
+        selected: { used: 37 },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ providerMetrics: { codex: "weekly" } }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ providerMetrics: { codex: "weekly" } }),
+    );
+    await waitFor(() => {
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("title")).toContain(
+        "Codex: 37% used",
+      );
     });
   });
 
@@ -988,17 +1043,21 @@ describe("FloatBar", () => {
     });
   });
 
-  it("sorts providers by their effective rate window", async () => {
+  it("sorts providers by their selected rate window", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 90, {
-        informational: true,
         secondary: { used: 20 },
+        selected: { used: 20 },
       }),
       snapshot("codex", "Codex", 50),
     ]);
-    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ providerMetrics: { claude: "weekly" } }),
+    );
 
-    const { container } = renderFloatBar(bootstrap());
+    const { container } = renderFloatBar(
+      bootstrap({ providerMetrics: { claude: "weekly" } }),
+    );
     await waitFor(() => {
       // claude's informational primary is absent → max used is 20 (weekly);
       // codex primary 5h 50% sorts first. Assert only the slot portion so

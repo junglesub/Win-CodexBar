@@ -258,8 +258,13 @@ Last30DaysCostFull = Últimos 30 días: ${ "{:.2}" } • { "{}" } tokens
 ProviderSettingsTitle = Configuración
 ProviderAccountsTitle = Cuentas
 ProviderOptionsTitle = Opciones
+<<<<<<< HEAD
 MenuBarMetric = Métrica
 MenuBarMetricHelper = Elegir qué ventana controla el porcentaje de la barra de menú y la métrica de respaldo de Float Bar.
+=======
+MenuBarMetric = Métrica de las barras de menú y flotante
+MenuBarMetricHelper = Elige qué ventana controla los porcentajes de las barras de menú y flotante.
+>>>>>>> upstream/main
 UsageSource = Fuente de uso
 ProviderNoCodexAccountsDetected = Aún no se detectaron cuentas de Codex.
 ProviderCodexAutoImportHelp = Importa automáticamente cookies del navegador para extras del panel.
@@ -511,6 +516,8 @@ DetailCostRemaining = Restante
 DetailCostBalance = Saldo
 DetailCostResets = Reinicia
 DetailChartCost = Costo (30 días)
+DetailChartTokens = Tokens (30 días)
+DetailChartRefreshing = Actualizando…
 DetailChartCredits = Créditos usados (30 días)
 DetailChartUsageBreakdown = Uso por servicio (30 días)
 DetailChartEmpty = Sin datos de gráfico aún.
@@ -680,7 +687,21 @@ DeepSeekPricingCurrent = Current local time:
 DeepSeekPricingNext = Next transition:
 DeepSeekPricingEffective = Effective local time:
 DeepSeekPricingAdvice = Official schedule: peak 01:00-04:00 and 06:00-10:00 UTC; off-peak is half-price.
+<<<<<<< HEAD
 
 FloatBarBackgroundColor = Color de fondo
 FloatBarBackgroundOpacity = Opacidad del fondo
 FloatBarResetBackground = Restablecer fondo
+=======
+MistralMonthlySpend = Gasto de API mensual
+MistralMonthlySpendHelper = Uso de API del mes actual para cuentas de pago por uso de Mistral.
+CostSummaryDisplayStyle = Estilo de resumen de costos
+CostSummaryDisplayStyleHelper = Elige cómo se muestran los costos en cada tarjeta de proveedor.
+CostSummaryStyleCompact = Compacto
+CostSummaryStyleDetailed = Detallado
+CostSummaryStyleHidden = Oculto
+ProviderAccentColor = Color de acento
+ProviderAccentColorHelper = Anula el color de marca usado en barras de uso y gráficos. Introduce un color hexadecimal como #FF5733.
+ProviderAccentColorReset = Restablecer predeterminado
+ProviderAccentColorInvalid = Color hexadecimal no válido. Usa el formato #RRGGBB, por ejemplo #FF5733.
+>>>>>>> upstream/main

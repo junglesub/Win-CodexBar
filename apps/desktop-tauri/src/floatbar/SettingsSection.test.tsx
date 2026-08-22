@@ -7,6 +7,7 @@ vi.mock("../hooks/useLocale", () => ({
   useLocale: () => ({ t: (key: string) => key }),
 }));
 
+<<<<<<< HEAD
 function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
   return {
     floatBarEnabled: true,
@@ -26,6 +27,23 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     ...overrides,
   } as SettingsSnapshot;
 }
+=======
+const settings = {
+  floatBarEnabled: true,
+  floatBarOpacity: 90,
+  floatBarScale: 100,
+  floatBarOrientation: "horizontal",
+  floatBarStyle: "floating",
+  floatBarShowCost: false,
+  claudeDailyRoutinesUsageVisible: true,
+  claudeAllowReadingClaudeCodeCredentials: false,
+  alibabaTokenPlanRegion: "cn",
+  weeklyProgressWorkDays: null,
+  floatBarShowResetInline: false,
+  floatBarDarkText: false,
+  floatBarClickThrough: false,
+} as unknown as SettingsSnapshot;
+>>>>>>> upstream/main
 
 describe("FloatBar settings", () => {
   it("renders one cost toggle", () => {

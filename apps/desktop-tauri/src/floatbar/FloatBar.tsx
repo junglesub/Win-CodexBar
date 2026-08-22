@@ -18,8 +18,11 @@ import {
   getSettingsSnapshot,
   refreshProvidersIfStale,
 } from "../lib/tauri";
+<<<<<<< HEAD
 import { formatRelativeUpdated } from "../lib/relativeTime";
 import type { LocaleKey } from "../i18n/keys";
+=======
+>>>>>>> upstream/main
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
@@ -379,6 +382,7 @@ function ProviderPill({
   now: number;
   t: (key: LocaleKey) => string;
 }) {
+<<<<<<< HEAD
   const slots = selectFloatBarUsageSlots(provider);
   const fallback = Object.values(slots).some((window) => window !== null)
     ? null
@@ -387,6 +391,17 @@ function ProviderPill({
   const agyOverlay = isAntigravityNotRunningError(provider)
     ? t("FloatBarAgyRunNeeded")
     : null;
+=======
+  const rateWindow = provider.selectedMetric;
+  const remaining = Math.max(0, Math.min(100, rateWindow.remainingPercent));
+  const used = Math.max(0, Math.min(100, rateWindow.usedPercent));
+  const displayPercent = showAsUsed ? used : remaining;
+  const displaySuffix = showAsUsed ? usedSuffix : remainingSuffix;
+  const exhausted = rateWindow.isExhausted || provider.error;
+  let tone: "ok" | "warn" | "crit" = "ok";
+  if (exhausted || remaining <= critRemaining) tone = "crit";
+  else if (remaining <= highRemaining) tone = "warn";
+>>>>>>> upstream/main
 
   // One reset hook per fixed slot plus one for the fallback, all called
   // unconditionally in stable order.
@@ -566,8 +581,12 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     }
     return [...list].sort(
       (a, b) =>
+<<<<<<< HEAD
         maxFloatBarUsedPercent(b, settings.providerMetrics[b.providerId]) -
         maxFloatBarUsedPercent(a, settings.providerMetrics[a.providerId]),
+=======
+        b.selectedMetric.usedPercent - a.selectedMetric.usedPercent,
+>>>>>>> upstream/main
     );
   }, [providers, settings.enabledProviders, filterIds, settings.providerMetrics]);
 

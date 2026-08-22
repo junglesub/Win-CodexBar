@@ -43,6 +43,7 @@ export type MetricPreference =
   | "tertiary"
   | "credits"
   | "extraUsage"
+  | "monthlyPlan"
   | "average";
 
 export type Language =
@@ -52,7 +53,8 @@ export type Language =
   | "japanese"
   | "korean"
   | "spanish"
-  | "russian";
+  | "russian"
+  | "turkish";
 
 /** Language catalog entry from the Rust backend. */
 export type LanguageOption = {
@@ -67,6 +69,9 @@ export type UpdateChannel = "stable" | "beta";
 export type ThemePreference = "auto" | "light" | "dark";
 
 export type MenuBarDisplayMode = "minimal" | "compact" | "detailed";
+
+/** How cost is rendered on provider MenuCards (#2976). */
+export type CostSummaryDisplayStyle = "compact" | "detailed" | "hidden";
 export type FloatBarOrientation = "horizontal" | "vertical";
 export type FloatBarStyle = "floating" | "taskbar";
 
@@ -171,6 +176,7 @@ export interface SettingsSnapshot {
   adaptiveRefresh: boolean;
   refreshAllProvidersOnMenuOpen: boolean;
   lowPowerMode: boolean;
+  lowPowerModePreference?: "off" | "on" | "automatic";
   startAtLogin: boolean;
   startMinimized: boolean;
   showNotifications: boolean;
@@ -235,7 +241,11 @@ export interface SettingsSnapshot {
   floatBarProviderIds: string[];
   /** When true, render with dark text/glass for light desktops. */
   floatBarDarkText: boolean;
+<<<<<<< HEAD
   /** When true, append each quota window's compact reset beside its percentage. */
+=======
+  /** When true, render the selected metric's next reset inline in each provider pill. */
+>>>>>>> upstream/main
   floatBarShowResetInline: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
@@ -243,10 +253,24 @@ export interface SettingsSnapshot {
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
   claudeDailyRoutinesUsageVisible: boolean;
+  /**
+   * Explicit consent to read (and refresh) Claude Code's own OAuth
+   * credentials for the Claude provider. Default false — without consent
+   * OAuth stays closed and Auto falls back to labeled reduced-fidelity CLI
+   * usage (upstream #2634/#2745).
+   */
+  claudeAllowReadingClaudeCodeCredentials: boolean;
   /** Alibaba Token Plan region: cn | intl | cn-personal | intl-personal. */
   alibabaTokenPlanRegion: string;
   /** Optional work-week length [2,6] for session-equivalent weekly forecast. */
   weeklyProgressWorkDays?: number | null;
+  /** How cost is rendered on provider cards (#2976). */
+  costSummaryDisplayStyle: CostSummaryDisplayStyle;
+  /** Opt-in read-only OpenCodex usage.jsonl import. */
+  openCodexUsageLogsEnabled?: boolean;
+  hideNativeCodexCostWhenOpenCodexPresent?: boolean;
+  /** Per-provider accent color overrides (CLI name → hex color, #2972). */
+  providerAccentColors: Record<string, string>;
 }
 
 /** Partial settings object — only include fields you want to change. */
@@ -256,6 +280,7 @@ export interface SettingsUpdate {
   adaptiveRefresh?: boolean;
   refreshAllProvidersOnMenuOpen?: boolean;
   lowPowerMode?: boolean;
+  lowPowerModePreference?: "off" | "on" | "automatic";
   startAtLogin?: boolean;
   startMinimized?: boolean;
   showNotifications?: boolean;
@@ -295,6 +320,7 @@ export interface SettingsUpdate {
   trayScalePercent?: number;
   powertoysStatusPipeEnabled?: boolean;
   claudeAvoidKeychainPrompts?: boolean;
+  claudeAllowReadingClaudeCodeCredentials?: boolean;
   codexSparkUsageVisible?: boolean;
   disableKeychainAccess?: boolean;
   /** Map of provider CLI name → metric preference label. */
@@ -317,6 +343,10 @@ export interface SettingsUpdate {
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;
   weeklyProgressWorkDays?: number | null;
+  costSummaryDisplayStyle?: CostSummaryDisplayStyle;
+  openCodexUsageLogsEnabled?: boolean;
+  hideNativeCodexCostWhenOpenCodexPresent?: boolean;
+  providerAccentColors?: Record<string, string | null>;
 }
 
 export interface UsageThresholdOverride {
@@ -340,6 +370,57 @@ export interface UsageSpendRow {
 
 export interface UsageSpendSummary {
   rows: UsageSpendRow[];
+  contract: SpendContract;
+}
+
+export type CostProvenance = "listPriceEstimate" | "vendorMetered" | "mixed" | "unknown";
+
+export interface CostCoverageCounts {
+  priced: number;
+  unpriced: number;
+  unmetered: number;
+  estimated: number;
+}
+
+export interface SpendTokenMix {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  reasoningTokens: number | null;
+}
+
+export interface SpendModelRow {
+  model: string;
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  customPricing: boolean;
+}
+
+export interface SpendDailyPoint {
+  day: string;
+  costUsd: number | null;
+  totalTokens: number | null;
+}
+
+export interface SpendActivityCell {
+  weekday: number;
+  hour: number;
+  conversations: number;
+}
+
+export interface ImportedSpendSource {
+  sourceId: string;
+  displayName: string;
+  requestCount: number;
+  conversationCount: number;
+  tokenMix: SpendTokenMix;
+  coverage: CostCoverageCounts;
+  models: SpendModelRow[];
+  hourlyActivity: SpendActivityCell[];
 }
 
 /** Codex local Workspaces snapshot (get_codex_workspaces_snapshot). */
@@ -400,9 +481,33 @@ export interface CodexLocalProjectUsageSnapshot {
   indexedFileCount: number;
   skippedFileCount: number;
   total: CodexWorkspacesUsageTotals;
+  /** All indexed conversations in the selected history window. */
+  sessions: CodexWorkspacesSessionUsage[];
   projects: CodexWorkspacesProjectUsage[];
   daily: CodexWorkspacesDailyPoint[];
   sourceStatus: CodexWorkspacesSourceStatus;
+}
+
+
+export interface SpendContract {
+  providerId: string;
+  historyDays: number;
+  knownCostUsd: number | null;
+  knownZero: boolean;
+  provenance: CostProvenance;
+  priceCoverage: CostCoverageCounts;
+  priceCoverageRatio: number | null;
+  historyCoverageEstablished: boolean;
+  tokenMix: SpendTokenMix;
+  conversationCount: number;
+  models: SpendModelRow[];
+  projects: CodexWorkspacesProjectUsage[];
+  conversations: CodexWorkspacesSessionUsage[];
+  daily: SpendDailyPoint[];
+  hourlyActivity: SpendActivityCell[];
+  projectSourceStatus: CodexWorkspacesSourceStatus | null;
+  customPricingActive: boolean;
+  imports: ImportedSpendSource[];
 }
 
 
@@ -433,6 +538,8 @@ export interface CostSnapshotBridge {
   limit: number | null;
   remaining: number | null;
   currencyCode: string;
+  /** Optional currency symbol (e.g. "€", "$", "¥") for localized rendering. */
+  currencySymbol?: string | null;
   period: string;
   resetsAt: string | null;
   formattedUsed: string;
@@ -463,6 +570,8 @@ export interface ProviderUsageSnapshot {
   providerId: string;
   displayName: string;
   primary: RateWindowSnapshot;
+  /** Settings-selected metric shared by native and webview presentation surfaces. */
+  selectedMetric: RateWindowSnapshot;
   primaryLabel?: string;
   secondary: RateWindowSnapshot | null;
   secondaryLabel?: string;
@@ -601,6 +710,12 @@ export interface DailyCostPoint {
   value: number;
 }
 
+/** Exact local token totals per day (upstream 0.50.0 #2930). */
+export interface DailyTokenPoint {
+  date: string;
+  tokens: number;
+}
+
 export interface ServiceUsagePoint {
   service: string;
   creditsUsed: number;
@@ -628,6 +743,8 @@ export interface ProviderChartData {
   creditsHistory: DailyCostPoint[];
   usageBreakdown: DailyUsageBreakdown[];
   localUsage: ProviderLocalUsageSummary | null;
+  tokensHistory: DailyTokenPoint[];
+  tokensIncomplete: boolean;
 }
 
 // ── Token account types ──────────────────────────────────────────────
@@ -746,6 +863,8 @@ export interface ProviderDetail {
 
   hasSnapshot: boolean;
 
+  /** Persisted provider usage source (auto | cli | oauth | web). */
+  usageSource?: string | null;
   /** Phase 6c — currently-persisted cookie source value ("auto" | "manual" | "off" | …).
    *  `null` for providers that do not expose a cookie-source picker. */
   cookieSource: string | null;

@@ -258,8 +258,13 @@ Last30DaysCostFull = 최근 30일: ${ "{:.2}" } • { "{}" } 토큰
 ProviderSettingsTitle = 설정
 ProviderAccountsTitle = 계정
 ProviderOptionsTitle = 옵션
+<<<<<<< HEAD
 MenuBarMetric = 메트릭
 MenuBarMetricHelper = 메뉴 바 백분율과 Float Bar 폴백 메트릭을 결정할 창을 선택합니다.
+=======
+MenuBarMetric = 메뉴 바 및 플로팅 바 메트릭
+MenuBarMetricHelper = 메뉴 바와 플로팅 바의 백분율을 결정할 시간 창을 선택합니다.
+>>>>>>> upstream/main
 UsageSource = 사용량 소스
 ProviderNoCodexAccountsDetected = 감지된 Codex 계정이 아직 없습니다.
 ProviderCodexAutoImportHelp = 대시보드 추가 기능을 위해 브라우저 쿠키를 자동으로 가져옵니다.
@@ -498,6 +503,8 @@ DetailCostRemaining = 남음
 DetailCostBalance = 잔액
 DetailCostResets = 초기화
 DetailChartCost = 비용 (30일)
+DetailChartTokens = 토큰 (30일)
+DetailChartRefreshing = 새로 고치는 중…
 DetailChartCredits = 사용 크레딧 (30일)
 DetailChartUsageBreakdown = 서비스별 사용량 (30일)
 DetailChartEmpty = 아직 차트 데이터가 없습니다.
@@ -667,7 +674,21 @@ DeepSeekPricingCurrent = Current local time:
 DeepSeekPricingNext = Next transition:
 DeepSeekPricingEffective = Effective local time:
 DeepSeekPricingAdvice = Official schedule: peak 01:00-04:00 and 06:00-10:00 UTC; off-peak is half-price.
+<<<<<<< HEAD
 
 FloatBarBackgroundColor = 배경색
 FloatBarBackgroundOpacity = 배경 불투명도
 FloatBarResetBackground = 배경 기본값 복원
+=======
+MistralMonthlySpend = 월간 API 비용
+MistralMonthlySpendHelper = 종량제 Mistral 계정의 당월 API 사용량입니다.
+CostSummaryDisplayStyle = 비용 요약 표시 스타일
+CostSummaryDisplayStyleHelper = 각 공급자 카드에 비용을 표시하는 방법을 선택합니다.
+CostSummaryStyleCompact = 간결
+CostSummaryStyleDetailed = 세부
+CostSummaryStyleHidden = 숨김
+ProviderAccentColor = 강조 색상
+ProviderAccentColorHelper = 사용량 막대와 차트에 사용되는 브랜드 색상을 재정의합니다. #FF5733 같은 16진수 색상을 입력하세요.
+ProviderAccentColorReset = 기본값으로 재설정
+ProviderAccentColorInvalid = 잘못된 16진수 색상입니다. #RRGGBB 형식(예: #FF5733)을 사용하세요.
+>>>>>>> upstream/main

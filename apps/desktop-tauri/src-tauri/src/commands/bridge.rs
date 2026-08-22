@@ -2,20 +2,37 @@ use super::*;
 
 // ── Bridge snapshot types ────────────────────────────────────────────
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RateWindowSnapshot {
     pub used_percent: f64,
+    /// Defaults to `100.0` when absent in JSON (e.g. proof-seed files).
+    #[serde(default = "default_full_remaining")]
     pub remaining_percent: f64,
+    #[serde(default)]
     pub window_minutes: Option<u32>,
+    #[serde(default)]
     pub resets_at: Option<String>,
+    #[serde(default)]
     pub reset_description: Option<String>,
+    #[serde(default)]
     pub is_exhausted: bool,
+    #[serde(default)]
     pub is_informational: bool,
+    #[serde(default)]
     pub reserve_percent: Option<f64>,
+    #[serde(default)]
     pub reserve_description: Option<String>,
+    #[serde(default)]
     pub reserve_will_last_to_reset: bool,
+    #[serde(default)]
     pub reserve_eta_seconds: Option<f64>,
+}
+
+/// Serde default for [`RateWindowSnapshot::remaining_percent`] — the common
+/// case for a fresh window (0 %% used → 100 %% remaining).
+fn default_full_remaining() -> f64 {
+    100.0
 }
 
 impl RateWindowSnapshot {
@@ -50,22 +67,54 @@ impl RateWindowSnapshot {
     }
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct CostSnapshotBridge {
     pub used: f64,
+    #[serde(default)]
     pub limit: Option<f64>,
+    #[serde(default)]
     pub remaining: Option<f64>,
+    #[serde(default = "default_currency")]
     pub currency_code: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub currency_symbol: Option<String>,
+    #[serde(default = "default_cost_period")]
     pub period: String,
+    #[serde(default)]
     pub resets_at: Option<String>,
+    /// Defaults to `format!("${:.2}", used)` when absent (filled by
+    /// [`parse_seed_usage_snapshot`](crate::proof_harness::parse_seed_usage_snapshot)).
+    #[serde(default)]
     pub formatted_used: String,
+    #[serde(default)]
     pub formatted_limit: Option<String>,
+    #[serde(default)]
     pub balance: Option<f64>,
+    #[serde(default)]
     pub formatted_balance: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+fn default_currency() -> String {
+    "USD".to_string()
+}
+
+fn default_cost_period() -> String {
+    "month".to_string()
+}
+
+/// Format a cost amount using the snapshot's currency symbol when available,
+/// otherwise falling back to the currency-code prefix. Used by tray surfaces
+/// that render a spend amount without a rate-window percent (MonthlyPlan).
+pub(crate) fn format_cost_amount(cost: &CostSnapshotBridge) -> String {
+    if let Some(ref symbol) = cost.currency_symbol {
+        format!("{}{:.2}", symbol, cost.used)
+    } else {
+        format!("{:.2} {}", cost.used, cost.currency_code)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct NamedRateWindowSnapshot {
     pub id: String,
@@ -74,19 +123,23 @@ pub struct NamedRateWindowSnapshot {
 }
 
 /// Pace prediction snapshot for tray/bridge display.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PaceSnapshot {
-    pub stage: &'static str,
+    pub stage: String,
     pub delta_percent: f64,
+    #[serde(default)]
     pub will_last_to_reset: bool,
+    #[serde(default)]
     pub eta_seconds: Option<f64>,
+    #[serde(default)]
     pub expected_used_percent: f64,
+    #[serde(default)]
     pub actual_used_percent: f64,
 }
 
 /// Session-equivalent weekly forecast for Claude/Codex menu secondary line.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SessionEquivalentForecastSnapshot {
     pub estimated_windows_to_exhaust_weekly: f64,
@@ -98,32 +151,79 @@ pub struct SessionEquivalentForecastSnapshot {
 }
 
 /// A frontend-friendly snapshot of one provider's usage data.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ProviderUsageSnapshot {
+    #[serde(default)]
     pub tertiary_label: Option<String>,
     pub provider_id: String,
+    #[serde(default = "default_display_name")]
     pub display_name: String,
     pub primary: RateWindowSnapshot,
+    #[serde(default)]
     pub primary_label: Option<String>,
+    #[serde(default)]
     pub secondary: Option<RateWindowSnapshot>,
+    #[serde(default)]
     pub secondary_label: Option<String>,
+    #[serde(default)]
     pub model_specific: Option<RateWindowSnapshot>,
+    #[serde(default)]
     pub tertiary: Option<RateWindowSnapshot>,
+    #[serde(default)]
     pub extra_rate_windows: Vec<NamedRateWindowSnapshot>,
+    #[serde(default)]
     pub cost: Option<CostSnapshotBridge>,
+    #[serde(default)]
     pub plan_name: Option<String>,
+    #[serde(default)]
     pub account_email: Option<String>,
+    #[serde(default = "default_source_label")]
     pub source_label: String,
+    /// Defaults to launch time when absent so the card renders as fresh.
+    #[serde(default)]
     pub updated_at: String,
+    #[serde(default)]
     pub error: Option<String>,
+    #[serde(default)]
     pub pace: Option<PaceSnapshot>,
+    #[serde(default)]
     pub account_organization: Option<String>,
+    #[serde(default)]
     pub tray_status_label: Option<String>,
+    #[serde(default)]
     pub fetch_duration_ms: Option<u128>,
+    #[serde(default)]
     pub wayfinder_usage: Option<codexbar::core::WayfinderUsageSnapshot>,
-    #[serde(skip_serializing_if = "Option::is_none")]
+    #[serde(skip_serializing_if = "Option::is_none", default)]
     pub session_equivalent_forecast: Option<SessionEquivalentForecastSnapshot>,
+}
+
+fn default_display_name() -> String {
+    "Codex".to_string()
+}
+
+fn default_source_label() -> String {
+    "seed".to_string()
+}
+
+/// Provider payload after applying settings-driven cross-surface presentation.
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderUsagePresentationSnapshot {
+    #[serde(flatten)]
+    pub snapshot: ProviderUsageSnapshot,
+    pub selected_metric: RateWindowSnapshot,
+}
+
+impl ProviderUsagePresentationSnapshot {
+    pub(crate) fn new(snapshot: ProviderUsageSnapshot, settings: &Settings) -> Self {
+        let selected_metric = crate::usage_metric::selected_usage_window(&snapshot, settings);
+        Self {
+            snapshot,
+            selected_metric,
+        }
+    }
 }
 
 pub(crate) fn filter_hidden_codex_spark_rows(
@@ -171,7 +271,7 @@ impl ProviderUsageSnapshot {
             .and_then(|window| codexbar::core::UsagePace::weekly(window, None, 10080));
 
         let pace = primary_pace.as_ref().map(|p| PaceSnapshot {
-            stage: pace_stage_str(p.stage),
+            stage: pace_stage_str(p.stage).to_string(),
             delta_percent: p.delta_percent,
             will_last_to_reset: p.will_last_to_reset,
             eta_seconds: p.eta_seconds,
@@ -250,6 +350,7 @@ impl ProviderUsageSnapshot {
                 limit: c.limit,
                 remaining: c.remaining(),
                 currency_code: c.currency_code.clone(),
+                currency_symbol: c.currency_symbol.clone(),
                 period: c.period.clone(),
                 resets_at: c.resets_at.map(|dt| dt.to_rfc3339()),
                 formatted_used: c.format_used(),
@@ -541,6 +642,7 @@ pub struct SettingsSnapshot {
     adaptive_refresh: bool,
     refresh_all_providers_on_menu_open: bool,
     low_power_mode: bool,
+    low_power_mode_preference: &'static str,
     start_at_login: bool,
     start_minimized: bool,
     show_notifications: bool,
@@ -599,8 +701,13 @@ pub struct SettingsSnapshot {
     float_bar_show_cost: bool,
     promote_tray_icon: bool,
     claude_daily_routines_usage_visible: bool,
+    claude_allow_reading_claude_code_credentials: bool,
     alibaba_token_plan_region: String,
     weekly_progress_work_days: Option<u8>,
+    cost_summary_display_style: &'static str,
+    open_codex_usage_logs_enabled: bool,
+    hide_native_codex_cost_when_open_codex_present: bool,
+    provider_accent_colors: std::collections::HashMap<String, String>,
 }
 
 #[tauri::command]
@@ -648,7 +755,9 @@ impl From<Settings> for SettingsSnapshot {
             refresh_interval_secs: settings.refresh_interval_secs,
             adaptive_refresh: settings.adaptive_refresh,
             refresh_all_providers_on_menu_open: settings.refresh_all_providers_on_menu_open,
-            low_power_mode: settings.low_power_mode,
+            low_power_mode: settings.low_power_mode_preference
+                == codexbar::settings::LowPowerModePreference::On,
+            low_power_mode_preference: settings.low_power_mode_preference.as_str(),
             start_at_login: settings.start_at_login,
             start_minimized: settings.start_minimized,
             show_notifications: settings.show_notifications,
@@ -706,8 +815,26 @@ impl From<Settings> for SettingsSnapshot {
             float_bar_show_cost: settings.float_bar_show_cost,
             promote_tray_icon: settings.promote_tray_icon,
             claude_daily_routines_usage_visible: settings.claude_daily_routines_usage_visible,
+            claude_allow_reading_claude_code_credentials: settings
+                .claude_allow_reading_claude_code_credentials,
             alibaba_token_plan_region: settings.alibaba_token_plan_region,
             weekly_progress_work_days: settings.weekly_progress_work_days,
+            cost_summary_display_style: cost_summary_display_style_label(
+                settings.cost_summary_display_style,
+            ),
+            open_codex_usage_logs_enabled: settings.open_codex_usage_logs_enabled,
+            hide_native_codex_cost_when_open_codex_present: settings
+                .hide_native_codex_cost_when_open_codex_present,
+            provider_accent_colors: settings
+                .provider_configs
+                .iter()
+                .filter_map(|(id, config)| {
+                    config
+                        .accent_color
+                        .as_ref()
+                        .map(|color| (id.cli_name().to_string(), color.clone()))
+                })
+                .collect(),
         }
     }
 }
@@ -754,6 +881,28 @@ fn theme_label(theme: ThemePreference) -> &'static str {
     }
 }
 
+fn cost_summary_display_style_label(
+    style: codexbar::settings::CostSummaryDisplayStyle,
+) -> &'static str {
+    match style {
+        codexbar::settings::CostSummaryDisplayStyle::Compact => "compact",
+        codexbar::settings::CostSummaryDisplayStyle::Detailed => "detailed",
+        codexbar::settings::CostSummaryDisplayStyle::Hidden => "hidden",
+    }
+}
+
+pub(crate) fn parse_cost_summary_display_style(
+    s: &str,
+) -> Option<codexbar::settings::CostSummaryDisplayStyle> {
+    use codexbar::settings::CostSummaryDisplayStyle;
+    match s {
+        "compact" => Some(CostSummaryDisplayStyle::Compact),
+        "detailed" => Some(CostSummaryDisplayStyle::Detailed),
+        "hidden" => Some(CostSummaryDisplayStyle::Hidden),
+        _ => None,
+    }
+}
+
 pub(super) fn parse_theme(s: &str) -> Option<ThemePreference> {
     match s {
         "auto" => Some(ThemePreference::Auto),
@@ -772,6 +921,7 @@ fn metric_preference_label(pref: MetricPreference) -> &'static str {
         MetricPreference::Tertiary => "tertiary",
         MetricPreference::Credits => "credits",
         MetricPreference::ExtraUsage => "extraUsage",
+        MetricPreference::MonthlyPlan => "monthlyPlan",
         MetricPreference::Average => "average",
     }
 }
@@ -785,6 +935,7 @@ pub(super) fn parse_metric_preference(s: &str) -> Option<MetricPreference> {
         "tertiary" => Some(MetricPreference::Tertiary),
         "credits" => Some(MetricPreference::Credits),
         "extraUsage" | "extrausage" => Some(MetricPreference::ExtraUsage),
+        "monthlyPlan" | "monthlyplan" => Some(MetricPreference::MonthlyPlan),
         "average" => Some(MetricPreference::Average),
         _ => None,
     }
