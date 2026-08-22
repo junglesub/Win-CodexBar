@@ -62,7 +62,7 @@ nul
 .env
 .env.*
 /.local/
-/docs/
+# /docs/
 /scripts/*
 /docs/ui-parity-workflow.md
 /scripts/crop_vm_preferences_proof.sh
