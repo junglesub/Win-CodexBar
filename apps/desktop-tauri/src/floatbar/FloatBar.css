@@ -87,7 +87,6 @@ body.floatbar-window #root {
   padding: calc(1px * var(--floatbar-scale, 1)) calc(5px * var(--floatbar-scale, 1));
   min-height: calc(16px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   border: 1px solid rgba(255, 255, 255, 0.48);
@@ -123,7 +122,6 @@ body.floatbar-window #root {
   min-height: calc(16px * var(--floatbar-scale, 1));
   padding: calc(1px * var(--floatbar-scale, 1)) calc(6px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.48));
@@ -161,50 +159,47 @@ body.floatbar-window #root {
   flex-direction: column;
   gap: calc(2px * var(--floatbar-scale, 1));
 }
-.floatbar__pill--warn {
-  background: rgba(250, 221, 171, 0.84);
-  border-color: rgba(255, 246, 219, 0.62);
+.floatbar__metrics {
+  display: inline-flex;
+  align-items: center;
+  gap: calc(3px * var(--floatbar-scale, 1));
+  line-height: 1;
+  font-variant-numeric: tabular-nums;
+}
+.floatbar__metric {
+  min-width: 2.4em;
+  text-align: center;
+}
+.floatbar__metric--warn {
   color: #7a4c05;
+  font-weight: 700;
 }
-.floatbar__pill--crit {
-  background: rgba(255, 194, 194, 0.86);
-  border-color: rgba(255, 236, 236, 0.66);
+.floatbar__metric--crit {
   color: #7f1d1d;
+  font-weight: 700;
 }
-.floatbar__text {
-  display: inline-flex;
-  align-items: center;
-  gap: calc(4px * var(--floatbar-scale, 1));
-  line-height: 1;
+.floatbar__metric-label {
+  font-size: 0.78em;
+  font-weight: 600;
+  opacity: 0.66;
 }
-.floatbar__pct {
-  font-variant-numeric: tabular-nums;
-  letter-spacing: 0;
-  line-height: 1;
+/* Compact antigravity-not-running overlay: one short localized action next to
+ * the provider icon instead of usage dashes, keeping the pill compact. */
+.floatbar__agy-overlay {
+  font-size: 0.78em;
+  font-weight: 700;
+  opacity: 0.92;
+  letter-spacing: 0.01em;
 }
-.floatbar__reset {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  gap: calc(2px * var(--floatbar-scale, 1));
-  color: currentColor;
-  opacity: 0.72;
-  line-height: 1;
+.floatbar__metric-separator {
+  opacity: 0.55;
 }
-.floatbar__reset-icon-svg {
-  display: block;
-  flex-shrink: 0;
-}
-.floatbar__reset-time {
-  font-size: 0.86em;
-  font-weight: 500;
-  font-variant-numeric: tabular-nums;
-  line-height: 1;
-}
-.floatbar--vertical .floatbar__text {
+.floatbar--vertical .floatbar__metrics {
   flex-direction: column;
-  align-items: center;
   gap: calc(1px * var(--floatbar-scale, 1));
+}
+.floatbar--vertical .floatbar__metric-separator {
+  display: none;
 }
 .floatbar__empty {
   display: inline-flex;
@@ -212,11 +207,23 @@ body.floatbar-window #root {
   min-height: calc(16px * var(--floatbar-scale, 1));
   padding: 0 calc(8px * var(--floatbar-scale, 1));
   border-radius: calc(7px * var(--floatbar-scale, 1));
-  background: rgba(213, 231, 242, 0.74);
   backdrop-filter: blur(16px) saturate(145%);
   -webkit-backdrop-filter: blur(16px) saturate(145%);
   opacity: 0.75;
   font-weight: 500;
+}
+
+/* Custom pill background from Settings — authoritative for every pill
+ * surface; the later per-style `background` overrides were removed so they
+ * can't fight it. Opacity fills only the surfaces, never text/icon opacity. */
+.floatbar__pill,
+.floatbar__cost-pill,
+.floatbar__empty {
+  background: color-mix(
+    in srgb,
+    var(--floatbar-background-color) var(--floatbar-background-opacity),
+    transparent
+  );
 }
 
 /* ── Light-background mode ─────────────────────────────────────────────
@@ -229,16 +236,13 @@ body.floatbar-window #root {
 .floatbar--light-bg .floatbar__pill,
 .floatbar--light-bg .floatbar__cost-pill,
 .floatbar--light-bg .floatbar__empty {
-  background: rgba(248, 252, 255, 0.82);
   border-color: rgba(255, 255, 255, 0.64);
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
-.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
+.floatbar--light-bg .floatbar__metric--warn {
   color: #92400e;
 }
-.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
+.floatbar--light-bg .floatbar__metric--crit {
   color: #991b1b;
 }
 .floatbar--light-bg .floatbar__handle {
@@ -291,25 +295,19 @@ body.floatbar-window #root {
 .floatbar--floating .floatbar__pill,
 .floatbar--floating .floatbar__cost-pill {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
   border: 1px solid var(--brand, rgba(255, 255, 255, 0.22));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.25);
 }
-.floatbar--floating .floatbar__pill--warn {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #f59e0b;
+.floatbar--floating .floatbar__metric--warn {
   color: #fbbf24;
 }
-.floatbar--floating .floatbar__pill--crit {
-  background: rgba(255, 255, 255, 0.08);
-  border-color: #ef4444;
+.floatbar--floating .floatbar__metric--crit {
   color: #fca5a5;
 }
 .floatbar--floating .floatbar__empty {
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.08);
   backdrop-filter: blur(14px) saturate(140%);
   -webkit-backdrop-filter: blur(14px) saturate(140%);
 }
@@ -319,16 +317,13 @@ body.floatbar-window #root {
 .floatbar--floating.floatbar--light-bg .floatbar__pill,
 .floatbar--floating.floatbar--light-bg .floatbar__cost-pill,
 .floatbar--floating.floatbar--light-bg .floatbar__empty {
-  background: rgba(255, 255, 255, 0.55);
   border-color: var(--brand, rgba(20, 22, 26, 0.25));
   box-shadow: 0 1px 2px rgba(0, 0, 0, 0.12);
 }
-.floatbar--floating.floatbar--light-bg .floatbar__pill--warn {
-  border-color: #b45309;
+.floatbar--floating.floatbar--light-bg .floatbar__metric--warn {
   color: #92400e;
 }
-.floatbar--floating.floatbar--light-bg .floatbar__pill--crit {
-  border-color: #b91c1c;
+.floatbar--floating.floatbar--light-bg .floatbar__metric--crit {
   color: #991b1b;
 }
 .floatbar--floating.floatbar--light-bg .floatbar__handle {

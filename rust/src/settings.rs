@@ -271,6 +271,17 @@ pub struct Settings {
     #[serde(default = "default_float_bar_opacity")]
     pub float_bar_opacity: u8,
 
+    /// Custom background color for the floating-bar pill surfaces, as `#RRGGBB`.
+    /// Normalized to uppercase on load; anything invalid falls back to `#FFFFFF`.
+    #[serde(default = "default_float_bar_background_color")]
+    pub float_bar_background_color: String,
+
+    /// Opacity of the custom floating-bar background fill (0..=100). Applies
+    /// only to the pill surfaces, never to text or icons. Independent of
+    /// [`Self::float_bar_opacity`], which controls the whole window/surface.
+    #[serde(default = "default_float_bar_background_opacity")]
+    pub float_bar_background_opacity: u8,
+
     /// Floating-bar visual scale, in the inclusive range 75..=200.
     #[serde(default = "default_float_bar_scale")]
     pub float_bar_scale: u8,
@@ -422,6 +433,39 @@ pub fn normalize_float_bar_style(value: &str) -> String {
     }
 }
 
+/// Default floating-bar background color (opaque white).
+fn default_float_bar_background_color() -> String {
+    "#FFFFFF".to_string()
+}
+
+/// Default floating-bar background fill opacity (8%).
+fn default_float_bar_background_opacity() -> u8 {
+    8
+}
+
+/// Normalize a floating-bar background color to uppercase `#RRGGBB`.
+///
+/// Anything that isn't exactly `#` followed by six hex digits falls back to
+/// the default white so invalid persisted/IPC colors can never become
+/// arbitrary CSS values.
+pub fn normalize_float_bar_background_color(value: &str) -> String {
+    let valid = value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
+    if valid {
+        value.to_ascii_uppercase()
+    } else {
+        default_float_bar_background_color()
+    }
+}
+
+/// Clamp the floating-bar background fill opacity to the valid 0..=100 range.
+/// Unlike whole-bar opacity, 0 is meaningful here (a fully transparent fill),
+/// so no lower bound is applied.
+pub fn clamp_float_bar_background_opacity(value: u8) -> u8 {
+    value.min(100)
+}
+
 /// Canonicalize a requested provider display order.
 ///
 /// Keeps requested provider IDs that map to a real [`ProviderId`], drops
@@ -542,6 +586,8 @@ impl Default for Settings {
             powertoys_status_pipe_enabled: false,
             float_bar_enabled: false,
             float_bar_opacity: default_float_bar_opacity(),
+            float_bar_background_color: default_float_bar_background_color(),
+            float_bar_background_opacity: default_float_bar_background_opacity(),
             float_bar_scale: default_float_bar_scale(),
             float_bar_orientation: default_float_bar_orientation(),
             float_bar_style: default_float_bar_style(),

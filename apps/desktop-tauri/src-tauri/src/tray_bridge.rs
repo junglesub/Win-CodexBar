@@ -179,7 +179,6 @@ enum MenuAction {
     /// Open (or focus) the dedicated flyout ("Pop Out Dashboard") window.
     OpenFlyout,
     Refresh,
-    CheckForUpdates,
     /// Toggle the enabled/disabled state of the provider with the given CLI name.
     ToggleProvider(String),
     /// Toggle the floating bar window on/off.
@@ -195,7 +194,6 @@ enum MenuTransitionDispatch {
 fn resolve_menu_action(id: &str) -> Option<MenuAction> {
     match id {
         "refresh" => Some(MenuAction::Refresh),
-        "check_for_updates" => Some(MenuAction::CheckForUpdates),
         "quit" => Some(MenuAction::Quit),
         "settings" => Some(MenuAction::OpenSettings("general".into())),
         "about" => Some(MenuAction::OpenSettings("about".into())),
@@ -365,13 +363,6 @@ fn handle_menu_event(app: &AppHandle, id: &str) {
             let handle = app.clone();
             tauri::async_runtime::spawn(async move {
                 let _ = crate::commands::do_refresh_providers(&handle).await;
-            });
-        }
-        Some(MenuAction::CheckForUpdates) => {
-            let handle = app.clone();
-            tauri::async_runtime::spawn(async move {
-                let state = handle.state::<Mutex<AppState>>();
-                let _ = crate::commands::check_for_updates(handle.clone(), state).await;
             });
         }
         Some(MenuAction::ToggleProvider(provider_id)) => {
@@ -831,6 +822,11 @@ mod tests {
         assert!(menu_contains(&menu, "about"));
         assert!(menu_contains(&menu, "toggle_provider:codex"));
         assert!(menu_contains(&menu, "quit"));
+    }
+
+    #[test]
+    fn check_for_updates_menu_id_is_not_resolved_while_updater_disabled() {
+        assert!(resolve_menu_action("check_for_updates").is_none());
     }
 
     #[test]

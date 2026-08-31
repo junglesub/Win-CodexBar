@@ -6,32 +6,9 @@ const tauriMocks = vi.hoisted(() => ({
   openExternalUrl: vi.fn(),
 }));
 
-const updateMocks = vi.hoisted(() => ({
-  checkNow: vi.fn(),
-  download: vi.fn(),
-  apply: vi.fn(),
-  dismiss: vi.fn(),
-  openRelease: vi.fn(),
-}));
-
 vi.mock("../../../lib/tauri", () => tauriMocks);
 vi.mock("../../../hooks/useLocale", () => ({
   useLocale: () => ({ t: (key: string) => key }),
-}));
-vi.mock("../../../hooks/useUpdateState", () => ({
-  useUpdateState: () => ({
-    updateState: {
-      status: "idle",
-      version: null,
-      error: null,
-      progress: null,
-      releaseUrl: null,
-      canDownload: false,
-      canApply: false,
-      lastCheckedAt: null,
-    },
-    ...updateMocks,
-  }),
 }));
 
 import AboutTab from "./AboutTab";
@@ -87,6 +64,8 @@ const settings: SettingsSnapshot = {
   providerMetrics: {},
   floatBarEnabled: false,
   floatBarOpacity: 0.9,
+  floatBarBackgroundColor: "#FFFFFF",
+  floatBarBackgroundOpacity: 8,
   floatBarScale: 100,
   floatBarOrientation: "horizontal",
   floatBarStyle: "floating",
@@ -126,11 +105,11 @@ describe("AboutTab", () => {
 
     expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
       1,
-      "https://github.com/nesszer/Win-CodexBar",
+      "https://github.com/junglesub/Win-CodexBar",
     );
     expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
       2,
-      "https://codexbar.app",
+      "https://junglesub.github.io/Win-CodexBar/",
     );
     expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
       3,
@@ -138,8 +117,42 @@ describe("AboutTab", () => {
     );
     expect(tauriMocks.openExternalUrl).toHaveBeenNthCalledWith(
       4,
-      "https://github.com/nesszer/Win-CodexBar/issues/new?labels=bug&template=bug_report.yml",
+      "https://github.com/junglesub/Win-CodexBar/issues/new?labels=bug&template=bug_report.yml",
     );
+  });
+
+  it("retains the inline original-project credit link", async () => {
+    render(<AboutTab settings={settings} set={vi.fn()} saving={false} />);
+
+    // Wait for the app info to load so the About section (not the loading
+    // placeholder) is rendered.
+    await screen.findByRole("button", { name: "AboutLinkGitHub" });
+
+    // The copyright line renders the brand name as a link to the original
+    // macOS project.
+    const inlineLink = screen.getByRole("button", { name: "AppName" });
+    fireEvent.click(inlineLink);
+
+    expect(tauriMocks.openExternalUrl).toHaveBeenCalledWith(
+      "https://github.com/steipete/CodexBar",
+    );
+  });
+
+  it("does not render updater controls or actions while the updater is disabled", async () => {
+    render(<AboutTab settings={settings} set={vi.fn()} saving={false} />);
+
+    await screen.findByRole("button", { name: "AboutLinkGitHub" });
+
+    expect(
+      screen.queryByRole("button", { name: "AboutCheckForUpdates" }),
+    ).not.toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "AutoDownloadUpdates" }),
+    ).not.toBeInTheDocument();
+    expect(screen.queryByText("UpdateChannelChoice")).not.toBeInTheDocument();
+    expect(screen.queryByText("InstallUpdatesOnQuit")).not.toBeInTheDocument();
+    expect(screen.queryByText("UpdateChannelChoiceHelper")).not.toBeInTheDocument();
+    expect(tauriMocks.getAppInfo).toHaveBeenCalled();
   });
 
   it("shows a link error if the OS browser launch fails", async () => {

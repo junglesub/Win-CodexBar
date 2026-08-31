@@ -55,12 +55,12 @@ fn validate_surface_target_rejects_hidden_mode() {
 #[test]
 fn external_url_validation_allows_only_http_urls() {
     assert_eq!(
-        validate_external_url(" https://github.com/Finesssee/Win-CodexBar ").unwrap(),
-        "https://github.com/Finesssee/Win-CodexBar"
+        validate_external_url(" https://github.com/junglesub/Win-CodexBar ").unwrap(),
+        "https://github.com/junglesub/Win-CodexBar"
     );
     assert_eq!(
-        validate_external_url("http://codexbar.app").unwrap(),
-        "http://codexbar.app"
+        validate_external_url("http://example.com").unwrap(),
+        "http://example.com"
     );
 
     for invalid in [
@@ -1354,8 +1354,8 @@ fn open_path_rejects_missing_path() {
 #[test]
 fn external_url_validator_accepts_http_and_https() {
     assert_eq!(
-        super::validate_external_url(" https://github.com/Finesssee/Win-CodexBar "),
-        Ok("https://github.com/Finesssee/Win-CodexBar")
+        super::validate_external_url(" https://github.com/junglesub/Win-CodexBar "),
+        Ok("https://github.com/junglesub/Win-CodexBar")
     );
     assert_eq!(
         super::validate_external_url("http://localhost:1420"),

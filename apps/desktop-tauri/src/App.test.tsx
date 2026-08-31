@@ -113,6 +113,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     providerMetrics: {},
     floatBarEnabled: false,
     floatBarOpacity: 80,
+    floatBarBackgroundColor: "#FFFFFF",
+    floatBarBackgroundOpacity: 8,
     floatBarScale: 100,
     floatBarOrientation: "horizontal",
     floatBarStyle: "floating",
@@ -196,6 +198,24 @@ describe("App window-label routing", () => {
       expect(queryByTestId("surface-float-bar")).not.toBeNull();
     });
     expect(queryByTestId("surface-tray-panel")).toBeNull();
+  });
+
+  it("does not invoke the update check or download on the startup timer", async () => {
+    // The delayed startup update check / auto-download is deactivated while
+    // the in-app updater is disabled, so advancing well past the old 2s
+    // timer must never touch the update bridge functions.
+    webviewWindowMocks.label = "main";
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(tauriMocks.getBootstrapState).toHaveBeenCalled();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+
+    expect(tauriMocks.checkForUpdates).not.toHaveBeenCalled();
+    expect(tauriMocks.downloadUpdate).not.toHaveBeenCalled();
   });
 
   it("does not route the shared main window to TrayPanel while hidden", async () => {

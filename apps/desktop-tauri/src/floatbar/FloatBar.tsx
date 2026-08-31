@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -17,54 +18,192 @@ import {
   getSettingsSnapshot,
   refreshProvidersIfStale,
 } from "../lib/tauri";
+import { formatRelativeUpdated } from "../lib/relativeTime";
+import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
-import { describeProviderState } from "../lib/providerState";
 import type {
   BootstrapState,
+  MetricPreference,
   ProviderLocalUsageSummary,
   ProviderUsageSnapshot,
+  RateWindowSnapshot,
   SettingsSnapshot,
 } from "../types/bridge";
 import { FLOAT_BAR_CONFIG_CHANGED_EVENT, resizeFloatBar } from "./api";
 import "./FloatBar.css";
 
-function ResetIcon({ size }: { size: number }) {
+/**
+ * Cadence classification for the three fixed Float Bar usage positions.
+ *
+ * A known `windowMinutes` always wins; label fallback is used only when the
+ * duration is absent, because labels are not a reliable source of truth.
+ */
+type UsageCadence = "5h" | "weekly" | "monthly";
+type UsageSlots = Record<UsageCadence, RateWindowSnapshot | null>;
+
+const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
+
+function cadenceFromMinutes(minutes: number): UsageCadence | null {
+  if (minutes === 300) return "5h";
+  // Actual Gregorian months run 28-31 days (40,320-44,640 minutes); anything
+  // above that range is unsupported rather than weekly or monthly.
+  if (minutes >= 40_320 && minutes <= 44_640) return "monthly";
+  if (minutes >= 10_080 && minutes < 40_320) return "weekly";
+  return null;
+}
+
+function cadenceFromLabel(label: string | undefined): UsageCadence | null {
+  const normalized = label?.trim().toLowerCase() ?? "";
+  if (/(^|[^a-z0-9])5\s*(?:-|\s)?(?:h|hour)(?:s)?([^a-z0-9]|$)/.test(normalized)) return "5h";
+  if (/(^|[^a-z0-9])(?:weekly|7[ -]?day)([^a-z0-9]|$)/.test(normalized)) return "weekly";
+  if (/(^|[^a-z0-9])monthly([^a-z0-9]|$)/.test(normalized)) return "monthly";
+  return null;
+}
+
+function selectFloatBarUsageSlots(provider: ProviderUsageSnapshot): UsageSlots {
+  const slots: UsageSlots = { "5h": null, weekly: null, monthly: null };
+  const candidates = [
+    [provider.primary, provider.primaryLabel],
+    [provider.secondary, provider.secondaryLabel],
+    [provider.tertiary, provider.tertiaryLabel],
+  ] as const;
+
+  for (const [window, label] of candidates) {
+    if (!window || window.isInformational) continue;
+    const cadence =
+      window.windowMinutes == null
+        ? cadenceFromLabel(label)
+        : cadenceFromMinutes(window.windowMinutes);
+    if (cadence && !slots[cadence]) slots[cadence] = window;
+  }
+  return slots;
+}
+
+function maxFloatBarUsedPercent(
+  provider: ProviderUsageSnapshot,
+  preference?: MetricPreference | undefined,
+): number {
+  const slots = Object.values(selectFloatBarUsageSlots(provider)).filter(
+    (window): window is RateWindowSnapshot => window !== null,
+  );
+  if (slots.length > 0) {
+    return Math.max(
+      0,
+      ...slots.map((window) => Math.max(0, Math.min(100, window.usedPercent))),
+    );
+  }
+  const fallback = fallbackFor(provider, preference);
+  if (!fallback) return 0;
+  return Math.max(0, Math.min(100, fallback.window.usedPercent));
+}
+
+/**
+ * Detect the known Antigravity-not-running error so the pill can show a
+ * compact, non-identity overlay message next to the Antigravity icon.
+ */
+function isAntigravityNotRunningError(provider: ProviderUsageSnapshot): boolean {
   return (
-    <svg
-      className="floatbar__reset-icon-svg"
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M12.9 7.1a5 5 0 1 0-1.2 3.9"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12.9 3.8v3.3H9.6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
+    provider.providerId === "antigravity" &&
+    /antigravity language server not running/i.test(provider.error ?? "")
   );
 }
 
-function inlineResetTime(resetText: string): string {
-  const normalized = resetText.trim();
-  if (/^reset(?:s|ting)?(?:\s+due)?\s*(?:now)?$/i.test(normalized)) {
-    return "now";
+/**
+ * A single fallback metric for providers whose canonical windows carry no
+ * recognizable cadence. The visible label prefers the provider's own window
+ * label (primaryLabel/secondaryLabel/tertiaryLabel) and only falls back to a
+ * generic localized identity when the provider did not supply one.
+ * Model-specific has no bridge label, so it always uses the generic key.
+ */
+type FallbackMetric = {
+  window: RateWindowSnapshot;
+  providerLabel: string | null;
+  labelKey: LocaleKey;
+};
+
+/** One canonical window candidate with its provider label and generic key. */
+type FallbackCandidate = {
+  window: RateWindowSnapshot | null;
+  providerLabel: string | null;
+  labelKey: LocaleKey;
+};
+
+function fallbackFor(
+  provider: ProviderUsageSnapshot,
+  preference: MetricPreference | undefined,
+): FallbackMetric | null {
+  const candidates: FallbackCandidate[] = [
+    {
+      window: provider.modelSpecific,
+      providerLabel: null,
+      labelKey: "DetailWindowModelSpecific",
+    },
+    {
+      window: provider.primary,
+      providerLabel: provider.primaryLabel ?? null,
+      labelKey: "ProviderSessionLabel",
+    },
+    {
+      window: provider.secondary,
+      providerLabel: provider.secondaryLabel ?? null,
+      labelKey: "ProviderWeeklyLabel",
+    },
+    {
+      window: provider.tertiary,
+      providerLabel: provider.tertiaryLabel ?? null,
+      labelKey: "DetailWindowTertiary",
+    },
+  ];
+
+  // Explicit preference -> the matching window, when present and not
+  // informational. Anything else (automatic, unsupported, absent,
+  // informational) falls through to the automatic order:
+  // modelSpecific -> primary -> secondary -> tertiary.
+  const preferredIndex =
+    preference === "session"
+      ? 1
+      : preference === "weekly"
+        ? 2
+        : preference === "model"
+          ? 0
+          : preference === "tertiary"
+            ? 3
+            : -1;
+  const preferred = preferredIndex >= 0 ? candidates[preferredIndex] : null;
+  if (preferred?.window && !preferred.window.isInformational) {
+    return {
+      window: preferred.window,
+      providerLabel: preferred.providerLabel,
+      labelKey: preferred.labelKey,
+    };
   }
-  return normalized
-    .replace(/^resets?\s+in\s+/i, "")
-    .replace(/^resets?\s+/i, "")
-    .trim();
+
+  for (const candidate of candidates) {
+    if (candidate.window && !candidate.window.isInformational) {
+      return {
+        window: candidate.window,
+        providerLabel: candidate.providerLabel,
+        labelKey: candidate.labelKey,
+      };
+    }
+  }
+  return null;
+}
+
+/**
+ * Locale-independent compact countdown for the visible Float Bar slot value.
+ * Never derives from localized prose, so it stays compact in every language.
+ */
+function compactResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "now";
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  if (totalMinutes >= 1440) return `${Math.floor(totalMinutes / 1440)}d`;
+  return `${Math.floor(totalMinutes / 60)}h`;
 }
 
 type FloatBarCostSummary = {
@@ -99,13 +238,11 @@ function CostPill({
   scale,
   todayLabel,
   thirtyDayLabel,
-  estimateLabel,
 }: {
   summary: FloatBarCostSummary;
   scale: number;
   todayLabel: string;
   thirtyDayLabel: string;
-  estimateLabel: string;
 }) {
   const today = formatUsd(summary.todayCost);
   const thirtyDay = formatUsd(summary.thirtyDayCost);
@@ -121,7 +258,7 @@ function CostPill({
   return (
     <div
       className="floatbar__cost-pill"
-      title={`${summary.displayName}: ${title} (${estimateLabel})`}
+      title={`${summary.displayName}: ${title}`}
       data-tauri-drag-region
       style={{ "--brand": brand } as CSSProperties}
     >
@@ -150,95 +287,192 @@ function CostPill({
           </span>
         )}
       </span>
-      <span className="floatbar__cost-estimate" data-tauri-drag-region>
-        {estimateLabel}
-      </span>
     </div>
   );
 }
 /**
+ * One fixed quota slot in the Float Bar provider pill.
+ *
+ * Renders only the compact visible value. The pill itself carries the full
+ * cadence/used/reset detail on its title and accessible name, because pill
+ * children intentionally have `pointer-events: none`. Each metric colors
+ * itself from its own consumed percentage: red at/above the critical
+ * threshold (or on provider error / exhaustion), amber at/above the
+ * high-usage threshold, otherwise neutral.
+ */
+function UsageMetric({
+  window: rateWindow,
+  providerError,
+  showResetInline,
+  highUsage,
+  critUsage,
+  label,
+}: {
+  window: RateWindowSnapshot | null;
+  providerError: boolean;
+  showResetInline: boolean;
+  highUsage: number;
+  critUsage: number;
+  label?: string;
+}) {
+  const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
+  const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
+  const hasFutureReset = Number.isFinite(target) && target > Date.now();
+  const compactReset =
+    hasFutureReset && rateWindow?.resetsAt ? compactResetTime(rateWindow.resetsAt) : null;
+  const visible =
+    used == null || providerError
+      ? "—"
+      : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
+
+  const tone =
+    providerError || rateWindow?.isExhausted || (used != null && used >= critUsage)
+      ? "crit"
+      : used != null && used >= highUsage
+        ? "warn"
+        : "ok";
+
+  return (
+    <span
+      className={
+        tone === "ok"
+          ? "floatbar__metric"
+          : `floatbar__metric floatbar__metric--${tone}`
+      }
+      data-tauri-drag-region
+    >
+      {label ? <span className="floatbar__metric-label">{label} </span> : null}
+      {visible}
+    </span>
+  );
+}
+
+/**
  * The capacity pill shown for a single provider.
  *
- * Color follows usage: green default, amber when remaining drops below the
- * high-usage threshold, red when remaining is below the critical threshold
- * or the provider is exhausted.
+ * Renders fixed 5-hour / weekly / monthly usage slots (or the cadence-less
+ * fallback metric). The pill, icon, and container stay visually neutral;
+ * each usage metric colors itself from its own consumed percentage. The
+ * full per-slot detail (cadence, used percentage, localized reset) lives on
+ * the pill `title` and `aria-label` so it stays hoverable/accessible.
  */
 function ProviderPill({
   provider,
-  highRemaining,
-  critRemaining,
-  showAsUsed,
+  highUsage,
+  critUsage,
   scale,
   showResetInline,
   resetRelative,
   usedSuffix,
-  remainingSuffix,
-  stateLabel,
+  preference,
+  now,
+  t,
 }: {
   provider: ProviderUsageSnapshot;
-  highRemaining: number;
-  critRemaining: number;
-  showAsUsed: boolean;
+  highUsage: number;
+  critUsage: number;
   scale: number;
   showResetInline: boolean;
   resetRelative: boolean;
   usedSuffix: string;
-  remainingSuffix: string;
-  stateLabel: string;
+  preference: MetricPreference | undefined;
+  now: number;
+  t: (key: LocaleKey) => string;
 }) {
-  const rateWindow = provider.selectedMetric;
-  const remaining = Math.max(0, Math.min(100, rateWindow.remainingPercent));
-  const used = Math.max(0, Math.min(100, rateWindow.usedPercent));
-  const displayPercent = showAsUsed ? used : remaining;
-  const displaySuffix = showAsUsed ? usedSuffix : remainingSuffix;
-  const state = describeProviderState(provider.errorState);
-  const exhausted = rateWindow.isExhausted || state.isProblem;
-  let tone: "ok" | "warn" | "crit" = "ok";
-  if (exhausted || remaining <= critRemaining) tone = "crit";
-  else if (remaining <= highRemaining) tone = "warn";
+  const slots = selectFloatBarUsageSlots(provider);
+  const fallback = Object.values(slots).some((window) => window !== null)
+    ? null
+    : fallbackFor(provider, preference);
+  const hasError = Boolean(provider.error);
+  const agyOverlay = isAntigravityNotRunningError(provider)
+    ? t("FloatBarAgyRunNeeded")
+    : null;
 
-  const brand = getProviderIcon(provider.providerId).brandColor;
-  const label = state.isProblem ? stateLabel : `${Math.round(displayPercent)}%`;
-  const resetText = useFormattedResetTime(
-    rateWindow.resetsAt,
-    rateWindow.resetDescription,
+  // One reset hook per fixed slot plus one for the fallback, all called
+  // unconditionally in stable order.
+  const reset5h = useFormattedResetTime(slots["5h"]?.resetsAt ?? null, null, resetRelative);
+  const resetWeekly = useFormattedResetTime(slots.weekly?.resetsAt ?? null, null, resetRelative);
+  const resetMonthly = useFormattedResetTime(slots.monthly?.resetsAt ?? null, null, resetRelative);
+  const resetFallback = useFormattedResetTime(
+    fallback?.window.resetsAt ?? null,
+    null,
     resetRelative,
   );
-  const resetSuffix = resetText ? `\n${resetText}` : "";
-  const inlineReset = resetText ? inlineResetTime(resetText) : null;
+  const resetTexts = [reset5h, resetWeekly, resetMonthly];
+
+  const slotDetails = USAGE_CADENCES.map((cadence, index) => {
+    const window = slots[cadence];
+    if (!window) return `${cadence}: —`;
+    const used = Math.round(Math.max(0, Math.min(100, window.usedPercent)));
+    const reset = resetTexts[index];
+    return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
+  });
+  let pillDetail: string;
+  const fallbackLabel =
+    hasError || !fallback ? "" : (fallback.providerLabel ?? t(fallback.labelKey));
+  if (provider.error) {
+    pillDetail = `${provider.displayName}: ${provider.error}`;
+  } else if (fallback) {
+    const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
+    pillDetail = `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
+  } else {
+    pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+  }
+  // Relative last-refresh line for the hover/accessibility detail. A single
+  // shared 30-second clock at the FloatBar surface re-renders all pills, so
+  // the text advances even when no slot has a future reset timestamp. An
+  // unparseable `updatedAt` keeps its raw value after the localized label.
+  const updatedAtMs = Date.parse(provider.updatedAt);
+  const updatedDetail = Number.isNaN(updatedAtMs)
+    ? `${t("LastUpdated")}: ${provider.updatedAt}`
+    : `${t("LastUpdated")}: ${formatRelativeUpdated(updatedAtMs, t, now)}`;
+  pillDetail = `${pillDetail}\n${updatedDetail}`;
+
+  const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
-  const resetIconSize = Math.round(10 * scale);
 
   return (
     <div
-      className={`floatbar__pill floatbar__pill--${tone}`}
-      title={
-        state.isProblem
-          ? `${provider.displayName}: ${stateLabel}`
-          : `${provider.displayName}: ${label} ${displaySuffix}${resetSuffix}`
-      }
+      role="group"
+      className="floatbar__pill"
+      title={pillDetail}
+      aria-label={pillDetail}
       data-tauri-drag-region
       style={{ "--brand": brand } as CSSProperties}
     >
       <span className="floatbar__provider-icon" data-tauri-drag-region>
         <ProviderIcon providerId={provider.providerId} size={iconSize} />
       </span>
-      <span className="floatbar__text" data-tauri-drag-region>
-        <span className="floatbar__pct" data-tauri-drag-region>
-          {label}
-        </span>
-        {showResetInline && resetText && inlineReset && (
+      <span className="floatbar__metrics" data-tauri-drag-region>
+        {agyOverlay ? (
           <span
-            className="floatbar__reset"
-            title={resetText}
-            aria-label={resetText}
+            className="floatbar__metric floatbar__metric--crit floatbar__agy-overlay"
             data-tauri-drag-region
           >
-            <ResetIcon size={resetIconSize} />
-            <span className="floatbar__reset-time" data-tauri-drag-region>
-              {inlineReset}
-            </span>
+            {agyOverlay}
           </span>
+        ) : fallback ? (
+          <UsageMetric
+            window={fallback.window}
+            providerError={hasError}
+            showResetInline={showResetInline}
+            highUsage={highUsage}
+            critUsage={critUsage}
+            label={fallbackLabel}
+          />
+        ) : (
+          USAGE_CADENCES.map((cadence, index) => (
+            <Fragment key={cadence}>
+              {index > 0 && <span className="floatbar__metric-separator">/</span>}
+              <UsageMetric
+                window={slots[cadence]}
+                providerError={hasError}
+                showResetInline={showResetInline}
+                highUsage={highUsage}
+                critUsage={critUsage}
+              />
+            </Fragment>
+          ))
         )}
       </span>
     </div>
@@ -280,6 +514,14 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     setSettings(state.settings);
   }
   const [localCosts, setLocalCosts] = useState<Record<string, FloatBarCostSummary>>({});
+
+  // Single shared 30-second clock so relative "updated N ago" hover text
+  // advances for every provider without a per-pill timer.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
 
   // The detached floatbar should keep usage fresh, but it must not open or
   // focus any other surface. Refresh data only; provider-updated events feed
@@ -324,9 +566,10 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     }
     return [...list].sort(
       (a, b) =>
-        b.selectedMetric.usedPercent - a.selectedMetric.usedPercent,
+        maxFloatBarUsedPercent(b, settings.providerMetrics[b.providerId]) -
+        maxFloatBarUsedPercent(a, settings.providerMetrics[a.providerId]),
     );
-  }, [providers, settings.enabledProviders, filterIds]);
+  }, [providers, settings.enabledProviders, filterIds, settings.providerMetrics]);
 
   const visibleCostTargets = useMemo<FloatBarCostTarget[]>(
     () =>
@@ -453,13 +696,11 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     [],
   );
 
-  const highRemaining = 100 - settings.highUsageThreshold;
-  const critRemaining = 100 - settings.criticalUsageThreshold;
   const opacityFraction = Math.max(0.3, Math.min(1, settings.floatBarOpacity / 100));
 
   return (
     <div
-      role="button"
+      role="group"
       tabIndex={-1}
       aria-label={t("AppName")}
       className={`floatbar floatbar--${orientation} floatbar--${style}${settings.floatBarDarkText ? " floatbar--light-bg" : ""}`}
@@ -469,6 +710,11 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
         {
           opacity: opacityFraction,
           "--floatbar-scale": scale,
+          "--floatbar-background-color": settings.floatBarBackgroundColor,
+          "--floatbar-background-opacity": `${Math.max(
+            0,
+            Math.min(100, settings.floatBarBackgroundOpacity),
+          )}%`,
         } as CSSProperties
       }
     >
@@ -483,15 +729,15 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
             <ProviderPill
               key={providerCostKey(p)}
               provider={p}
-              highRemaining={highRemaining}
-              critRemaining={critRemaining}
-              showAsUsed={settings.showAsUsed}
+              highUsage={settings.highUsageThreshold}
+              critUsage={settings.criticalUsageThreshold}
               scale={scale}
               showResetInline={showResetInline}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
-              remainingSuffix={t("FloatBarRemainingSuffix")}
-              stateLabel={t(describeProviderState(p.errorState).labelKey)}
+              preference={settings.providerMetrics[p.providerId]}
+              now={now}
+              t={t}
             />
           ))}
           {visibleCosts.map((summary) => (
@@ -501,7 +747,6 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               scale={scale}
               todayLabel={t("PanelToday")}
               thirtyDayLabel={t("FloatBarThirtyDayShort")}
-              estimateLabel={t("OverviewSpendEstimate")}
             />
           ))}
         </>

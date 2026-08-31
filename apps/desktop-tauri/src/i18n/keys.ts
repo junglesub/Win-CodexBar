@@ -613,6 +613,7 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarThirtyDayShort",
   "FloatBarNoProviders",
   "FloatBarRemainingSuffix",
+  "FloatBarAgyRunNeeded",
   "FloatBarShowCost",
   "FloatBarShowCostDescription",
   "BannerCheckingForUpdates",
@@ -755,6 +756,9 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarInvertColorsHelper",
   "FloatBarClickThrough",
   "FloatBarClickThroughHelper",
+  "FloatBarBackgroundColor",
+  "FloatBarBackgroundOpacity",
+  "FloatBarResetBackground",
 
   // Tauri desktop shell — About / app identity
   "AppName",

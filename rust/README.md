@@ -23,7 +23,7 @@ A Windows port of [CodexBar](https://github.com/steipete/CodexBar) - a system tr
 
 ### From Release
 
-Download the latest release from the [Releases](https://github.com/Finesssee/Win-CodexBar/releases) page.
+Download the latest release from the [Releases](https://github.com/junglesub/Win-CodexBar/releases) page.
 
 - Recommended: `CodexBar-<version>-Setup.exe`
   - This installer now installs the required Microsoft Visual C++ runtime and Microsoft Edge WebView2 Runtime on clean Windows machines before launching CodexBar.
@@ -42,7 +42,7 @@ Requirements:
 
 ```powershell
 # Clone the repository
-git clone https://github.com/Finesssee/Win-CodexBar.git
+git clone https://github.com/junglesub/Win-CodexBar.git
 cd Win-CodexBar/rust
 
 # Build release version
@@ -68,10 +68,14 @@ codexbar.exe
 This launches the system tray application:
 - Click the tray icon to show the usage panel
 - Use Settings to pick English or Chinese in `General`
-- Use `General -> Updates` to choose the release channel, background auto-download behavior, and whether a ready installer should run automatically when you quit CodexBar
 - Use the Providers tab to re-enable providers and review auth/account state
 - Use the Cookies, API Keys, or provider account sections to recover credentials if status stops updating
 - Use the About button for version info
+
+The in-app updater (startup check, About update controls, tray
+**Check for Updates**, update banners, and install-on-quit) is temporarily
+disabled; download the latest build from the
+[Releases](https://github.com/junglesub/Win-CodexBar/releases) page instead.
 
 On Windows Remote Desktop sessions, CodexBar now exits with a direct error dialog instead of crashing with renderer errors. Use the local Windows desktop session for the native UI, or run installed CLI commands like `codexbar-cli usage -p claude` while connected over RDP.
 

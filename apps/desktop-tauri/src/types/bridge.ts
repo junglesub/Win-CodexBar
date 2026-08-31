@@ -1,4 +1,4 @@
-export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
+﻿export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
 export type VisibleSurfaceMode = Exclude<SurfaceMode, "hidden">;
 export type SettingsTabId =
   | "general"
@@ -229,6 +229,10 @@ export interface SettingsSnapshot {
   floatBarEnabled: boolean;
   /** 30..=100 — clamped server-side. */
   floatBarOpacity: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor: string;
+  /** 0..=100, clamped server-side. Affects only the pill surfaces. */
+  floatBarBackgroundOpacity: number;
   /** 75..=200 — clamped server-side. */
   floatBarScale: number;
   floatBarOrientation: FloatBarOrientation;
@@ -238,6 +242,8 @@ export interface SettingsSnapshot {
   floatBarProviderIds: string[];
   /** When true, render with dark text/glass for light desktops. */
   floatBarDarkText: boolean;
+  /** When true, append each quota window's compact reset beside its percentage. */
+  /** When true, render the next primary reset inline in each provider pill. */
   /** When true, render the selected metric's next reset inline in each provider pill. */
   floatBarShowResetInline: boolean;
   /** When true, scan and render local cost summaries. */
@@ -321,6 +327,10 @@ export interface SettingsUpdate {
   providerMetrics?: Record<string, MetricPreference>;
   floatBarEnabled?: boolean;
   floatBarOpacity?: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor?: string;
+  /** 0..=100, clamped server-side. */
+  floatBarBackgroundOpacity?: number;
   floatBarScale?: number;
   floatBarOrientation?: FloatBarOrientation;
   floatBarStyle?: FloatBarStyle;

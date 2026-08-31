@@ -18,6 +18,28 @@ fn test_locale_key_english() {
 }
 
 #[test]
+fn float_bar_agy_run_needed_locale_values() {
+    // The FloatBar overlay for the Antigravity-not-running state must stay
+    // short in every supported locale. ko-KR is the exact required string.
+    let cases = [
+        (Language::English, "Start agy"),
+        (Language::Korean, "agy 실행 필요"),
+        (Language::Chinese, "需启动 agy"),
+        (Language::ChineseTraditional, "需啟動 agy"),
+        (Language::Japanese, "agy の起動が必要"),
+        (Language::Spanish, "Inicia agy"),
+        (Language::Russian, "Запустите agy"),
+    ];
+    for (lang, expected) in cases {
+        assert_eq!(
+            get_text(lang, LocaleKey::FloatBarAgyRunNeeded),
+            expected,
+            "{lang:?}"
+        );
+    }
+}
+
+#[test]
 fn test_locale_key_chinese() {
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabGeneral), "通用");
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabCookies), "Cookie");
@@ -444,6 +466,33 @@ fn test_fluent_preserves_literal_placeholders_and_status_spacing() {
     assert_eq!(
         get_text(Language::English, LocaleKey::RemainingAmount),
         "{:.2} remaining"
+    );
+}
+
+#[test]
+fn test_about_copyright_before_identifies_junglesub_codexbar() {
+    assert_eq!(
+        get_text(Language::English, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. Based on"
+    );
+    assert_eq!(
+        get_text(Language::Japanese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。元プロジェクト："
+    );
+    assert_eq!(
+        get_text(Language::Russian, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. На основе"
+    );
+    assert_eq!(
+        get_text(Language::Chinese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。基于"
+    );
+    assert_eq!(
+        get_text(
+            Language::ChineseTraditional,
+            LocaleKey::AboutCopyrightBefore
+        ),
+        "junglesub/CodexBar。基於"
     );
 }
 

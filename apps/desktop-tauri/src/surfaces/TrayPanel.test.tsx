@@ -155,6 +155,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     providerMetrics: {},
     floatBarEnabled: false,
     floatBarOpacity: 80,
+    floatBarBackgroundColor: "#FFFFFF",
+    floatBarBackgroundOpacity: 8,
     floatBarScale: 100,
     floatBarOrientation: "horizontal",
     floatBarStyle: "floating",

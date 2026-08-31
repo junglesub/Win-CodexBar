@@ -130,6 +130,8 @@ pub fn apply_state(app: &tauri::AppHandle, settings: &Settings) {
 pub struct SettingsPatch {
     pub enabled: Option<bool>,
     pub opacity: Option<u8>,
+    pub background_color: Option<String>,
+    pub background_opacity: Option<u8>,
     pub scale: Option<u8>,
     pub orientation: Option<String>,
     pub style: Option<String>,
@@ -144,6 +146,8 @@ impl SettingsPatch {
     pub fn is_empty(&self) -> bool {
         self.enabled.is_none()
             && self.opacity.is_none()
+            && self.background_color.is_none()
+            && self.background_opacity.is_none()
             && self.scale.is_none()
             && self.orientation.is_none()
             && self.style.is_none()
@@ -162,6 +166,14 @@ impl SettingsPatch {
         }
         if let Some(v) = self.opacity {
             settings.float_bar_opacity = codexbar::settings::clamp_float_bar_opacity(v);
+        }
+        if let Some(v) = &self.background_color {
+            settings.float_bar_background_color =
+                codexbar::settings::normalize_float_bar_background_color(v);
+        }
+        if let Some(v) = self.background_opacity {
+            settings.float_bar_background_opacity =
+                codexbar::settings::clamp_float_bar_background_opacity(v);
         }
         if let Some(v) = self.scale {
             settings.float_bar_scale = codexbar::settings::clamp_float_bar_scale(v);
@@ -271,6 +283,29 @@ mod tests {
     }
 
     #[test]
+    fn background_patch_is_not_empty_and_clamps_on_apply() {
+        let patch = SettingsPatch {
+            background_color: Some("#12abEF".into()),
+            background_opacity: Some(255),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        s.float_bar_background_color = "#ABCDEF".into();
+        s.float_bar_background_opacity = 42;
+        let original_enabled = s.float_bar_enabled;
+        let original_style = s.float_bar_style.clone();
+
+        patch.apply(&mut s);
+        assert_eq!(s.float_bar_background_color, "#12ABEF");
+        assert_eq!(s.float_bar_background_opacity, 100);
+        // Unrelated fields are untouched.
+        assert_eq!(s.float_bar_enabled, original_enabled);
+        assert_eq!(s.float_bar_style, original_style);
+    }
+
+    #[test]
     fn empty_patch_leaves_settings_unchanged() {
         let original = Settings::default();
         let mut s = Settings::default();
@@ -284,6 +319,14 @@ mod tests {
         assert_eq!(
             s.float_bar_show_reset_inline,
             original.float_bar_show_reset_inline
+        );
+        assert_eq!(
+            s.float_bar_background_color,
+            original.float_bar_background_color
+        );
+        assert_eq!(
+            s.float_bar_background_opacity,
+            original.float_bar_background_opacity
         );
     }
 }

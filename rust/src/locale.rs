@@ -887,6 +887,7 @@ locale_keys! {
     FloatBarThirtyDayShort,
     FloatBarNoProviders,
     FloatBarRemainingSuffix,
+    FloatBarAgyRunNeeded,
     FloatBarShowCost,
     FloatBarShowCostDescription,
 
@@ -1035,6 +1036,9 @@ locale_keys! {
     FloatBarInvertColorsHelper,
     FloatBarClickThrough,
     FloatBarClickThroughHelper,
+    FloatBarBackgroundColor,
+    FloatBarBackgroundOpacity,
+    FloatBarResetBackground,
 
     // Tauri desktop shell — About / app identity
     AppName,
