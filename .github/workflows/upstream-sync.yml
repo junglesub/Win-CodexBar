@@ -109,10 +109,12 @@ jobs:
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           PR_NUMBER="$(
             gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
               --state open \
               --base personal \
               --head sync/upstream \
@@ -133,6 +135,7 @@ jobs:
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           CONFLICTED: ${{ steps.sync_main.outputs.conflicted }}
           CONFLICT_FILES: ${{ steps.sync_main.outputs.conflict_files }}
         shell: bash
@@ -141,8 +144,8 @@ jobs:
           git push --force-with-lease origin sync/upstream
           echo "Updated sync/upstream for PR #${{ steps.pr.outputs.number }}."
           if [ "$CONFLICTED" = "true" ]; then
-            gh pr edit "${{ steps.pr.outputs.number }}" --title "chore: sync upstream (conflicts)" || true
-            gh pr comment "${{ steps.pr.outputs.number }}" --body "$(cat <<EOF
+            gh pr edit "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --title "chore: sync upstream (conflicts)" || true
+            gh pr comment "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
           Squash onto personal still has unresolved files:
 
           \`\`\`
@@ -158,16 +161,18 @@ jobs:
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
           echo "personal already contains upstream; closing leftover sync PR."
-          gh pr close "${{ steps.pr.outputs.number }}" --comment "personal already contains the latest upstream/main changes." || true
+          gh pr close "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --comment "personal already contains the latest upstream/main changes." || true
           git push origin --delete sync/upstream || true
 
       - name: Create new sync branch and PR
         if: steps.pr.outputs.exists == 'false' && steps.sync_main.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
           OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
           NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
           CONFLICTED: ${{ steps.sync_main.outputs.conflicted }}
@@ -198,6 +203,7 @@ jobs:
 
           COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/personal...sync/upstream?quick_pull=1"
           if ! gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
             --base personal \
             --head sync/upstream \
             --title "$TITLE" \
