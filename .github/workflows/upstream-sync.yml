@@ -27,10 +27,18 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
           fetch-depth: 0
+          token: ${{ steps.generate-token.outputs.token }}
 
       - name: Configure Git
         run: |
@@ -108,7 +116,7 @@ jobs:
       - name: Find existing sync PR
         id: pr
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
@@ -134,7 +142,7 @@ jobs:
       - name: Update existing sync branch
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           CONFLICTED: ${{ steps.sync_main.outputs.conflicted }}
           CONFLICT_FILES: ${{ steps.sync_main.outputs.conflict_files }}
@@ -160,7 +168,7 @@ jobs:
       - name: Close stale sync PR
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'false'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
@@ -171,7 +179,7 @@ jobs:
       - name: Create new sync branch and PR
         if: steps.pr.outputs.exists == 'false' && steps.sync_main.outputs.needed == 'true'
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
           NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
