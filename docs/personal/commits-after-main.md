@@ -320,7 +320,7 @@ Both sides must be treated as landed. The merge resolution is the source of trut
 - **Files:** `.coderabbit.yaml`, `.github/workflows/pr-check.yml` (re-added), `.github/workflows/upstream-sync.yml`
 - **What changed:**
   - Slim personal `pr-check.yml` (not necessarily identical to upstream Blacksmith budget gate).
-  - `upstream-sync.yml`: weekly (Mon 03:00 Asia/Seoul) + dispatch; ff-only `origin/main` from `nesszer/Win-CodexBar` `main`; open/update PR `sync/upstream` → `personal`.
+  - `upstream-sync.yml`: weekly (Mon 03:00 Asia/Seoul) + dispatch; ff-only `origin/main` from `nesszer/Win-CodexBar` `main`; open/update a normal merge PR `sync/upstream` → `personal`.
   - Initial CodeRabbit config.
 - **Collision risk:** **High** for `.github/workflows/pr-check.yml` (two different gates). `upstream-sync.yml` is personal-only; keep it. CodeRabbit is personal-only.
 
@@ -433,9 +433,15 @@ Tray panel, pop-out, settings provider list, and CLI still follow shared/`main` 
 When `main` has new upstream commits:
 
 1. Fast-forward `main` (this is what `upstream-sync.yml` already does with `--ff-only`).
-2. Diff `main` against the old merge-base and mark hits in the collision map.
+2. Diff both branches against their merge base. The workflow lists every path changed by both branches in the sync PR as requiring a developer decision.
 3. For each hit, decide **keep personal concept**, **take upstream concept**, or **re-implement personal concept on the new code**.
 4. Highest-cost files if both sides touched them: `FloatBar.tsx`, `antigravity/mod.rs`, `settings.rs` / `raw.rs`, `App.tsx` / `AboutTab.tsx`, `.github/workflows/pr-check.yml`, `README.md`.
 5. After merge, re-verify Float Bar slot classification (minutes bounds), Antigravity summary-then-fallback, updater still dormant, and background color settings still load.
+
+The PR must use a normal merge commit. Do not squash or rebase it: preserving
+`main` as an ancestor prevents later sync runs from reconsidering the same
+upstream commits. Unresolved conflicts stay in Git's index and are never
+committed as marker text; GitHub therefore blocks the PR until a developer
+resolves and commits them.
 
 This catalog does not include untracked local paths (for example `plugins/` at generation time).

@@ -106,4 +106,13 @@ foreach ($removedScript in @('circleci-release-build.ps1', 'emit-release-manifes
     Assert-True (-not (Test-Path (Join-Path $scriptRoot $removedScript))) "$removedScript removed"
 }
 
+$upstreamSyncText = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $scriptRoot) '.github\workflows\upstream-sync.yml')
+Assert-True ($upstreamSyncText -match 'git merge --ff-only upstream/main') 'fork main fast-forwards from upstream'
+Assert-True ($upstreamSyncText -match 'git checkout -B sync/upstream main') 'new sync branches track fork main'
+Assert-True ($upstreamSyncText -match 'git merge --no-edit main') 'existing sync branches merge later main commits normally'
+Assert-True ($upstreamSyncText -match 'comm -12') 'paths changed by both personal and main require developer review'
+Assert-True ($upstreamSyncText -notmatch 'git merge --squash') 'sync never squashes main into personal'
+Assert-True ($upstreamSyncText -notmatch 'git add -A') 'sync never commits unresolved conflict markers'
+Assert-True ($upstreamSyncText -notmatch 'checkout origin/personal -- \.github/workflows') 'main workflow changes are not discarded wholesale'
+
 Write-Host 'Release pipeline focused tests passed.'

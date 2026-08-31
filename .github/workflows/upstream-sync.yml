@@ -10,16 +10,15 @@ on:
 permissions:
   contents: write
   pull-requests: write
-  issues: write
 
 concurrency:
   group: upstream-sync
   cancel-in-progress: false
 
-# origin/main is a tracking ref only. This workflow never updates it, so
-# upstream workflows that listen on push to main (e.g. pr-check) do not run.
-# Fork-owned files under .github/workflows/ stay on personal.
-# Squash conflicts still open/update the sync PR with conflict markers.
+# main tracks nesszer/main with fast-forward-only updates. The sync PR then
+# merges main into personal, preserving both histories and letting GitHub block
+# textual conflicts. Paths changed on both branches are listed for developer
+# review because a clean textual merge can still be a product-level collision.
 
 jobs:
   sync:
@@ -46,72 +45,99 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
 
       - name: Add upstream remote
-        run: |
-          git remote add upstream https://github.com/nesszer/Win-CodexBar.git
+        run: git remote add upstream https://github.com/nesszer/Win-CodexBar.git
 
       - name: Fetch repositories
         run: |
           git fetch --prune origin
           git fetch upstream main
 
-      - name: Prepare upstream sync
+      - name: Fast-forward main and find overlaps
         id: sync_main
         shell: bash
         run: |
+          LOCAL_MAIN_SHA="$(git rev-parse origin/main)"
           UPSTREAM_MAIN_SHA="$(git rev-parse upstream/main)"
-          echo "upstream_main_sha=$UPSTREAM_MAIN_SHA" >> "$GITHUB_OUTPUT"
-          echo "local_main_sha=$(git rev-parse origin/main)" >> "$GITHUB_OUTPUT"
 
-          git checkout -B sync/upstream origin/personal
-
-          CONFLICTED=false
-          if ! git merge --squash upstream/main; then
-            CONFLICTED=true
-            echo "::warning::Squash of upstream/main onto personal conflicted. Opening or updating the sync PR with conflict markers."
+          git checkout -B main origin/main
+          git merge --ff-only upstream/main
+          if [ "$LOCAL_MAIN_SHA" != "$UPSTREAM_MAIN_SHA" ]; then
+            git push origin main
           fi
 
-          CONFLICT_FILES="$(
-            git diff --name-only --diff-filter=U \
-              | grep -v '^\.github/workflows/' \
-              | sort \
-              | paste -sd ',' - || true
+          MERGE_BASE="$(git merge-base origin/personal main)"
+          OVERLAP_FILES="$(
+            comm -12 \
+              <(git diff --name-only "$MERGE_BASE"..origin/personal | sort) \
+              <(git diff --name-only "$MERGE_BASE"..main | sort)
           )"
-          if [ -n "$CONFLICT_FILES" ]; then
-            CONFLICTED=true
-          fi
 
-          # Stage remaining paths, including unresolved files with markers.
-          git add -A
+          echo "local_main_sha=$LOCAL_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream_main_sha=$UPSTREAM_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo 'overlap_files<<EOF'
+            echo "$OVERLAP_FILES"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
 
-          # Pin workflows to origin/personal. Squash otherwise stages upstream
-          # files like release.yml, and GITHUB_TOKEN cannot push those.
-          git rm -r --cached --ignore-unmatch -- .github/workflows
-          rm -rf .github/workflows
-          git checkout origin/personal -- .github/workflows
-          git add -- .github/workflows
-
-          echo "conflicted=$CONFLICTED" >> "$GITHUB_OUTPUT"
-          echo "conflict_files=$CONFLICT_FILES" >> "$GITHUB_OUTPUT"
-
-          if ! git diff --cached --quiet origin/personal -- .github/workflows; then
-            echo "::error::Staged .github/workflows still differs from origin/personal; GITHUB_TOKEN cannot push workflow file changes."
-            git diff --cached --name-only origin/personal -- .github/workflows
-            exit 1
-          fi
-
-          if git diff --cached --quiet; then
+          if git merge-base --is-ancestor main origin/personal; then
             echo "needed=false" >> "$GITHUB_OUTPUT"
-            echo "personal already contains the latest non-workflow upstream/main changes."
-            git reset --hard origin/personal
           else
             echo "needed=true" >> "$GITHUB_OUTPUT"
-            if [ "$CONFLICTED" = "true" ]; then
-              git commit -m "chore: sync upstream ${UPSTREAM_MAIN_SHA:0:12} (conflicts)"
-            else
-              git commit -m "chore: sync upstream ${UPSTREAM_MAIN_SHA:0:12}"
-            fi
-            echo "Prepared squash commit $(git rev-parse HEAD) from upstream/main."
           fi
+
+      - name: Write PR description
+        env:
+          OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
+          NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
+          OVERLAP_FILES: ${{ steps.sync_main.outputs.overlap_files }}
+        shell: bash
+        run: |
+          if [ -n "$OVERLAP_FILES" ]; then
+            OVERLAP_SECTION="$(cat <<EOF
+
+          ### Developer decision required
+
+          Both \`personal\` and \`main\` changed these paths since their merge base.
+          Review each path for product-level duplication even if Git reports no
+          textual conflict. Preserve the personal behavior documented in
+          \`docs/personal/commits-after-main.md\` unless a developer explicitly
+          chooses the main behavior.
+
+          \`\`\`
+          $OVERLAP_FILES
+          \`\`\`
+          EOF
+          )"
+          else
+            OVERLAP_SECTION="No paths were changed by both branches."
+          fi
+
+          cat > "$RUNNER_TEMP/upstream-sync-pr.md" <<EOF
+          Automated upstream synchronization.
+
+          Fork main before sync:
+          \`$OLD_SHA\`
+
+          Upstream main:
+          \`$NEW_SHA\`
+
+          This PR merges \`main\` into \`personal\` with normal Git ancestry.
+          Do not squash or rebase this PR. GitHub merge conflicts and final merge
+          approval are intentionally manual.
+          $OVERLAP_SECTION
+
+          ### Local conflict resolution
+
+          \`\`\`bash
+          git fetch origin
+          git checkout -B sync/upstream origin/sync/upstream
+          git merge origin/personal
+
+          # Resolve conflicts, verify, commit, and push.
+          git push origin sync/upstream
+          \`\`\`
+          EOF
 
       - name: Find existing sync PR
         id: pr
@@ -133,37 +159,38 @@ jobs:
           if [ -n "$PR_NUMBER" ]; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-            echo "Found existing open sync PR #$PR_NUMBER"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
-            echo "No existing open sync PR found."
           fi
 
-      - name: Update existing sync branch
+      - name: Update existing sync branch and PR
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'true'
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          CONFLICTED: ${{ steps.sync_main.outputs.conflicted }}
-          CONFLICT_FILES: ${{ steps.sync_main.outputs.conflict_files }}
         shell: bash
         run: |
           git fetch origin sync/upstream
-          git push --force-with-lease origin sync/upstream
-          echo "Updated sync/upstream for PR #${{ steps.pr.outputs.number }}."
-          if [ "$CONFLICTED" = "true" ]; then
-            gh pr edit "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --title "chore: sync upstream (conflicts)" || true
-            gh pr comment "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --body "$(cat <<EOF
-          Squash onto personal still has unresolved files:
+          git checkout -B sync/upstream origin/sync/upstream
 
-          \`\`\`
-          $(echo "$CONFLICT_FILES" | tr ',' '\n')
-          \`\`\`
-
-          Search for \`<<<<<<<\` and resolve, then push to \`sync/upstream\`.
-          EOF
-          )" || true
+          # Replace commits created by the previous squash workflow. They can
+          # contain conflict markers while GitHub still reports the PR mergeable.
+          if git log -1 --format=%s | grep -qE '^chore: sync upstream .+ \(conflicts\)$'; then
+            git reset --hard main
+            git push --force-with-lease origin sync/upstream
+          elif ! git merge-base --is-ancestor main HEAD; then
+            if ! git merge --no-edit main; then
+              git merge --abort || true
+              echo "::error::New main changes conflict with sync/upstream. Resolve them manually; no conflict markers were committed."
+              exit 1
+            fi
+            git push origin sync/upstream
           fi
+
+          gh pr edit "${{ steps.pr.outputs.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "chore: sync upstream" \
+            --body-file "$RUNNER_TEMP/upstream-sync-pr.md"
 
       - name: Close stale sync PR
         if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'false'
@@ -172,8 +199,9 @@ jobs:
           GH_REPO: ${{ github.repository }}
         shell: bash
         run: |
-          echo "personal already contains upstream; closing leftover sync PR."
-          gh pr close "${{ steps.pr.outputs.number }}" --repo "$GITHUB_REPOSITORY" --comment "personal already contains the latest upstream/main changes." || true
+          gh pr close "${{ steps.pr.outputs.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --comment "personal already contains the latest main." || true
           git push origin --delete sync/upstream || true
 
       - name: Create new sync branch and PR
@@ -181,77 +209,15 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.generate-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
-          NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
-          CONFLICTED: ${{ steps.sync_main.outputs.conflicted }}
-          CONFLICT_FILES: ${{ steps.sync_main.outputs.conflict_files }}
         shell: bash
         run: |
           git push origin --delete sync/upstream 2>/dev/null || true
+          git checkout -B sync/upstream main
           git push -u origin sync/upstream
 
-          TITLE="chore: sync upstream"
-          if [ "$CONFLICTED" = "true" ]; then
-            TITLE="chore: sync upstream (conflicts)"
-          fi
-
-          CONFLICT_SECTION=""
-          if [ "$CONFLICTED" = "true" ]; then
-            CONFLICT_SECTION="$(cat <<EOF
-
-          ### Unresolved squash conflicts
-          This commit still contains conflict markers. Resolve these files before merging:
-
-          \`\`\`
-          $(echo "$CONFLICT_FILES" | tr ',' '\n')
-          \`\`\`
-          EOF
-          )"
-          fi
-
-          COMPARE_URL="https://github.com/${GITHUB_REPOSITORY}/compare/personal...sync/upstream?quick_pull=1"
-          if ! gh pr create \
+          gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --base personal \
             --head sync/upstream \
-            --title "$TITLE" \
-            --body "$(cat <<EOF
-          Automated upstream synchronization.
-
-          origin/main (tracking only, not updated by this workflow):
-          \`$OLD_SHA\`
-
-          Upstream main:
-          \`$NEW_SHA\`
-
-          This PR squashes upstream/main onto personal and keeps this fork's
-          \`.github/workflows\` files.
-
-          This PR is maintained automatically.
-
-          If upstream receives additional commits before this PR is merged,
-          they will be added to this PR.
-
-          Conflict resolution and final merge are intentionally manual.
-          $CONFLICT_SECTION
-
-          ---
-
-          ### Local Conflict Resolution Guide
-          \`\`\`bash
-          git fetch origin
-          git checkout -B sync/upstream origin/sync/upstream
-
-          # Search for <<<<<<< and resolve remaining files
-          git add -A
-          git commit --amend --no-edit
-          git push --force-with-lease origin sync/upstream
-          \`\`\`
-          EOF
-          )"; then
-            echo "::error::gh pr create failed. sync/upstream was pushed; open a PR manually:"
-            echo "::error::$COMPARE_URL"
-            echo "::error::If the error is 'Resource not accessible by integration', enable Settings → Actions → General → Workflow permissions → Allow GitHub Actions to create and approve pull requests."
-            exit 1
-          fi
-          echo "Successfully created upstream sync PR targeting personal."
+            --title "chore: sync upstream" \
+            --body-file "$RUNNER_TEMP/upstream-sync-pr.md"
