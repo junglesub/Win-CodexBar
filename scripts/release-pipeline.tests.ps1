@@ -38,7 +38,7 @@ Assert-True (@($parsedArray | Where-Object tagName -EQ 'personal-latest').Count 
 
 $prerequisiteText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'install-release-prerequisites.ps1')
 Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
-Assert-True ($prerequisiteText -match '11\\.24\\.0') 'release prerequisite keeps pnpm 11.24.0 pinned'
+Assert-True ($prerequisiteText -match '10\\.18\\.1') 'release prerequisite keeps pnpm 10.18.1 pinned'
 
 Assert-Equal (Normalize-GitHubRepository 'https://github.com/junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'HTTPS canonical URL'
 Assert-Equal (Normalize-GitHubRepository 'git@github.com:junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'SSH canonical URL'
