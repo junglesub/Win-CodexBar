@@ -12,6 +12,7 @@ pub struct SettingsUpdate {
     pub adaptive_refresh: Option<bool>,
     pub refresh_all_providers_on_menu_open: Option<bool>,
     pub low_power_mode: Option<bool>,
+    pub low_power_mode_preference: Option<String>,
     pub start_at_login: Option<bool>,
     pub start_minimized: Option<bool>,
     pub show_notifications: Option<bool>,
@@ -23,6 +24,7 @@ pub struct SettingsUpdate {
     pub provider_usage_thresholds:
         Option<std::collections::HashMap<String, codexbar::settings::UsageThresholdOverride>>,
     pub predictive_pace_warning_enabled: Option<bool>,
+    pub show_pace: Option<bool>,
     pub tray_icon_mode: Option<String>,
     pub switcher_shows_icons: Option<bool>,
     pub menu_bar_shows_highest_usage: Option<bool>,
@@ -52,6 +54,7 @@ pub struct SettingsUpdate {
     pub tray_scale_percent: Option<u16>,
     pub powertoys_status_pipe_enabled: Option<bool>,
     pub claude_avoid_keychain_prompts: Option<bool>,
+    pub claude_allow_reading_claude_code_credentials: Option<bool>,
     pub codex_spark_usage_visible: Option<bool>,
     pub disable_keychain_access: Option<bool>,
     /// Map of provider CLI name → metric preference label.
@@ -72,12 +75,16 @@ pub struct SettingsUpdate {
     pub claude_daily_routines_usage_visible: Option<bool>,
     pub alibaba_token_plan_region: Option<String>,
     pub weekly_progress_work_days: Option<u8>,
+    pub cost_summary_display_style: Option<String>,
+    pub open_codex_usage_logs_enabled: Option<bool>,
+    pub hide_native_codex_cost_when_open_codex_present: Option<bool>,
 }
 
 impl SettingsUpdate {
     fn refreshes_provider_data(&self) -> bool {
         self.enabled_providers.is_some()
             || self.claude_daily_routines_usage_visible.is_some()
+            || self.claude_allow_reading_claude_code_credentials.is_some()
             || self.alibaba_token_plan_region.is_some()
             || self.weekly_progress_work_days.is_some()
     }
@@ -86,6 +93,7 @@ impl SettingsUpdate {
         self.enabled_providers.is_some()
             || self.refresh_interval_secs.is_some()
             || self.low_power_mode.is_some()
+            || self.low_power_mode_preference.is_some()
             || self.adaptive_refresh.is_some()
             || self.codex_custom_sessions_dirs.is_some()
             || self.high_usage_threshold.is_some()
@@ -150,8 +158,23 @@ impl SettingsUpdate {
         if let Some(v) = self.refresh_all_providers_on_menu_open {
             settings.refresh_all_providers_on_menu_open = v;
         }
+        if let Some(v) = self.open_codex_usage_logs_enabled {
+            settings.open_codex_usage_logs_enabled = v;
+        }
+        if let Some(v) = self.hide_native_codex_cost_when_open_codex_present {
+            settings.hide_native_codex_cost_when_open_codex_present = v;
+        }
         if let Some(v) = self.low_power_mode {
-            settings.low_power_mode = v;
+            settings.low_power_mode_preference = if v {
+                codexbar::settings::LowPowerModePreference::On
+            } else {
+                codexbar::settings::LowPowerModePreference::Off
+            };
+        }
+        if let Some(value) = self.low_power_mode_preference.as_deref()
+            && let Some(preference) = codexbar::settings::LowPowerModePreference::parse(value)
+        {
+            settings.low_power_mode_preference = preference;
         }
         if let Some(ref s) = self.tray_icon_mode
             && let Some(mode) = parse_tray_icon_mode(s)
@@ -253,6 +276,9 @@ impl SettingsUpdate {
         if let Some(v) = self.predictive_pace_warning_enabled {
             settings.predictive_pace_warning_enabled = v;
         }
+        if let Some(v) = self.show_pace {
+            settings.show_pace = v;
+        }
         Ok(self)
     }
 
@@ -307,6 +333,9 @@ impl SettingsUpdate {
         if let Some(v) = self.claude_avoid_keychain_prompts {
             settings.set_claude_avoid_keychain_prompts(v);
         }
+        if let Some(v) = self.claude_allow_reading_claude_code_credentials {
+            settings.claude_allow_reading_claude_code_credentials = v;
+        }
         if let Some(v) = self.codex_spark_usage_visible {
             settings.set_codex_spark_usage_visible(v);
         }
@@ -329,6 +358,13 @@ impl SettingsUpdate {
         if let Some(v) = self.weekly_progress_work_days {
             settings.weekly_progress_work_days = if (2..=6).contains(&v) { Some(v) } else { None };
         }
+        if let Some(v) = self
+            .cost_summary_display_style
+            .as_deref()
+            .and_then(crate::commands::bridge::parse_cost_summary_display_style)
+        {
+            settings.cost_summary_display_style = v;
+        }
         self
     }
 
@@ -350,6 +386,11 @@ impl SettingsUpdate {
     }
 
     fn apply_to(self, settings: &mut Settings) -> Result<crate::floatbar::SettingsPatch, String> {
+        if let Some(value) = self.low_power_mode_preference.as_deref()
+            && codexbar::settings::LowPowerModePreference::parse(value).is_none()
+        {
+            return Err(format!("Invalid low power mode preference: {value}"));
+        }
         let float_bar_patch = self.float_bar_patch();
         self.apply_provider_settings(settings)
             .apply_general_settings(settings)?
@@ -490,6 +531,13 @@ mod tests {
             .refreshes_provider_data()
         );
         assert!(
+            SettingsUpdate {
+                claude_allow_reading_claude_code_credentials: Some(true),
+                ..Default::default()
+            }
+            .refreshes_provider_data()
+        );
+        assert!(
             !SettingsUpdate {
                 provider_metrics: Some(Default::default()),
                 tray_icon_mode: Some("single".to_string()),
@@ -497,6 +545,26 @@ mod tests {
             }
             .refreshes_provider_data()
         );
+    }
+
+    #[test]
+    fn apply_advanced_settings_sets_claude_code_credentials_consent() {
+        let mut settings = Settings::default();
+        assert!(!settings.claude_allow_reading_claude_code_credentials);
+
+        SettingsUpdate {
+            claude_allow_reading_claude_code_credentials: Some(true),
+            ..Default::default()
+        }
+        .apply_advanced_settings(&mut settings);
+        assert!(settings.claude_allow_reading_claude_code_credentials);
+
+        SettingsUpdate {
+            claude_allow_reading_claude_code_credentials: Some(false),
+            ..Default::default()
+        }
+        .apply_advanced_settings(&mut settings);
+        assert!(!settings.claude_allow_reading_claude_code_credentials);
     }
 
     #[test]

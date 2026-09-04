@@ -82,10 +82,11 @@ pub struct ServeArgs {
     #[arg(long = "allow-plain-http", default_value_t = false)]
     pub allow_plain_http: bool,
 
-    /// Dashboard snapshot identity detail: redacted (default) or full. `full`
-    /// exposes real account emails to every authorized dashboard client.
-    #[arg(long, value_parser = ["redacted", "full"], default_value = "redacted")]
-    pub identity: String,
+    /// Dashboard snapshot identity detail: redacted or full. When omitted,
+    /// the identity follows the app's "hide personal info" setting per
+    /// request (upstream 0.50.1 #2960).
+    #[arg(long, value_parser = ["redacted", "full"])]
+    pub identity: Option<String>,
 }
 
 /// Normalized serve bind configuration after startup validation.
@@ -98,8 +99,9 @@ struct ServeConfig {
     /// [`HEAD_READ_TIMEOUT`]; tests inject a short budget (upstream 0.48.0
     /// #2684 makes the deadline injectable for exactly this reason).
     head_read_budget: Duration,
-    /// Dashboard snapshot identity mode (`redacted` default, `full` opt-in).
-    identity: DashboardIdentity,
+    /// Dashboard snapshot identity mode. `None` means follow the app's
+    /// `hide_personal_info` setting per request (upstream 0.50.1 #2960).
+    identity: Option<DashboardIdentity>,
     /// Dashboard state (coordinator + producer). Always `Some` from `run`;
     /// `None` only in pure-transport tests, where dashboard routes answer 503.
     dashboard: Option<dashboard::DashboardState>,
@@ -107,8 +109,13 @@ struct ServeConfig {
 
 pub async fn run(args: ServeArgs) -> anyhow::Result<()> {
     let mut config = validate_serve_args(&args)?;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "refresh interval is seconds; >u32::MAX secs is meaningless for a dashboard refresh"
+    )]
+    let refresh_interval = args.refresh_interval.max(1) as u32;
     config.dashboard = Some(dashboard::DashboardState::live(
-        args.refresh_interval.max(1) as u32,
+        refresh_interval,
         config.identity,
     ));
     let listener = TcpListener::bind((config.host.as_str(), config.port)).await?;
@@ -171,10 +178,13 @@ fn validate_serve_args(args: &ServeArgs) -> anyhow::Result<ServeConfig> {
     if args.port == 0 {
         anyhow::bail!("--port must be between 1 and 65535.");
     }
-
     // clap's value_parser already rejects anything but redacted|full.
-    let Some(identity) = DashboardIdentity::parse(&args.identity) else {
-        anyhow::bail!("--identity must be redacted or full.");
+    let identity = match args.identity.as_deref() {
+        Some(raw) => Some(
+            DashboardIdentity::parse(raw)
+                .ok_or_else(|| anyhow::anyhow!("--identity must be redacted or full."))?,
+        ),
+        None => None,
     };
 
     let token = resolve_dashboard_token(args.dashboard_token.as_deref())?;
@@ -392,8 +402,10 @@ fn invalid_request_response() -> String {
 /// The drain is bounded independently of the head-read budget, so this cannot
 /// re-open the slow-trickle hold that #2684 closes.
 async fn respond_and_close_gracefully(stream: &mut TcpStream, response: &[u8]) {
-    let _ = stream.write_all(response).await;
-    let _ = stream.shutdown().await;
+    // Best-effort teardown: a failed error write still leaves the drain +
+    // half-close below to close the socket cleanly.
+    let _written = stream.write_all(response).await;
+    let _shutdown = stream.shutdown().await;
     let drain = async {
         let mut sink = [0_u8; 512];
         while let Ok(n) = stream.read(&mut sink).await {
@@ -402,7 +414,9 @@ async fn respond_and_close_gracefully(stream: &mut TcpStream, response: &[u8]) {
             }
         }
     };
-    let _ = tokio::time::timeout(Duration::from_secs(1), drain).await;
+    // Draining is best-effort; whether the 1s drain budget elapses or the
+    // client already closed, the socket is dropped right after either way.
+    let _drain_result = tokio::time::timeout(Duration::from_secs(1), drain).await;
 }
 
 /// Strongly typed route table for the serve surface.

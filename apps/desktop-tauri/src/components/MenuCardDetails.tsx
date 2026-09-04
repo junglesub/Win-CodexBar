@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type {
+  CostSummaryDisplayStyle,
   DailyCostPoint,
   PaceSnapshot,
   ProviderChartData,
@@ -270,11 +271,12 @@ function getMetricPaceView(snap: RateWindowSnapshot): MetricPaceView {
 
   return { kind: "none" };
 }
-
 type MetricRowDisplay = {
   resetTimeRelative: boolean;
   showResetWhenExhausted?: boolean;
+  showPace?: boolean;
   showAsUsed?: boolean;
+  costSummaryDisplayStyle?: CostSummaryDisplayStyle;
 };
 
 /**
@@ -303,8 +305,12 @@ function MetricRow({
   sessionEquivalentForecast?: SessionEquivalentForecastSnapshot | null;
 }) {
   const { t } = useLocale();
-  const { resetTimeRelative, showResetWhenExhausted = false, showAsUsed = false } =
-    display;
+  const {
+    resetTimeRelative,
+    showResetWhenExhausted = false,
+    showPace = true,
+    showAsUsed = false,
+  } = display;
   const isInformational = snap.isInformational === true;
   const usedPct = Number.isFinite(snap.usedPercent) ? Math.max(0, snap.usedPercent) : 0;
   const barPct = Math.min(100, usedPct);
@@ -327,7 +333,7 @@ function MetricRow({
     Number.isFinite(resetTarget) &&
     resetTarget > Date.now() &&
     resetText !== null;
-  const paceView = getMetricPaceView(snap);
+  const paceView = showPace ? getMetricPaceView(snap) : { kind: "none" as const };
   const reserveDescription = formatReserveDescription(snap, t);
   const forecastText = formatSessionEquivalentEstimate(sessionEquivalentForecast);
   return (
@@ -393,7 +399,7 @@ function MetricRow({
           )}
         </div>
       )}
-      {!isInformational && forecastText && (
+      {showPace && !isInformational && forecastText && (
         <div className="menu-metric__row menu-metric__forecast">
           <span className="menu-metric__pct">{forecastText}</span>
         </div>
@@ -433,6 +439,8 @@ export function describeCard(
   provider: ProviderUsageSnapshot,
   chartData: ProviderChartData | null,
   visibleMetrics: MetricEntry[],
+  costSummaryDisplayStyle: CostSummaryDisplayStyle = "detailed",
+  showPace = true,
 ): MenuCardPresence {
   const hasCostHistory =
     chartData !== null && chartData.costHistory.some((point) => point.value > 0);
@@ -445,8 +453,8 @@ export function describeCard(
   const localUsage = provider.error ? null : chartData?.localUsage ?? null;
   const wayfinderUsage = isWayfinder ? provider.wayfinderUsage : null;
   const hasMetrics = visibleMetrics.length > 0;
-  const hasCost = !!provider.cost;
-  const hasPace = !!provider.pace;
+  const hasCost = !!provider.cost && costSummaryDisplayStyle !== "hidden";
+  const hasPace = showPace && !!provider.pace;
   const hasDetails =
     !provider.error &&
     (hasMetrics || hasCost || hasPace || hasCharts || !!localUsage || !!wayfinderUsage);
@@ -481,6 +489,7 @@ export default function MenuCardDetails({
     display.resetTimeRelative,
   );
   const localCostHistory = chartData?.costHistory ?? [];
+  const costStyle = display.costSummaryDisplayStyle ?? "detailed";
 
   const {
     hasMetrics,
@@ -529,9 +538,9 @@ export default function MenuCardDetails({
         />
       )}
 
-      {hasMetrics && hasCost && <div className="menu-card__divider" />}
+      {hasMetrics && hasCost && costStyle !== "hidden" && <div className="menu-card__divider" />}
 
-      {provider.cost && (
+      {provider.cost && costStyle !== "hidden" && (
         <section className="menu-card__group menu-card__cost">
           <div className="menu-card__group-title">
             {provider.cost.balance != null && provider.cost.limit == null
@@ -566,7 +575,7 @@ export default function MenuCardDetails({
                   </>
                 )}
               </div>
-              {provider.cost.balance != null && (
+              {costStyle === "detailed" && provider.cost.balance != null && (
                 <div className="menu-card__cost-line menu-card__cost-line--muted">
                   {t("DetailCostBalance")}:{" "}
                   {provider.cost.formattedBalance ||
@@ -576,7 +585,7 @@ export default function MenuCardDetails({
                     )}
                 </div>
               )}
-              {provider.cost.remaining != null && (
+              {costStyle === "detailed" && provider.cost.remaining != null && (
                 <div className="menu-card__cost-line menu-card__cost-line--muted">
                   {t("DetailCostRemaining")}:{" "}
                   {formatCurrency(
@@ -585,19 +594,27 @@ export default function MenuCardDetails({
                   )}
                 </div>
               )}
-              {formattedCostReset && (
+              {costStyle === "detailed" && formattedCostReset && (
                 <div className="menu-card__cost-line menu-card__cost-line--muted">
                   {t("DetailCostResets")}: {formattedCostReset}
                 </div>
               )}
             </>
           )}
+          {provider.providerId === "mistral" && provider.cost && (
+            <div className="menu-card__cost-line menu-card__monthly-spend">
+              {t("MistralMonthlySpend")}:{" "}
+              {provider.cost.currencySymbol
+                ? `${provider.cost.currencySymbol}${provider.cost.used.toFixed(2)}`
+                : provider.cost.formattedUsed}
+            </div>
+          )}
         </section>
       )}
 
       {(hasMetrics || hasCost) && hasPace && <div className="menu-card__divider" />}
 
-      {provider.pace && (
+      {hasPace && provider.pace && (
         <section className="menu-card__group menu-card__pace">
           <div className="menu-card__pace-header">
             <span className="menu-card__group-title">{t("DetailPaceTitle")}</span>
@@ -649,7 +666,7 @@ export default function MenuCardDetails({
             <SimpleBarChart
               points={chartData!.costHistory}
               label={t("DetailChartCost")}
-              color="var(--accent)"
+              color="var(--provider-accent, var(--accent))"
               formatValue={(v) => `$${v.toFixed(2)}`}
               t={t}
             />

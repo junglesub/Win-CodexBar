@@ -3,10 +3,14 @@
 //! Fetches usage data from Kiro (Amazon's AI coding assistant)
 //! Uses kiro-cli for authentication and usage fetching
 
+mod usage_limits;
 pub mod version;
 
 // Re-exports for version compatibility checking
-#[allow(unused_imports)]
+#[allow(
+    unused_imports,
+    reason = "imports needed for future Kiro provider wiring"
+)]
 pub use version::{
     KiroVersion, detect_version, find_kiro_cli, get_version, is_compatible, is_installed,
 };
@@ -447,13 +451,17 @@ impl Provider for KiroProvider {
         tracing::debug!("Fetching Kiro usage");
 
         match ctx.source_mode {
-            SourceMode::Auto | SourceMode::Cli => {
+            SourceMode::Auto | SourceMode::Cli | SourceMode::Web => {
+                // Web has no independent Kiro transport; it intentionally shares
+                // the same CLI baseline and optional GetUsageLimits enrichment.
                 let usage = self.fetch_via_cli().await?;
-                Ok(ProviderFetchResult::new(usage, "cli"))
-            }
-            SourceMode::Web => {
-                // Kiro doesn't have a direct web API, use CLI
-                let usage = self.fetch_via_cli().await?;
+                let usage = match usage_limits::fetch_usage_limits().await {
+                    Ok(limits) => usage_limits::apply_usage_limits(usage, &limits),
+                    Err(error) => {
+                        tracing::debug!("Kiro GetUsageLimits enrichment unavailable: {error}");
+                        usage
+                    }
+                };
                 Ok(ProviderFetchResult::new(usage, "cli"))
             }
             SourceMode::OAuth => Err(ProviderError::UnsupportedSource(SourceMode::OAuth)),
@@ -470,5 +478,44 @@ impl Provider for KiroProvider {
 
     fn supports_cli(&self) -> bool {
         true
+    }
+    /// Kiro's CLI probes raise `NotInstalled` when the `kiro-cli` binary is
+    /// missing ("kiro-cli not found. Install from https://kiro.dev") — an
+    /// installation gap, not a credential problem — so it surfaces as an
+    /// offline local runtime (matching the pre-backend classifier's
+    /// treatment of CLI-presence failures). The guard is message-scoped:
+    /// the state-database token lookup ("Kiro CLI state database not found
+    /// at ...") is auth-flavored and keeps the default mapping.
+    fn error_state_kind(&self, error: &ProviderError) -> crate::core::ProviderStateKind {
+        match error {
+            ProviderError::NotInstalled(msg) if msg.contains("kiro-cli not found") => {
+                crate::core::ProviderStateKind::LocalRuntimeOffline
+            }
+            _ => error.state_kind(),
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn cli_presence_maps_to_local_runtime_offline_but_state_db_stays_default() {
+        assert_eq!(
+            KiroProvider::new().error_state_kind(&ProviderError::NotInstalled(
+                "kiro-cli not found. Install from https://kiro.dev".to_string(),
+            )),
+            crate::core::ProviderStateKind::LocalRuntimeOffline
+        );
+        // The state-database token lookup is auth-flavored and keeps the
+        // default mapping.
+        assert_eq!(
+            KiroProvider::new().error_state_kind(&ProviderError::NotInstalled(
+                "Kiro CLI state database not found at C:\\Users\\x\\Kiro-Cli\\data.sqlite3"
+                    .to_string(),
+            )),
+            crate::core::ProviderStateKind::NeedsAuthentication
+        );
     }
 }

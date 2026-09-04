@@ -243,9 +243,12 @@ export default function PopOutPanel({
                   hideEmail: settings.hidePersonalInfo,
                   resetTimeRelative: settings.resetTimeRelative,
                   showResetWhenExhausted: settings.showResetWhenExhausted,
+            showPace: settings.showPace ?? true,
                   showAsUsed: settings.showAsUsed,
                   compactMetrics: selectedProviderId === null,
+                  costSummaryDisplayStyle: settings.costSummaryDisplayStyle,
                 }}
+                accentColor={settings.providerAccentColors[p.providerId]}
               />
             </div>
           </Fragment>

@@ -244,6 +244,19 @@ fn test_classify_model_families() {
 }
 
 #[test]
+fn retired_flash_ids_collapse_to_current_wire_id() {
+    for id in [
+        "gemini-3.6-flash",
+        "gemini-3.6-flash-high",
+        "gemini-3.5-flash-extra-low",
+        "gemini-3-flash-agent",
+    ] {
+        assert_eq!(canonical_model_id(id), "gemini-3.7-flash");
+    }
+    assert_eq!(canonical_model_id("gemini-3.7-flash"), "gemini-3.7-flash");
+}
+
+#[test]
 fn parses_current_language_server_process() {
     let output = r"4242	C:\Users\test\AppData\Local\Programs\Antigravity\resources\bin\language_server.exe --csrf_token 11111111-2222-3333-4444-555555555555 --extension_server_port 54123";
 
@@ -310,6 +323,41 @@ fn make_response(models: Vec<(&str, f64)>) -> UserStatusResponse {
         }
     });
     serde_json::from_value(json).unwrap()
+}
+
+#[test]
+fn antigravity_extra_windows_preserve_usage_known() {
+    let json = serde_json::json!({
+        "userStatus": {
+            "cascadeModelConfigData": {
+                "clientModelConfigs": [
+                    {
+                        "label": "Gemini 2.5 Pro",
+                        "quotaInfo": {"remainingFraction": 0.8}
+                    },
+                    {
+                        "label": "Claude 4 Sonnet",
+                        "quotaInfo": {"remainingFraction": null}
+                    }
+                ]
+            }
+        }
+    });
+    let resp: UserStatusResponse = serde_json::from_value(json).unwrap();
+    let snap = AntigravityProvider::new().parse_user_status(resp).unwrap();
+    let gemini = snap
+        .extra_rate_windows
+        .iter()
+        .find(|window| window.title.contains("Gemini"))
+        .unwrap();
+    let claude = snap
+        .extra_rate_windows
+        .iter()
+        .find(|window| window.title.contains("Claude"))
+        .unwrap();
+    assert!(gemini.usage_known);
+    assert!(!claude.usage_known);
+    assert_eq!(claude.window.used_percent, 0.0);
 }
 
 #[test]
@@ -412,6 +460,19 @@ fn detects_agy_exe_cli_process_with_empty_csrf() {
 }
 
 #[test]
+fn detects_quoted_agy_exe_cli_process() {
+    // Windows CIM quotes an executable path that contains path separators.
+    let output = "7777\t\"C:\\Users\\user\\AppData\\Local\\agy\\bin\\agy.exe\" --model gemini-3.7-flash-high";
+
+    let process = AntigravityProvider::parse_process_info(output)
+        .expect("quoted agy CLI process should be detected");
+
+    assert_eq!(process.pid, Some(7777));
+    assert_eq!(process.source, ProcessSource::Cli);
+    assert!(process.csrf_token.is_empty());
+}
+
+#[test]
 fn detects_bare_agy_command() {
     // The CLI may appear under the bare `agy` name (no .exe suffix).
     let output = "8888\tagy serve";
@@ -480,8 +541,16 @@ fn is_agy_cli_command_matches_known_names() {
     assert!(is_agy_cli_command(
         "C:\\Users\\test\\AppData\\Local\\agy\\bin\\agy.exe session"
     ));
+    assert!(is_agy_cli_command(
+        "C:\\Users\\user\\AppData\\Local\\agy\\bin\\AGY.EXE --model gemini-3.7-flash-high"
+    ));
+    assert!(is_agy_cli_command(
+        "\"C:\\Users\\user\\AppData\\Local\\agy\\bin\\agy.exe\" --model gemini-3.7-flash-high"
+    ));
     assert!(is_agy_cli_command("/usr/local/bin/antigravity-cli status"));
     assert!(is_agy_cli_command("/opt/antigravity_cli run"));
+    assert!(is_agy_cli_command("\"C:\\Tools\\antigravity-cli\" status"));
+    assert!(is_agy_cli_command("\"C:\\Tools\\antigravity_cli\" run"));
 }
 
 #[test]
@@ -516,7 +585,14 @@ fn detects_quoted_agy_exe_command_line() {
 #[test]
 fn is_agy_cli_command_rejects_unrelated_names() {
     // A leading path separator prevents `notantigravity-cli` from matching.
+    assert!(!is_agy_cli_command(
+        "notagy.exe --model gemini-3.7-flash-high"
+    ));
+    assert!(!is_agy_cli_command(
+        "C:\\Tools\\someagy.exe --model gemini-3.7-flash-high"
+    ));
     assert!(!is_agy_cli_command("notantigravity-cli status"));
+    assert!(!is_agy_cli_command("C:\\Tools\\notantigravity-cli status"));
     assert!(!is_agy_cli_command("C:\\Windows\\System32\\notepad.exe"));
     assert!(!is_agy_cli_command("language_server.exe --csrf_token abc"));
     assert!(
@@ -526,4 +602,60 @@ fn is_agy_cli_command_rejects_unrelated_names() {
     assert!(!is_agy_cli_command("\"C:\\tools\\agy-helper.exe\" run"));
     assert!(!is_agy_cli_command("\"C:\\tools\\notagy.exe\" run"));
     assert!(!is_agy_cli_command(""));
+}
+
+// ── Upstream 0.50.1 #2963: one lane per quota bucket ──────────────────────
+
+#[test]
+fn multiple_models_in_same_quota_bucket_collapse_to_one_lane() {
+    // Two Claude variants sharing the same remaining fraction (same 5h
+    // session bucket) should produce one extra rate window, not two.
+    let resp = make_response(vec![
+        ("Claude 3.5 Sonnet", 0.8),
+        ("Claude 4 Sonnet", 0.8),
+        ("Gemini 2.5 Pro Low", 0.5),
+    ]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_user_status(resp).unwrap();
+    assert_eq!(
+        snap.extra_rate_windows.len(),
+        2,
+        "models sharing a quota bucket collapse to one lane"
+    );
+}
+
+#[test]
+fn models_in_distinct_quota_buckets_keep_separate_lanes() {
+    let resp = make_response(vec![
+        ("Claude 3.5 Sonnet", 0.8),
+        ("Claude 4 Sonnet", 0.7),
+        ("Gemini 2.5 Pro Low", 0.5),
+    ]);
+    let provider = AntigravityProvider::new();
+    let snap = provider.parse_user_status(resp).unwrap();
+    assert_eq!(snap.extra_rate_windows.len(), 3);
+}
+
+#[test]
+fn not_installed_maps_to_local_runtime_offline() {
+    // Antigravity's `NotInstalled` reports the local language-server probe
+    // finding nothing to talk to: a runtime that is not running, not a
+    // credential problem.
+    assert_eq!(
+        AntigravityProvider::new()
+            .error_state_kind(&ProviderError::NotInstalled(NOT_RUNNING_MESSAGE.into())),
+        crate::core::ProviderStateKind::LocalRuntimeOffline
+    );
+}
+
+#[test]
+fn probe_failure_maps_to_unknown() {
+    // A failed probe (PowerShell unavailable etc.) says nothing about the
+    // runtime itself - inconclusive, not offline.
+    assert_eq!(
+        AntigravityProvider::new().error_state_kind(&ProviderError::NotInstalled(
+            "Failed to detect Antigravity process".into()
+        )),
+        crate::core::ProviderStateKind::Unknown
+    );
 }

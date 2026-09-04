@@ -2,6 +2,8 @@
 
 mod adaptive_refresh;
 mod aws_signing;
+mod claude_routed_pricing;
+mod codex_routed_pricing;
 mod cost_cache_budget;
 mod cost_pricing;
 pub mod curl_capture;
@@ -15,6 +17,7 @@ mod models_dev_pricing;
 mod openai_dashboard;
 mod provider;
 mod provider_factory;
+mod provider_state;
 mod rate_window;
 mod redactor;
 mod session_equivalent_forecast;
@@ -41,6 +44,7 @@ pub use models_dev_pricing::*;
 pub use openai_dashboard::*;
 pub use provider::*;
 pub use provider_factory::instantiate as instantiate_provider;
+pub use provider_state::*;
 pub use rate_window::*;
 pub use redactor::*;
 pub use session_equivalent_forecast::*;

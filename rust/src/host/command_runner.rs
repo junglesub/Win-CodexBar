@@ -4,7 +4,10 @@
 //! On Windows, uses standard process spawning with output capture.
 //! Designed for running interactive CLI tools like `codex` and `claude`.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "command runner types reserved for future host management integration"
+)]
 
 use std::collections::HashMap;
 use std::io::{BufRead, BufReader};
@@ -66,8 +69,10 @@ impl Default for CommandOptions {
 /// Result of running a command
 #[derive(Debug, Clone)]
 pub struct CommandResult {
-    /// Captured output text
+    /// Captured output text (stdout)
     pub text: String,
+    /// Captured stderr text
+    pub stderr: String,
     /// Whether the command timed out
     pub timed_out: bool,
     /// Exit code if available
@@ -109,7 +114,10 @@ pub struct CommandRunner {
 }
 
 impl CommandRunner {
+    /// Upper bound for a single captured line fed into user-facing tails.
+    pub const MAX_LINE_CHARS: usize = 200;
     const MAX_CAPTURE_BYTES: usize = 1024 * 1024;
+
     pub fn new() -> Self {
         Self {
             env_additions: HashMap::new(),
@@ -148,12 +156,19 @@ impl CommandRunner {
         Self::send_initial_input(&mut child, input, options.initial_delay, deadline);
 
         // Capture output
-        let (output, timed_out) = self.capture_output(&mut child, options, deadline)?;
+        let (output, stderr, timed_out) = match self.capture_output(&mut child, options, deadline) {
+            Ok(captured) => captured,
+            Err(e) => {
+                let _exit_code = Self::finish_child(&mut child);
+                return Err(e);
+            }
+        };
 
         let exit_code = Self::finish_child(&mut child);
 
         Ok(CommandResult {
             text: output,
+            stderr,
             timed_out,
             exit_code,
         })
@@ -241,31 +256,62 @@ impl CommandRunner {
         if Self::past_deadline(deadline) {
             return;
         }
-        let _ = stdin.write_all(input_text.as_bytes());
-        let _ = stdin.write_all(b"\n");
-        let _ = stdin.flush();
+        // Fire-and-forget seeding: the child may close stdin before we finish
+        // writing, and a write error there must not abort output capture.
+        let _written_input = stdin.write_all(input_text.as_bytes());
+        let _written_newline = stdin.write_all(b"\n");
+        let _flushed_stdin = stdin.flush();
     }
 
+    /// Grace period between stdout/stderr EOF and process-object exit.
+    ///
+    /// Windows is the motivating case: PowerShell tears down its console
+    /// handles slightly before the process object transitions to signaled, so
+    /// a single `try_wait` right after capture sees `Ok(None)` even though the
+    /// process exited successfully milliseconds later. Waiting (instead of
+    /// immediately killing) preserves the real exit code.
+    const EXIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
+
     fn finish_child(child: &mut Child) -> Option<i32> {
-        match child.try_wait() {
-            Ok(Some(status)) => status.code(),
-            Ok(None) => {
-                let _ = child.kill();
-                let _ = child.wait();
-                None
+        let mut remaining = Self::EXIT_GRACE_PERIOD;
+        loop {
+            match child.try_wait() {
+                Ok(Some(status)) => return status.code(),
+                Ok(None) => {}
+                Err(_) => break,
             }
-            Err(_) => None,
+            if remaining.is_zero() {
+                break;
+            }
+            let step = remaining.min(Duration::from_millis(10));
+            std::thread::sleep(step);
+            remaining -= step;
         }
+        // Teardown after timeout/capture or a transient try_wait error
+        // (e.g. ECHILD/handle race). If the process already exited, kill
+        // fails and `wait` still yields the true exit status; when the kill
+        // lands, the code is ours and already reported separately.
+        let killed = child.kill().is_ok();
+        let reaped = child.wait().ok();
+        if killed {
+            return None;
+        }
+        reaped.and_then(|status| status.code())
     }
 
     /// Capture output from a running process
+    ///
+    /// Returns `(stdout, stderr, timed_out)`. Stderr lines are kept in a
+    /// separate buffer (bounded like stdout) so callers can surface real
+    /// diagnostics; they are never folded into the stdout `text` field.
     fn capture_output(
         &self,
         child: &mut Child,
         options: &CommandOptions,
         deadline: Instant,
-    ) -> Result<(String, bool), CommandError> {
+    ) -> Result<(String, String, bool), CommandError> {
         let mut output = String::new();
+        let mut stderr_output = String::new();
         let mut last_output_time = Instant::now();
         let (sender, receiver) = mpsc::channel();
         Self::read_stream(Self::stdout_reader(child)?, sender.clone(), true);
@@ -274,7 +320,7 @@ impl CommandRunner {
 
         loop {
             if Self::past_deadline(deadline) {
-                return Ok((output, true));
+                return Ok((output, stderr_output, true));
             }
             if Self::idle_timed_out(options.idle_timeout, last_output_time) {
                 break;
@@ -285,6 +331,7 @@ impl CommandRunner {
                 Ok(StreamEvent::Line { text, capture }) => {
                     last_output_time = Instant::now();
                     if !capture {
+                        Self::append_output_line(&mut stderr_output, &text);
                         continue;
                     }
                     Self::append_output_line(&mut output, &text);
@@ -308,7 +355,7 @@ impl CommandRunner {
             }
         }
 
-        Ok((output, false))
+        Ok((output, stderr_output, false))
     }
 
     fn stdout_reader(child: &mut Child) -> Result<BufReader<ChildStdout>, CommandError> {
@@ -346,7 +393,7 @@ impl CommandRunner {
                     return;
                 }
             }
-            let _ = sender.send(StreamEvent::Closed);
+            let _sent_closed = sender.send(StreamEvent::Closed);
         });
     }
 
@@ -547,6 +594,76 @@ mod tests {
             started.elapsed() < Duration::from_secs(2),
             "timeout took {:?}",
             started.elapsed()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn large_capture_is_not_truncated() {
+        let runner = CommandRunner::new();
+        let options = CommandOptions {
+            timeout: Duration::from_secs(60),
+            initial_delay: Duration::ZERO,
+            extra_args: vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                "$big = 'A' * 90000; Write-Output $big".to_string(),
+            ],
+            ..CommandOptions::default()
+        };
+
+        let result = runner.run("powershell.exe", None, &options).unwrap();
+
+        assert!(!result.timed_out);
+        assert_eq!(result.exit_code, Some(0));
+        assert!(
+            result.text.len() >= 90_000,
+            "expected >= 90000 bytes, got {}",
+            result.text.len()
+        );
+    }
+
+    #[cfg(windows)]
+    #[test]
+    fn stderr_is_captured_separately_from_stdout() {
+        let runner = CommandRunner::new();
+        let options = CommandOptions {
+            initial_delay: Duration::ZERO,
+            extra_args: vec![
+                "-NoProfile".to_string(),
+                "-NonInteractive".to_string(),
+                "-Command".to_string(),
+                concat!(
+                    "$ErrorActionPreference='Stop';",
+                    "Write-Output 'stdout line';",
+                    "Write-Error 'boom diagnostics'"
+                )
+                .to_string(),
+            ],
+            ..CommandOptions::default()
+        };
+
+        let result = runner.run("powershell.exe", None, &options).unwrap();
+
+        assert_eq!(result.exit_code, Some(1));
+        assert!(
+            result.text.contains("stdout line"),
+            "stdout: {}",
+            result.text
+        );
+        assert!(
+            result.stderr.contains("boom diagnostics"),
+            "stderr: {}",
+            result.stderr
+        );
+        // PowerShell's error banner echoes the whole script line into
+        // stderr, so asserting stderr lacks "stdout line" would be wrong;
+        // instead assert stderr diagnostics never leaked into stdout.
+        assert!(
+            !result.text.contains("boom diagnostics"),
+            "stderr leaked into stdout: {}",
+            result.text
         );
     }
 

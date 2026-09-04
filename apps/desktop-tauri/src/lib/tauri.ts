@@ -33,6 +33,7 @@ import type {
   SessionFocusResult,
   TrayVisibilityStatusDto,
   UsageSpendSummary,
+  SpendContract,
   CodexLocalProjectUsageSnapshot,
   CodexAccount,
   CodexAccountUsageSnapshot,
@@ -191,6 +192,18 @@ export function removeApiKey(providerId: string): Promise<ApiKeyInfoBridge[]> {
   return invoke<ApiKeyInfoBridge[]>("remove_api_key", { providerId });
 }
 
+export function hasOpenRouterManagementApiKey(): Promise<boolean> {
+  return invoke<boolean>("has_openrouter_management_api_key");
+}
+
+export function setOpenRouterManagementApiKey(apiKey: string): Promise<void> {
+  return invoke<void>("set_openrouter_management_api_key", { apiKey });
+}
+
+export function removeOpenRouterManagementApiKey(): Promise<void> {
+  return invoke<void>("remove_openrouter_management_api_key");
+}
+
 export function getManualCookies(): Promise<CookieInfoBridge[]> {
   return invoke<CookieInfoBridge[]>("get_manual_cookies");
 }
@@ -242,8 +255,26 @@ export function getProviderLocalUsageSummary(
   return invoke<ProviderLocalUsageSummary | null>("get_provider_local_usage_summary", { providerId });
 }
 
-export function getUsageSpendSummary(): Promise<UsageSpendSummary> {
-  return invoke<UsageSpendSummary>("get_usage_spend_summary");
+export function getUsageSpendSummary(options?: { historyDays?: number; forceRefresh?: boolean }): Promise<UsageSpendSummary> {
+  return invoke<UsageSpendSummary>("get_usage_spend_summary", {
+    historyDays: options?.historyDays ?? null,
+    forceRefresh: options?.forceRefresh ?? null,
+  });
+}
+
+export function writeUsageSpendExport(path: string, payload: string): Promise<void> {
+  return invoke<void>("write_usage_spend_export", { path, payload });
+}
+
+export function getSpendContract(
+  providerId: string,
+  options?: { historyDays?: number; includeOpenCodex?: boolean },
+): Promise<SpendContract> {
+  return invoke<SpendContract>("get_spend_contract", {
+    providerId,
+    historyDays: options?.historyDays ?? null,
+    includeOpenCodex: options?.includeOpenCodex ?? null,
+  });
 }
 
 export function getCodexWorkspacesSnapshot(options?: {
@@ -348,6 +379,10 @@ export function getProviderCookieSourceOptions(
 
 export function getProviderRegionOptions(providerId: string): Promise<RegionOption[]> {
   return invoke<RegionOption[]>("get_provider_region_options", { providerId });
+}
+
+export function setProviderUsageSource(providerId: string, source: string): Promise<void> {
+  return invoke<void>("set_provider_usage_source", { providerId, source });
 }
 
 export function setProviderCookieSource(providerId: string, source: string): Promise<void> {
@@ -492,4 +527,8 @@ export function codexAccountRestartDesktop(
 
 export function getCodexAccountsState(): Promise<CodexAccountsStateBridge> {
   return invoke<CodexAccountsStateBridge>("get_codex_accounts_state");
+}
+
+export function getSafeDiagnostics(): Promise<string> {
+  return invoke<string>("get_safe_diagnostics");
 }

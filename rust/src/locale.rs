@@ -51,6 +51,7 @@ fn language_id(lang: Language) -> &'static LanguageIdentifier {
     static KO_KR: LazyLock<LanguageIdentifier> = LazyLock::new(|| "ko-KR".parse().unwrap());
     static ES_MX: LazyLock<LanguageIdentifier> = LazyLock::new(|| "es-MX".parse().unwrap());
     static RU_RU: LazyLock<LanguageIdentifier> = LazyLock::new(|| "ru-RU".parse().unwrap());
+    static TR_TR: LazyLock<LanguageIdentifier> = LazyLock::new(|| "tr-TR".parse().unwrap());
 
     match lang {
         Language::English => &EN_US,
@@ -60,6 +61,7 @@ fn language_id(lang: Language) -> &'static LanguageIdentifier {
         Language::Korean => &KO_KR,
         Language::Spanish => &ES_MX,
         Language::Russian => &RU_RU,
+        Language::Turkish => &TR_TR,
     }
 }
 
@@ -74,11 +76,23 @@ pub fn tray_tooltip(provider_name: &str, session_percent: f64, weekly_percent: f
     let lang = current_language();
     let session_label = get_text(lang, LocaleKey::TraySessionPercent);
     let weekly_label = get_text(lang, LocaleKey::TrayWeeklyPercent);
+    // Display-only percent tooltip; both values are 0–100 usage percents that
+    // fit i32, and the casts only drop the fractional part for a whole-percent label.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "tooltip percent is bounded to 0–100 and fits i32; only the fractional part is dropped for a whole-percent label"
+    )]
+    let session_pct = session_percent as i32;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "tooltip percent is bounded to 0–100 and fits i32; only the fractional part is dropped for a whole-percent label"
+    )]
+    let weekly_pct = weekly_percent as i32;
     format!(
         "{}: {} | {}",
         provider_name,
-        session_label.replace("{}", &format!("{}", session_percent as i32)),
-        weekly_label.replace("{}", &format!("{}", weekly_percent as i32))
+        session_label.replace("{}", &format!("{session_pct}")),
+        weekly_label.replace("{}", &format!("{weekly_pct}"))
     )
 }
 
@@ -100,11 +114,23 @@ pub fn tray_tooltip_with_status(
         Some(IconOverlayStatus::Incident) => get_text(lang, LocaleKey::TrayStatusIncident),
         Some(IconOverlayStatus::Partial) => get_text(lang, LocaleKey::TrayStatusPartial),
     };
+    // Display-only percent tooltip; both values are 0–100 usage percents that
+    // fit i32, and the casts only drop the fractional part for a whole-percent label.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "tooltip percent is bounded to 0–100 and fits i32; only the fractional part is dropped for a whole-percent label"
+    )]
+    let session_pct = session_percent as i32;
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "tooltip percent is bounded to 0–100 and fits i32; only the fractional part is dropped for a whole-percent label"
+    )]
+    let weekly_pct = weekly_percent as i32;
     format!(
         "{}: {} | {}{}",
         provider_name,
-        session_label.replace("{}", &format!("{}", session_percent as i32)),
-        weekly_label.replace("{}", &format!("{}", weekly_percent as i32)),
+        session_label.replace("{}", &format!("{session_pct}")),
+        weekly_label.replace("{}", &format!("{weekly_pct}")),
         status_suffix
     )
 }
@@ -135,7 +161,7 @@ pub fn tray_tooltip_credits(provider_name: &str, credits_percent: f64) -> String
 macro_rules! locale_keys {
     ($($key:ident,)*) => {
         /// Locale keys for app-owned UI strings.
-        #[allow(dead_code)]
+        #[allow(dead_code, reason = "locale keys are generated for all supported UI strings; not all are referenced yet")]
         #[derive(Debug, Clone, Copy, PartialEq, Eq)]
         pub enum LocaleKey {
             $($key,)*
@@ -227,6 +253,8 @@ locale_keys! {
     ResetTimeRelativeHelper,
     ShowResetWhenExhausted,
     ShowResetWhenExhaustedHelper,
+    ShowPace,
+    ShowPaceHelper,
     TrayIcon,
     MergeTrayIcons,
     MergeTrayIconsHelper,
@@ -515,6 +543,8 @@ locale_keys! {
     ProviderClaudeAvoidKeychainPromptsHelp,
     ProviderClaudeDailyRoutinesUsage,
     ProviderClaudeDailyRoutinesUsageHelp,
+    ProviderClaudeAllowReadingClaudeCodeCredentials,
+    ProviderClaudeAllowReadingClaudeCodeCredentialsHelp,
     ProviderCodexSparkUsage,
     ProviderCodexSparkUsageHelp,
     CodexAccountsTitle,
@@ -565,6 +595,37 @@ locale_keys! {
     NetworkProxyInvalidUrl,
     UsageSpendTitle,
     UsageSpendCaption,
+    UsageSpendModels,
+    UsageSpendAllTime,
+    UsageSpendOpenCodexImport,
+    UsageSpendHideNativeCodex,
+    UsageSpendSpend,
+    UsageSpendPriceCoverage,
+    UsageSpendConversations,
+    UsageSpendTokenMix,
+    UsageSpendKnownZero,
+    UsageSpendApiEstimate,
+    UsageSpendVendorMetered,
+    UsageSpendMixedSources,
+    UsageSpendUnknown,
+    UsageSpendUnpriced,
+    UsageSpendHistoryCovered,
+    UsageSpendPartialHistory,
+    UsageSpendCustomPricingActive,
+    UsageSpendDefaultPricing,
+    UsageSpendHourlyActivity,
+    UsageSpendRequests,
+    UsageSpendTokens,
+    UsageSpendAllTimeHistory,
+    UsageSpendCustomPricing,
+    OverviewSpendTitle,
+    OverviewSpendProviderCoverage,
+    OverviewSpendEstimate,
+    UsageSpendProjects,
+    UsageSpendShowAll,
+    UsageSpendShowLess,
+    UsageSpendNoModels,
+    UsageSpendNoProjects,
     UsageSpendRefresh,
     UsageSpendLoading,
     UsageSpendRefreshing,
@@ -575,6 +636,8 @@ locale_keys! {
     UsageSpendColCurrency,
     UsageSpendColSource,
     UsageSpendShare,
+    UsageSpendCopyJson,
+    UsageSpendSaveJson,
     UsageSpendShareEmpty,
     UsageSpendShareFailed,
     AgentSessionsTitle,
@@ -680,6 +743,9 @@ locale_keys! {
     RefreshAllProvidersOnMenuOpenHelper,
     LowPowerMode,
     LowPowerModeHelper,
+    LowPowerModeOff,
+    LowPowerModeOn,
+    LowPowerModeAutomatic,
     HighUsageWarningHelper,
     CriticalUsageWarningHelper,
     GlobalShortcutFieldLabel,
@@ -784,6 +850,8 @@ locale_keys! {
     DetailCostBalance,
     DetailCostResets,
     DetailChartCost,
+    DetailChartTokens,
+    DetailChartRefreshing,
     DetailChartCredits,
     DetailChartUsageBreakdown,
     DetailChartEmpty,
@@ -852,6 +920,11 @@ locale_keys! {
     ProviderIssueFetchNeedsAttention,
     ProviderIssueCopy,
     ProviderIssueUnsupportedSourceModePrefix,
+    ProviderIssueAuthRequired,
+    ProviderIssueSessionExpired,
+    ProviderIssueLocalRuntimeOffline,
+    ProviderIssueUnknown,
+    ProviderIssuePrivacySafeDetail,
     CredentialStorageTitle,
     CredentialRevokeStored,
     CredentialApiKeys,
@@ -909,6 +982,10 @@ locale_keys! {
     OpenCodeGoWorkspaceTitle,
     OpenCodeGoWorkspaceLabel,
     OpenCodeGoWorkspaceHelp,
+    OpenRouterManagementKeyTitle,
+    OpenRouterManagementKeyLabel,
+    OpenRouterManagementKeyHelp,
+    OpenRouterManagementKeyConfigured,
     CredsOpenAiHistoryHelp,
 
     // Tauri desktop shell — Token accounts (Phase 6e, review)
@@ -976,6 +1053,10 @@ locale_keys! {
     AboutLinkGitHub,
     AboutLinkWebsite,
     AboutLinkOriginalProject,
+    DiagnosticsSectionHeading,
+    DiagnosticsCopyButton,
+    DiagnosticsCopied,
+    DiagnosticsCopyFailed,
 
     // Tauri desktop shell — Cookies tab hints / placeholder
     SavedCookiesHint,
@@ -1043,6 +1124,23 @@ locale_keys! {
     PromoteTrayIconLabel,
     PromoteTrayIconHelper,
     PromoteTrayIconUnsupportedHint,
+
+    // Mistral PAYG monthly spend (#2821, #2947)
+    MistralMonthlySpend,
+    MistralMonthlySpendHelper,
+
+    // Menu cost-summary display style (#2976)
+    CostSummaryDisplayStyle,
+    CostSummaryDisplayStyleHelper,
+    CostSummaryStyleCompact,
+    CostSummaryStyleDetailed,
+    CostSummaryStyleHidden,
+
+    // Per-provider accent color override (#2972)
+    ProviderAccentColor,
+    ProviderAccentColorHelper,
+    ProviderAccentColorReset,
+    ProviderAccentColorInvalid,
 }
 
 #[cfg(test)]

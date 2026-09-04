@@ -5,7 +5,7 @@
 //! cookies or a manually pasted cookie header.
 //!
 //! Team path: `GetSubscriptionSummary` / BssOpenAPI-V3 (+ optional sec_token).
-//! Personal/Solo path: OneConsole personal token-plan APIs (no sec_token).
+//! Personal/Solo path: OneConsole personal token-plan APIs (+ best-effort sec_token).
 
 mod personal;
 mod region;
@@ -91,7 +91,15 @@ impl AlibabaTokenPlanProvider {
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
         let snapshot = if region.uses_personal_api() {
-            personal::fetch_personal_usage(&client, &cookie_header, region, ctx).await?
+            let sec_token = Self::resolve_sec_token(&client, &cookie_header, region, ctx).await;
+            personal::fetch_personal_usage(
+                &client,
+                &cookie_header,
+                region,
+                sec_token.as_deref(),
+                ctx,
+            )
+            .await?
         } else {
             self.fetch_team_usage(&client, &cookie_header, region, ctx)
                 .await?
@@ -192,6 +200,11 @@ impl AlibabaTokenPlanProvider {
                 "Accept",
                 "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
             )
+            .header("Referer", dashboard_referer(region))
+            .header("Sec-Fetch-Site", "same-origin")
+            .header("Sec-Fetch-Mode", "navigate")
+            .header("Sec-Fetch-Dest", "document")
+            .header("Accept-Language", "zh-CN,zh;q=0.9,en;q=0.8")
             .header("User-Agent", USER_AGENT)
             .send()
             .await
@@ -306,18 +319,29 @@ impl AlibabaTokenPlanProvider {
                 ),
             )
         });
-        let primary = five_hour.or(legacy).ok_or_else(|| {
-            ProviderError::Parse("Alibaba Token Plan quota totals missing".into())
-        })?;
-        let mut usage = UsageSnapshot::new(primary);
-
-        if let Some(weekly_percent) = snapshot.weekly_used_percent {
-            usage = usage.with_secondary(RateWindow::with_details(
-                weekly_percent,
+        let weekly = snapshot.weekly_used_percent.map(|percent| {
+            RateWindow::with_details(
+                percent,
                 Some(WEEKLY_MINUTES),
                 snapshot.weekly_resets_at,
-                quota_detail_percent(weekly_percent, snapshot.weekly_total_quota),
-            ));
+                quota_detail_percent(percent, snapshot.weekly_total_quota),
+            )
+        });
+        // Prefer the 5-hour window, then the Team/legacy credit envelope. Personal/Solo
+        // payloads sometimes expose only `per1WeekPercentage`; promote that window to
+        // primary instead of failing the whole fetch.
+        let (primary, secondary) = match (five_hour.or(legacy), weekly) {
+            (Some(primary), secondary) => (primary, secondary),
+            (None, Some(weekly)) => (weekly, None),
+            (None, None) => {
+                return Err(ProviderError::Parse(
+                    "Alibaba Token Plan quota totals missing".into(),
+                ));
+            }
+        };
+        let mut usage = UsageSnapshot::new(primary);
+        if let Some(secondary) = secondary {
+            usage = usage.with_secondary(secondary);
         }
 
         if let Some(plan) = snapshot.plan_name.filter(|plan| !plan.trim().is_empty()) {
@@ -379,11 +403,14 @@ pub(super) fn throw_if_error_payload(value: &Value) -> Result<(), ProviderError>
         )));
     }
 
-    if let Some(success) = find_first_bool(value, &["success", "Success"])
-        && !success
-    {
-        let message = find_first_string(value, &["message", "msg", "Message", "errorMessage"])
-            .unwrap_or_else(|| "request failed".to_string());
+    if let Some(frame) = find_failing_success_frame(value) {
+        let code = find_first_string(frame, &["errorCode", "Code", "code"]);
+        let message = find_first_string(
+            frame,
+            &["errorMsg", "message", "msg", "Message", "errorMessage"],
+        )
+        .or_else(|| code.clone())
+        .unwrap_or_else(|| "request failed".to_string());
         let lower = message.to_lowercase();
         if lower.contains("needlogin")
             || lower.contains("login")
@@ -413,6 +440,24 @@ pub(super) fn throw_if_error_payload(value: &Value) -> Result<(), ProviderError>
     Ok(())
 }
 
+fn find_failing_success_frame(value: &Value) -> Option<&Value> {
+    match value {
+        Value::Object(map) => {
+            let failed_here = ["success", "Success"]
+                .iter()
+                .filter_map(|key| map.get(*key))
+                .filter_map(|value| parse_bool(Some(value)))
+                .any(|success| !success);
+            if failed_here {
+                return Some(value);
+            }
+            map.values().find_map(find_failing_success_frame)
+        }
+        Value::Array(values) => values.iter().find_map(find_failing_success_frame),
+        _ => None,
+    }
+}
+
 fn normalize_cookie_header(raw: &str) -> Option<String> {
     let mut header = raw.trim();
     if header
@@ -433,12 +478,17 @@ pub(super) fn cookie_value(name: &str, cookie_header: &str) -> Option<String> {
     })
 }
 
+fn dashboard_referer(region: Region) -> String {
+    format!("{}/", region.gateway_base_url().trim_end_matches('/'))
+}
+
 fn extract_sec_token(html: &str) -> Option<String> {
     for pattern in [
         r#""secToken"\s*:\s*"([^"]+)""#,
         r#""sec_token"\s*:\s*"([^"]+)""#,
         r#"secToken['"]?\s*[:=]\s*['"]([^'"]+)['"]"#,
         r#"sec_token['"]?\s*[:=]\s*['"]([^'"]+)['"]"#,
+        r#"SEC_TOKEN['"]?\s*[:=]\s*['"]([^'"]+)['"]"#,
     ] {
         let Ok(regex) = Regex::new(pattern) else {
             continue;
@@ -733,22 +783,6 @@ fn find_first_i64(value: &Value, keys: &[&str]) -> Option<i64> {
     }
 }
 
-fn find_first_bool(value: &Value, keys: &[&str]) -> Option<bool> {
-    match value {
-        Value::Object(map) => keys
-            .iter()
-            .find_map(|key| parse_bool(map.get(*key)))
-            .or_else(|| {
-                map.values()
-                    .find_map(|nested| find_first_bool(nested, keys))
-            }),
-        Value::Array(values) => values
-            .iter()
-            .find_map(|nested| find_first_bool(nested, keys)),
-        _ => None,
-    }
-}
-
 fn first_date(value: &Value, keys: &[&str]) -> Option<DateTime<Utc>> {
     let map = value.as_object()?;
     keys.iter().find_map(|key| parse_date(map.get(*key)))
@@ -785,9 +819,14 @@ fn parse_f64(value: Option<&Value>) -> Option<f64> {
 
 fn parse_i64(value: Option<&Value>) -> Option<i64> {
     match value? {
-        Value::Number(number) => number
-            .as_i64()
-            .or_else(|| number.as_f64().map(|v| v as i64)),
+        Value::Number(number) => number.as_i64().or_else(|| {
+            // Quota/timestamp JSON floats are whole numbers; the fractional
+            // part is rounding noise from the upstream API.
+            let v = number.as_f64()?;
+            #[expect(clippy::cast_possible_truncation, reason = "quota/timestamp JSON floats are whole numbers; fractional part is rounding noise")]
+            let whole = v as i64;
+            Some(whole)
+        }),
         Value::String(text) => text.trim().replace(',', "").parse().ok(),
         _ => None,
     }
@@ -896,7 +935,14 @@ fn quota_detail_percent(used_percent: f64, total: Option<f64>) -> Option<String>
 
 fn format_quota(value: f64) -> String {
     if (value.round() - value).abs() < f64::EPSILON {
-        format_count(value.round() as i64)
+        // Guarded above: value is within EPSILON of a whole number, so the
+        // fractional part is zero.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "whole-number guard above; fractional part is zero"
+        )]
+        let whole = value.round() as i64;
+        format_count(whole)
     } else {
         let formatted = format!("{value:.2}");
         let trimmed = formatted.trim_end_matches('0').trim_end_matches('.');
@@ -1036,8 +1082,27 @@ mod tests {
             Some("abc123")
         );
         assert_eq!(
+            extract_sec_token(
+                r#"<script>window.ALIYUN_CONSOLE_CONFIG = { SEC_TOKEN: "upper123" };</script>"#
+            )
+            .as_deref(),
+            Some("upper123")
+        );
+        assert_eq!(
             cookie_value("sec_token", "foo=bar; sec_token=xyz"),
             Some("xyz".to_string())
+        );
+    }
+
+    #[test]
+    fn sec_token_shell_referer_uses_same_origin_root() {
+        assert_eq!(
+            dashboard_referer(Region::CnPersonal),
+            "https://bailian.console.aliyun.com/"
+        );
+        assert_eq!(
+            dashboard_referer(Region::IntlPersonal),
+            "https://modelstudio.console.alibabacloud.com/"
         );
     }
 

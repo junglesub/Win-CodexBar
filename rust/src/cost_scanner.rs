@@ -86,6 +86,11 @@ pub struct CostSummary {
     /// debounce window) or the scan just completed; `false` when the cache is stale
     /// or empty and a re-scan would be required (upstream 0.48.0 A16).
     pub history_coverage_established: bool,
+    /// True when the scan completed with zero results — a *known* zero, not a
+    /// missing scan. Set only when `history_coverage_established` is true and
+    /// the scan found no sessions/tokens (upstream 0.50.1 #2932). Never
+    /// fabricated on incomplete scans.
+    pub known_zero: bool,
     /// Period start date
     pub period_start: Option<NaiveDate>,
     /// Period end date
@@ -121,17 +126,29 @@ fn is_cancelled(cancel: Option<&AtomicBool>) -> bool {
 const FALLBACK_CLAUDE_MODEL: &str = "claude-sonnet-4-6";
 
 fn unix_now_ms() -> i64 {
-    SystemTime::now()
+    // Duration is clamped to i64::MAX before casting, so the value fits i64.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "clamped to i64::MAX before casting"
+    )]
+    let millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    millis
 }
 
 fn system_time_to_unix_ms(modified: Option<SystemTime>) -> i64 {
-    modified
+    // Duration is clamped to i64::MAX before casting, so the value fits i64.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "clamped to i64::MAX before casting"
+    )]
+    let millis = modified
         .and_then(|t| t.duration_since(UNIX_EPOCH).ok())
         .map(|d| d.as_millis().min(i64::MAX as u128) as i64)
-        .unwrap_or(0)
+        .unwrap_or(0);
+    millis
 }
 
 fn rebuild_cache_days(cache: &mut CostUsageCache) {
@@ -178,6 +195,10 @@ impl ClaudePricing {
         // Standard buckets (input, cache-read, 5-minute cache-write, output),
         // including any long-context tiering, come from the canonical table.
         // Unknown/retired models fall back to Sonnet pricing.
+        #[allow(
+            clippy::cast_possible_truncation,
+            reason = "clamped to i32::MAX before casting"
+        )]
         let clamp = |v: u64| v.min(i32::MAX as u64) as i32;
         let base = CostUsagePricing::claude_cost_usd(
             model,
@@ -207,7 +228,10 @@ impl ClaudePricing {
 }
 
 /// JSONL event structures for Codex
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "JSONL event fields are deserialized for parsing but not all are read"
+)]
 #[derive(Debug, Deserialize)]
 struct CodexEvent {
     #[serde(rename = "type")]
@@ -215,7 +239,10 @@ struct CodexEvent {
     event_msg: Option<CodexEventMsg>,
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "event message fields are deserialized for parsing but not all are read"
+)]
 #[derive(Debug, Deserialize)]
 struct CodexEventMsg {
     #[serde(rename = "type")]
@@ -377,7 +404,9 @@ impl CostScanner {
                 !cache.days.is_empty() && cache.previous_report.is_none();
             let (cost, _) = add_codex_days_map_to_summary(&mut summary, &cache.days, &range);
             summary.total_cost_usd += cost;
-            summary.sessions_count = cache
+            // Session count is a display field; the cache holds far fewer files than u32::MAX.
+            #[allow(clippy::cast_possible_truncation, reason = "cache file counts fit u32")]
+            let sessions_count = cache
                 .files
                 .values()
                 .filter(|usage| {
@@ -386,6 +415,7 @@ impl CostScanner {
                     })
                 })
                 .count() as u32;
+            summary.sessions_count = sessions_count;
 
             // Pi-compatible sessions are outside the Codex JSONL cache.
             // Skip when tests inject sessions roots — avoid scanning the real home tree.
@@ -399,6 +429,10 @@ impl CostScanner {
                     &mut seen_pi,
                 );
             }
+            // Upstream 0.50.1 #2932: debounce cache hit with coverage
+            // established but zero sessions in-range is a known-zero.
+            summary.known_zero =
+                summary.history_coverage_established && summary.sessions_count == 0;
             return (summary, stats);
         }
 
@@ -434,6 +468,10 @@ impl CostScanner {
         // A16 (upstream 0.48.0): after a completed scan, coverage IS established
         // unless cache pruning during save marked a catch-up pending.
         summary.history_coverage_established = cache.previous_report.is_none();
+        // Upstream 0.50.1 #2932: a completed scan with zero results is a
+        // *known* zero. Only set when coverage is established; an incomplete
+        // scan must NOT fabricate a zero.
+        summary.known_zero = summary.history_coverage_established && summary.sessions_count == 0;
 
         // OMP / pi-compatible agent sessions (upstream #2269). Dedup by entry id.
         // Skip when tests inject sessions roots — avoid scanning the real home tree.
@@ -611,7 +649,12 @@ impl CostScanner {
             Ok(m) => m,
             Err(_) => return,
         };
-        let size = metadata.len() as i64;
+        // File sizes are clamped to i64::MAX before casting.
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "file sizes are clamped to i64::MAX"
+        )]
+        let size = metadata.len().min(i64::MAX as u64) as i64;
         let mtime_ms = system_time_to_unix_ms(metadata.modified().ok());
         let path_key = path.to_string_lossy().to_string();
         let cached = cache.files.get(&path_key).cloned();
@@ -928,7 +971,10 @@ fn add_claude_record_to_daily_costs(
 }
 
 /// Check if any cost usage sources are available
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "utility probe for cost-usage availability; not yet wired into all call sites"
+)]
 pub fn has_cost_usage_sources() -> bool {
     let scanner = CostScanner::new(1);
     scanner
@@ -1006,6 +1052,101 @@ pub fn get_daily_cost_history(provider: &str, days: u32) -> Vec<(String, f64)> {
     let mut result: Vec<(String, f64)> = daily_costs.into_iter().collect();
     result.sort_by(|a, b| a.0.cmp(&b.0));
     result
+}
+
+/// Daily token totals (input + output) for the Tokens chart mode, plus
+/// whether local history looks incomplete at the old edge of the window
+/// (Codex backfill still in progress → the chart shows a "Refreshing"
+/// marker; upstream 0.50.0 #2930).
+pub fn get_daily_token_history(provider: &str, days: u32) -> (Vec<(String, u64)>, bool) {
+    let scanner = CostScanner::new(days);
+    let today = Local::now().date_naive();
+    let mut daily_tokens: HashMap<String, u64> = HashMap::new();
+    let mut covered_days: HashSet<String> = HashSet::new();
+
+    // Initialize all days with 0
+    for days_ago in 0..days {
+        let date = today - Duration::days(days_ago as i64);
+        let date_str = date.format("%Y-%m-%d").to_string();
+        daily_tokens.insert(date_str, 0);
+    }
+
+    match provider {
+        "codex" => {
+            // Warm/refresh the disk cache, then read exact local token totals
+            // from packed days through the same summary path the cost chart
+            // uses.
+            let _ = scanner.scan_codex();
+            let cache = JsonlScanner::load_cache(ProviderId::Codex, scanner.cache_root.as_deref());
+            for (day_key, models) in &cache.days {
+                if !daily_tokens.contains_key(day_key) {
+                    continue;
+                }
+                let Some(day) = CostUsageDayRange::parse_day_key(day_key) else {
+                    continue;
+                };
+                let day_range = CostUsageDayRange::new(day, day);
+                let mut one_day = HashMap::new();
+                one_day.insert(day_key.clone(), models.clone());
+                let mut scratch = CostSummary::default();
+                add_codex_days_map_to_summary(&mut scratch, &one_day, &day_range);
+                if let Some(slot) = daily_tokens.get_mut(day_key) {
+                    *slot = scratch.input_tokens + scratch.output_tokens;
+                }
+                covered_days.insert(day_key.clone());
+            }
+        }
+        "claude" => {
+            // Per-day token breakdown from the same de-duplicated record walk
+            // as the cost chart. The full walk is authoritative, so the
+            // Refreshing marker never applies here.
+            let projects_dir = scanner.get_claude_projects_dir();
+            if projects_dir.exists() {
+                let cutoff = Utc::now() - Duration::days(days as i64);
+                let mut seen = HashSet::new();
+                let mut handle_file = |path: &Path| {
+                    for_each_claude_usage_record(path, &cutoff, &mut seen, None, |record| {
+                        add_claude_record_to_daily_tokens(&mut daily_tokens, record);
+                    });
+                };
+                scanner.walk_claude_files(&projects_dir, &cutoff, None, &mut handle_file);
+            }
+        }
+        _ => {}
+    }
+
+    // Convert to sorted vector
+    let mut result: Vec<(String, u64)> = daily_tokens.into_iter().collect();
+    result.sort_by(|a, b| a.0.cmp(&b.0));
+
+    // Codex only: the bounded catch-up may not have reached the requested
+    // depth yet. Incomplete = history exists but the oldest quarter of the
+    // window has no scanned day.
+    let incomplete = provider == "codex"
+        && !covered_days.is_empty()
+        && covered_days.len() < days as usize
+        && result[..(result.len() / 4).max(1)]
+            .iter()
+            .any(|(date, _)| !covered_days.contains(date));
+
+    (result, incomplete)
+}
+
+fn add_claude_record_to_daily_tokens(
+    daily_tokens: &mut HashMap<String, u64>,
+    record: &ClaudeUsageRecord,
+) {
+    let Some(timestamp) = record.timestamp else {
+        return;
+    };
+    let date_str = timestamp
+        .with_timezone(&Local)
+        .date_naive()
+        .format("%Y-%m-%d")
+        .to_string();
+    if let Some(slot) = daily_tokens.get_mut(&date_str) {
+        *slot += record.input + record.output;
+    }
 }
 
 #[cfg(test)]
@@ -1160,7 +1301,8 @@ mod tests {
             Some(140)
         );
         assert!(scan_codex_file_cost(&path) > 0.0);
-        let _ = std::fs::remove_file(&path);
+        // Best-effort test cleanup; the file may already be gone.
+        let _removed = std::fs::remove_file(&path);
     }
 
     #[test]
@@ -1313,8 +1455,9 @@ mod tests {
             "each day should hold exactly one record's cost, got {day_one_cost} vs {day_two_cost}"
         );
 
-        let _ = std::fs::remove_file(&file_a);
-        let _ = std::fs::remove_file(&file_b);
+        // Best-effort test cleanup; the files may already be gone.
+        let _removed_a = std::fs::remove_file(&file_a);
+        let _removed_b = std::fs::remove_file(&file_b);
     }
 
     #[test]
@@ -1332,7 +1475,8 @@ mod tests {
         let mut seen = HashSet::new();
         let counted = for_each_claude_usage_record(&path, &cutoff, &mut seen, None, |_| {});
         assert_eq!(counted, 1, "incomplete final JSONL line must be processed");
-        let _ = std::fs::remove_file(&path);
+        // Best-effort test cleanup; the file may already be gone.
+        let _removed = std::fs::remove_file(&path);
     }
 
     fn write_codex_session_fixture(sessions_root: &Path, name: &str, input_tokens: u64) -> PathBuf {
@@ -1565,5 +1709,43 @@ mod tests {
             cache.previous_report.is_none(),
             "full scan clears previous_report"
         );
+    }
+
+    // ── Upstream 0.50.1 #2932: known-zero history ────────────────────────────
+
+    #[test]
+    fn known_zero_is_set_when_scan_completes_with_no_sessions() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = root.path().join("sessions");
+        let cache_root = root.path().join("cache");
+        std::fs::create_dir_all(&sessions).unwrap();
+
+        let scanner = CostScanner::new(7)
+            .with_options(CostScanOptions::app_driven())
+            .with_cache_root(&cache_root)
+            .with_sessions_dirs(vec![sessions.clone()]);
+
+        let (summary, _) = scanner.scan_codex_detailed(None);
+        assert!(summary.history_coverage_established, "scan completed");
+        assert_eq!(summary.sessions_count, 0, "no sessions");
+        assert!(summary.known_zero, "completed scan with zero = known-zero");
+    }
+
+    #[test]
+    fn known_zero_is_not_set_when_scan_has_results() {
+        let root = tempfile::tempdir().unwrap();
+        let sessions = root.path().join("sessions");
+        let cache_root = root.path().join("cache");
+        write_codex_session_fixture(&sessions, "a.jsonl", 100);
+
+        let scanner = CostScanner::new(7)
+            .with_options(CostScanOptions::app_driven())
+            .with_cache_root(&cache_root)
+            .with_sessions_dirs(vec![sessions.clone()]);
+
+        let (summary, _) = scanner.scan_codex_detailed(None);
+        assert!(summary.history_coverage_established);
+        assert_eq!(summary.sessions_count, 1);
+        assert!(!summary.known_zero, "scan with results is not known-zero");
     }
 }

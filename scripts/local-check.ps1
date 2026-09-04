@@ -7,11 +7,13 @@ param(
     [switch]$Clippy,
     [switch]$ReleaseDoctor,
     [switch]$All,
-    [string]$Version = ""
+    [string]$Version = "",
+    [ValidateSet("ci")]
+    [string]$Slice = ""
 )
 
-Set-StrictMode -Version Latest
-$ErrorActionPreference = "Stop"
+Set-StrictMode -Version 3.0
+$ErrorActionPreference = "Continue"
 
 $RepoRoot = Split-Path -Parent $PSScriptRoot
 
@@ -30,6 +32,26 @@ function Invoke-Step {
     }
 }
 
+# Hosted pr-check slice (-Slice ci): mirrors .github/workflows/pr-check.yml
+# step for step (workspace-wide fmt/clippy/test, frozen frontend install,
+# frontend test/build).
+if ($Slice -eq 'ci') {
+    Push-Location $RepoRoot
+    try {
+        Invoke-Step "Rust format check" "cargo" @("fmt", "--all", "--check")
+        Invoke-Step "Rust clippy (workspace)" "cargo" @("clippy", "--workspace", "--all-targets", "--", "-D", "warnings")
+        Invoke-Step "Rust tests (workspace)" "cargo" @("test", "--workspace")
+        Invoke-Step "Frontend install" "pnpm" @("--dir", "apps\desktop-tauri", "install", "--frozen-lockfile")
+        Invoke-Step "Frontend tests" "pnpm" @("--dir", "apps\desktop-tauri", "test")
+        Invoke-Step "Frontend type check / build" "pnpm" @("--dir", "apps\desktop-tauri", "run", "build")
+    } finally {
+        Pop-Location
+    }
+    Write-Host ""
+    Write-Host "Local checks passed." -ForegroundColor Green
+    return
+}
+
 if (-not ($Rust -or $Tauri -or $Frontend -or $Format -or $Clippy -or $ReleaseDoctor -or $All)) {
     $Rust = $true
     $Tauri = $true
@@ -38,6 +60,7 @@ if (-not ($Rust -or $Tauri -or $Frontend -or $Format -or $Clippy -or $ReleaseDoc
 
 Push-Location $RepoRoot
 try {
+    Invoke-Step "GitHub write-safety tests" "bash" @("scripts/gh-safe.tests.sh")
     if ($All -or $Format) {
         Invoke-Step "Rust format" "cargo" @("fmt", "--all", "--check")
     }

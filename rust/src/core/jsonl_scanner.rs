@@ -3,7 +3,10 @@
 //! Incremental log file parsing for Codex and Claude session logs.
 //! Supports file-level caching to avoid re-parsing unchanged files.
 
-#![allow(dead_code)]
+#![allow(
+    dead_code,
+    reason = "scanner types are deserialized from JSONL for parsing but not all are read"
+)]
 
 use crate::core::{CostUsagePricing, ProviderId};
 use chrono::{DateTime, Local, NaiveDate};
@@ -57,6 +60,11 @@ impl CostScanOptions {
 
     /// Whether a prior scan at `last_scan_unix_ms` is still within the debounce window.
     pub fn should_skip_scan(&self, last_scan_unix_ms: i64, now_unix_ms: i64) -> bool {
+        // Debounce intervals are seconds-scale config values, far below i64::MAX.
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "debounce interval in seconds is a small config value that cannot exceed i64::MAX"
+        )]
         let refresh_ms = (self.refresh_min_interval_secs as i64).saturating_mul(1000);
         refresh_ms > 0
             && last_scan_unix_ms > 0
@@ -285,11 +293,13 @@ impl CodexParserState {
     }
 
     fn process_line(&mut self, line: &str, range: &CostUsageDayRange) {
-        if !is_candidate_codex_line(line) {
+        let event_candidate = is_candidate_codex_line(line);
+        let bare_candidate = !event_candidate && line.contains("\"usage\"");
+        if !event_candidate && !bare_candidate {
             return;
         }
 
-        if let Some(event) = parse_codex_fast_event(line) {
+        if event_candidate && let Some(event) = parse_codex_fast_event(line) {
             self.process_fast_event(event, range);
             return;
         }
@@ -297,10 +307,32 @@ impl CodexParserState {
         let Ok(obj) = serde_json::from_str::<Value>(line) else {
             return;
         };
+
+        if bare_candidate {
+            if obj.get("type").is_some() {
+                return;
+            }
+            let Some(day_key) = codex_line_day_key(&obj, range)
+                .or_else(|| self.records.last().map(|record| record.day_key.clone()))
+            else {
+                return;
+            };
+            if let Some((totals, model)) = bare_usage_totals(&obj) {
+                let model = self
+                    .current_model
+                    .as_deref()
+                    .and_then(model_evidence)
+                    .or(model.as_deref().and_then(model_evidence))
+                    .unwrap_or(CostUsagePricing::CODEX_UNATTRIBUTED_MODEL)
+                    .to_string();
+                self.record_usage(day_key, &model, totals.input, totals.cached, totals.output);
+            }
+            return;
+        }
+
         let Some(day_key) = codex_line_day_key(&obj, range) else {
             return;
         };
-
         if obj.get("type").and_then(|v| v.as_str()) == Some("turn_context") {
             self.update_current_model(&obj);
         }
@@ -675,6 +707,69 @@ fn codex_timestamp_day_key(timestamp: &str) -> Option<String> {
         .or_else(|| timestamp.get(..10).map(str::to_string))
 }
 
+fn bare_usage_totals(obj: &Value) -> Option<(CodexTotals, Option<String>)> {
+    let usage = obj
+        .get("usage")
+        .or_else(|| obj.get("data").and_then(|v| v.get("usage")))
+        .or_else(|| obj.get("result").and_then(|v| v.get("usage")))
+        .or_else(|| obj.get("response").and_then(|v| v.get("usage")))?;
+    // Token counts come from usage records and fit i32, the canonical totals storage type.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "usage token counts fit i32, the canonical totals storage type"
+    )]
+    let input = ["input_tokens", "prompt_tokens", "input"]
+        .into_iter()
+        .find_map(|key| usage.get(key).and_then(Value::as_i64))
+        .unwrap_or(0)
+        .max(0) as i32;
+    // Token counts come from usage records and fit i32, the canonical totals storage type.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "usage token counts fit i32, the canonical totals storage type"
+    )]
+    let output = ["output_tokens", "completion_tokens", "output"]
+        .into_iter()
+        .find_map(|key| usage.get(key).and_then(Value::as_i64))
+        .unwrap_or(0)
+        .max(0) as i32;
+    // Token counts come from usage records and fit i32, the canonical totals storage type.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "usage token counts fit i32, the canonical totals storage type"
+    )]
+    let cached = [
+        "cached_input_tokens",
+        "cache_read_input_tokens",
+        "cached_tokens",
+    ]
+    .into_iter()
+    .filter_map(|key| usage.get(key).and_then(Value::as_i64))
+    .max()
+    .unwrap_or(0)
+    .max(0) as i32;
+    if input == 0 && output == 0 && cached == 0 {
+        return None;
+    }
+    let model = obj
+        .get("model")
+        .or_else(|| obj.get("data").and_then(|v| v.get("model")))
+        .or_else(|| obj.get("result").and_then(|v| v.get("model")))
+        .or_else(|| obj.get("response").and_then(|v| v.get("model")))
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .filter(|v| !v.is_empty())
+        .map(str::to_string);
+    Some((
+        CodexTotals {
+            input,
+            cached,
+            output,
+        },
+        model,
+    ))
+}
+
 fn token_count_payload(obj: &Value) -> Option<&Value> {
     if let Some(payload) = obj.get("payload")
         && payload.get("type").and_then(|v| v.as_str()) == Some("token_count")
@@ -687,13 +782,25 @@ fn token_count_payload(obj: &Value) -> Option<&Value> {
 }
 
 fn read_token_totals(value: &Value) -> CodexTotals {
+    // Token counts come from Codex usage records and fit within i32, which is
+    // the canonical storage type of the totals table.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "token counts from usage records fit i32"
+    )]
+    let cached = value
+        .get("cached_input_tokens")
+        .and_then(|v| v.as_i64())
+        .unwrap_or(0)
+        .max(
+            value
+                .get("cache_read_input_tokens")
+                .and_then(|v| v.as_i64())
+                .unwrap_or(0),
+        ) as i32;
     CodexTotals {
         input: token_i32(value, "input_tokens"),
-        cached: value
-            .get("cached_input_tokens")
-            .or_else(|| value.get("cache_read_input_tokens"))
-            .and_then(|v| v.as_i64())
-            .unwrap_or(0) as i32,
+        cached,
         output: token_i32(value, "output_tokens"),
     }
 }
@@ -703,8 +810,8 @@ fn codex_totals_from_fast(value: CodexFastTotals) -> CodexTotals {
         input: value.input_tokens,
         cached: value
             .cached_input_tokens
-            .or(value.cache_read_input_tokens)
-            .unwrap_or(0),
+            .unwrap_or(0)
+            .max(value.cache_read_input_tokens.unwrap_or(0)),
         output: value.output_tokens,
     }
 }
@@ -714,14 +821,20 @@ fn fast_totals_from_payload(value: &CodexFastPayload<'_>) -> CodexTotals {
         input: value.input_tokens.unwrap_or(0),
         cached: value
             .cached_input_tokens
-            .or(value.cache_read_input_tokens)
-            .unwrap_or(0),
+            .unwrap_or(0)
+            .max(value.cache_read_input_tokens.unwrap_or(0)),
         output: value.output_tokens.unwrap_or(0),
     }
 }
 
 fn token_i32(value: &Value, key: &str) -> i32 {
-    value.get(key).and_then(|v| v.as_i64()).unwrap_or(0) as i32
+    // Token counts from usage records fit i32, the canonical totals storage type.
+    #[allow(
+        clippy::cast_possible_truncation,
+        reason = "token counts from usage records fit i32"
+    )]
+    let tokens = value.get(key).and_then(|v| v.as_i64()).unwrap_or(0) as i32;
+    tokens
 }
 
 fn last_usage_delta(last: &Value) -> (i32, i32, i32) {
@@ -829,6 +942,11 @@ impl JsonlScanner {
         initial_totals: Option<CodexTotals>,
     ) -> std::io::Result<CodexParseResult> {
         let file = File::open(file_path)?;
+        // Session JSONL files are bounded by the cache budget; sizes fit i64.
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "session JSONL file sizes fit i64"
+        )]
         let file_size = file.metadata()?.len() as i64;
 
         let mut reader = BufReader::new(file);
@@ -842,7 +960,13 @@ impl JsonlScanner {
         while let Some((line_bytes, consumed)) =
             read_bounded_jsonl_line(&mut reader, CODEX_JSONL_MAX_LINE_BYTES)?
         {
-            parsed_bytes += consumed as i64;
+            // Per-line byte counts are capped at 256 KiB, far inside i64::MAX.
+            #[allow(
+                clippy::cast_possible_wrap,
+                reason = "per-line consumed bytes are capped at CODEX_JSONL_MAX_LINE_BYTES"
+            )]
+            let consumed_i64 = consumed as i64;
+            parsed_bytes += consumed_i64;
             if line_bytes.is_empty() {
                 continue;
             }
@@ -872,7 +996,13 @@ impl JsonlScanner {
         if offset <= 0 {
             return true;
         }
-        let Ok(file_size) = fs::metadata(file_path).map(|m| m.len() as i64) else {
+        // Session JSONL file sizes fit i64; metadata feeds only boundary probes.
+        #[allow(
+            clippy::cast_possible_wrap,
+            reason = "session JSONL file sizes fit i64"
+        )]
+        let file_size_i64 = fs::metadata(file_path).map(|m| m.len() as i64);
+        let Ok(file_size) = file_size_i64 else {
             return false;
         };
         if offset >= file_size {
@@ -908,6 +1038,12 @@ impl JsonlScanner {
         let cache_path = Self::cache_path(provider, cache_root);
 
         if crate::core::is_bounded_provider(provider) {
+            // Artifacts are bounded by MAX_LOAD_BYTES (320 MiB), fitting usize on
+            // any supported target even before the budget comparison below.
+            #[allow(
+                clippy::cast_possible_truncation,
+                reason = "bounded artifacts fit usize on any supported target"
+            )]
             let file_bytes = crate::core::artifact_file_size(&cache_path) as usize;
             if file_bytes > crate::core::CostUsageCacheBudget::MAX_LOAD_BYTES {
                 return CostUsageCache::default();
@@ -957,7 +1093,8 @@ impl JsonlScanner {
         let Some(parent) = cache_path.parent() else {
             return;
         };
-        let _ = fs::create_dir_all(parent);
+        // Best-effort cache dir creation; a missing dir surfaces as the write error below.
+        let _dir_created = fs::create_dir_all(parent);
 
         if crate::core::is_bounded_provider(provider) {
             let pruned = crate::core::prune_out_of_window_for_budget(
@@ -984,6 +1121,17 @@ impl JsonlScanner {
             // next refresh can signal catch-up is pending (and spend surfaces can show
             // the last-validated snapshot during the rescan).
             if (!pruned.is_empty() || !trimmed.is_empty()) && cache.previous_report.is_none() {
+                // Session counts are bounded by the cache budget (MAX_FILE_ENTRIES),
+                // far below i32::MAX, and are always non-negative.
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "session count is bounded by MAX_FILE_ENTRIES (25_000)"
+                )]
+                #[allow(
+                    clippy::cast_possible_wrap,
+                    reason = "session count is non-negative and bounded by MAX_FILE_ENTRIES"
+                )]
+                let sessions_count = cache.files.len() as i32;
                 cache.previous_report = Some(crate::core::CachedCostReport {
                     total_cost_usd: 0.0, // cost not tracked in day aggregates
                     input_tokens: cache
@@ -1004,7 +1152,7 @@ impl JsonlScanner {
                         .flat_map(|m| m.values())
                         .map(|v| v[2])
                         .sum(),
-                    sessions_count: cache.files.len() as i32,
+                    sessions_count,
                     updated_at: None,
                     partial: false,
                 });
@@ -1031,7 +1179,7 @@ impl JsonlScanner {
             )
         {
             // Best-effort removal; ignore errors (file may not exist).
-            let _ = fs::remove_file(&cache_path);
+            let _cleared = fs::remove_file(&cache_path);
             return;
         }
 
@@ -1050,10 +1198,11 @@ impl JsonlScanner {
         }
         // `copy` replaces an existing target on Windows; prefer it over rename.
         if fs::copy(&tmp_path, &cache_path).is_err() {
-            let _ = fs::write(&cache_path, json.as_bytes());
+            // Fallback direct write when copy fails; the copy error already surfaced.
+            let _fallback_written = fs::write(&cache_path, json.as_bytes());
         }
         // Best-effort temp cleanup (ignore errors — unique name avoids clashes).
-        let _ = fs::File::create(&tmp_path).and_then(|f| f.set_len(0));
+        let _truncated_tmp = fs::File::create(&tmp_path).and_then(|f| f.set_len(0));
     }
 
     /// Default on-disk cache root: `%LOCALAPPDATA%\CodexBar` (via `dirs::cache_dir`).
@@ -1367,6 +1516,86 @@ mod tests {
     }
 
     #[test]
+    fn cached_tokens_use_larger_cached_or_cache_read_field() {
+        let value = serde_json::json!({
+            "input_tokens": 100,
+            "cached_input_tokens": 20,
+            "cache_read_input_tokens": 35,
+            "output_tokens": 10
+        });
+        let totals = read_token_totals(&value);
+        assert_eq!(totals.cached, 35);
+    }
+
+    #[test]
+    fn parses_bare_usage_rows_outside_token_count_envelope() {
+        let value = serde_json::json!({
+            "model": "gpt-5.6-sol",
+            "usage": {
+                "prompt_tokens": 120,
+                "completion_tokens": 30,
+                "cached_input_tokens": 40,
+                "cache_read_input_tokens": 55
+            }
+        });
+        let (totals, model) = bare_usage_totals(&value).expect("bare usage");
+        assert_eq!(totals.input, 120);
+        assert_eq!(totals.output, 30);
+        assert_eq!(totals.cached, 55);
+        assert_eq!(model.as_deref(), Some("gpt-5.6-sol"));
+    }
+
+    #[test]
+    fn process_line_accepts_type_less_bare_usage_row() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let range = CostUsageDayRange::new(day, day);
+        let mut parser = CodexParserState::new(None, None);
+
+        parser.process_line(
+            r#"{"timestamp":"2026-05-31T10:00:01Z","model":"gpt-5.6-sol","usage":{"prompt_tokens":120,"completion_tokens":30,"cache_read_input_tokens":55}}"#,
+            &range,
+        );
+
+        assert_eq!(parser.records.len(), 1);
+        assert_eq!(parser.records[0].model, "gpt-5.6-sol");
+        assert_eq!(
+            (
+                parser.records[0].input,
+                parser.records[0].cached,
+                parser.records[0].output
+            ),
+            (120, 55, 30)
+        );
+    }
+
+    #[test]
+    fn timestamp_less_bare_usage_uses_last_accepted_usage_day() {
+        let day = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
+        let range = CostUsageDayRange::new(day, day);
+        let mut parser = CodexParserState::new(Some("gpt-5.6-sol".to_string()), None);
+
+        parser.process_line(
+            r#"{"timestamp":"2026-05-31T10:00:01Z","type":"event_msg","payload":{"type":"token_count","info":{"last_token_usage":{"input_tokens":10,"cached_input_tokens":2,"output_tokens":1}}}}"#,
+            &range,
+        );
+        parser.process_line(
+            r#"{"usage":{"prompt_tokens":20,"completion_tokens":4,"cache_read_input_tokens":3}}"#,
+            &range,
+        );
+
+        assert_eq!(parser.records.len(), 2);
+        assert_eq!(parser.records[1].day_key, "2026-05-31");
+        assert_eq!(
+            (
+                parser.records[1].input,
+                parser.records[1].cached,
+                parser.records[1].output
+            ),
+            (20, 3, 4)
+        );
+    }
+
+    #[test]
     fn interleaved_lineage_totals_never_exceed_high_watermark_growth() {
         let day = NaiveDate::from_ymd_opt(2026, 5, 31).unwrap();
         let range = CostUsageDayRange::new(day, day);
@@ -1478,7 +1707,7 @@ world
 line2
 ";
         std::fs::write(&path, content).unwrap();
-        let size = content.len() as i64;
+        let size = i64::try_from(content.len()).unwrap();
         assert!(JsonlScanner::is_line_boundary_offset(&path, size));
         assert!(JsonlScanner::is_line_boundary_offset(&path, size + 100));
     }

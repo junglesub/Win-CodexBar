@@ -325,6 +325,74 @@ fn fetch_context_cursor_cookie_off_stays_cli() {
 }
 
 #[test]
+fn fetch_context_grok_cookie_off_preserves_auto_oauth() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::Grok, "off");
+    settings.set_usage_source(ProviderId::Grok, "auto");
+    let ctx = super::build_fetch_context(
+        ProviderId::Grok,
+        &settings,
+        &ManualCookies::default(),
+        &ApiKeys::default(),
+        &HashMap::new(),
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::OAuth);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
+fn fetch_context_grok_cookie_off_preserves_explicit_oauth() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::Grok, "off");
+    settings.set_usage_source(ProviderId::Grok, "oauth");
+    let ctx = super::build_fetch_context(
+        ProviderId::Grok,
+        &settings,
+        &ManualCookies::default(),
+        &ApiKeys::default(),
+        &HashMap::new(),
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::OAuth);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
+fn fetch_context_grok_cookie_off_keeps_explicit_cli() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::Grok, "off");
+    settings.set_usage_source(ProviderId::Grok, "cli");
+    let ctx = super::build_fetch_context(
+        ProviderId::Grok,
+        &settings,
+        &ManualCookies::default(),
+        &ApiKeys::default(),
+        &HashMap::new(),
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::Cli);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
+fn fetch_context_grok_empty_manual_preserves_oauth_without_browser_import() {
+    let mut settings = Settings::default();
+    settings.set_cookie_source(ProviderId::Grok, "manual");
+    settings.set_usage_source(ProviderId::Grok, "auto");
+    let ctx = super::build_fetch_context(
+        ProviderId::Grok,
+        &settings,
+        &ManualCookies::default(),
+        &ApiKeys::default(),
+        &HashMap::new(),
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::OAuth);
+    assert!(ctx.manual_cookie_header.is_none());
+}
+
+#[test]
 fn fetch_context_opencode_empty_manual_remaps_to_web() {
     let settings = Settings::default();
     let cookies = ManualCookies::default();
@@ -441,6 +509,27 @@ fn fetch_context_kimi_api_key_preserves_auto_for_web_fallback() {
     assert_eq!(ctx.source_mode, SourceMode::Auto);
     assert!(ctx.manual_cookie_header.is_none());
     assert_eq!(ctx.api_key.as_deref(), Some("sk-kimi-test"));
+}
+
+#[test]
+fn fetch_context_opencodego_api_key_preserves_auto_for_api_overlay() {
+    let settings = Settings::default();
+    let cookies = ManualCookies::default();
+    let mut api_keys = ApiKeys::default();
+    api_keys.set("opencodego", "go-test", None);
+    let token_accounts = HashMap::new();
+
+    let ctx = super::build_fetch_context(
+        ProviderId::OpenCodeGo,
+        &settings,
+        &cookies,
+        &api_keys,
+        &token_accounts,
+    );
+
+    assert_eq!(ctx.source_mode, SourceMode::Auto);
+    assert!(ctx.manual_cookie_header.is_none());
+    assert_eq!(ctx.api_key.as_deref(), Some("go-test"));
 }
 
 #[test]
@@ -863,6 +952,7 @@ fn claude_transient_auth_failure_preserves_first_last_good_snapshot() {
         ProviderId::Claude,
         &metadata,
         "Unauthorized".to_string(),
+        codexbar::core::ProviderStateKind::NeedsAuthentication,
     );
     let mut state = crate::state::AppState::new();
     state.provider_cache.push(good.clone());
@@ -892,6 +982,7 @@ fn claude_repeated_auth_failure_surfaces_error() {
         ProviderId::Claude,
         &metadata,
         "Unauthorized".to_string(),
+        codexbar::core::ProviderStateKind::NeedsAuthentication,
     );
     let second_error = first_error.clone();
     let mut state = crate::state::AppState::new();
@@ -926,6 +1017,7 @@ fn claude_cli_parse_failure_keeps_last_good_every_time() {
         ProviderId::Claude,
         &metadata,
         "Parse error: Empty output from Claude CLI".to_string(),
+        codexbar::core::ProviderStateKind::Unknown,
     );
     let mut state = crate::state::AppState::new();
     state.provider_cache.push(good.clone());
@@ -961,6 +1053,7 @@ fn claude_hard_credentials_missing_does_not_preserve_stale() {
         &metadata,
         "OAuth error: Claude OAuth credentials not found. Run `claude` to authenticate."
             .to_string(),
+        codexbar::core::ProviderStateKind::NeedsAuthentication,
     );
     let mut state = crate::state::AppState::new();
     state.provider_cache.push(good);
@@ -968,6 +1061,11 @@ fn claude_hard_credentials_missing_does_not_preserve_stale() {
     let out =
         super::providers::preserve_last_good_transient_failure(&mut state, ProviderId::Claude, err);
     assert!(out.error.is_some());
+    assert_eq!(
+        out.error_state,
+        codexbar::core::ProviderStateKind::NeedsAuthentication,
+        "hard auth failure must carry its classification on the snapshot"
+    );
 }
 
 #[test]
@@ -1010,7 +1108,9 @@ fn non_claude_error_message_is_preserved() {
 
 #[test]
 fn chart_data_serde_roundtrip_preserves_fields() {
-    use super::{DailyCostPoint, DailyUsageBreakdown, ProviderChartData, ServiceUsagePoint};
+    use super::{
+        DailyCostPoint, DailyTokenPoint, DailyUsageBreakdown, ProviderChartData, ServiceUsagePoint,
+    };
 
     let original = ProviderChartData {
         provider_id: "codex".into(),
@@ -1043,6 +1143,11 @@ fn chart_data_serde_roundtrip_preserves_fields() {
             total_credits_used: 13.5,
         }],
         local_usage: None,
+        tokens_history: vec![DailyTokenPoint {
+            date: "2025-01-01".into(),
+            tokens: 123_456,
+        }],
+        tokens_incomplete: true,
     };
 
     let json = serde_json::to_string(&original).expect("serialize");
@@ -1056,6 +1161,9 @@ fn chart_data_serde_roundtrip_preserves_fields() {
     assert!(json.contains("\"localUsage\":null"));
     assert!(json.contains("\"creditsUsed\":10.0"));
     assert!(json.contains("\"totalCreditsUsed\":13.5"));
+    assert!(json.contains("\"tokensHistory\""));
+    assert!(json.contains("\"tokens\":123456"));
+    assert!(json.contains("\"tokensIncomplete\":true"));
 
     let back: ProviderChartData = serde_json::from_str(&json).expect("deserialize");
     assert_eq!(back.provider_id, "codex");
@@ -1064,6 +1172,8 @@ fn chart_data_serde_roundtrip_preserves_fields() {
     assert_eq!(back.credits_history[0].value, 42.0);
     assert_eq!(back.usage_breakdown[0].services.len(), 2);
     assert_eq!(back.usage_breakdown[0].total_credits_used, 13.5);
+    assert_eq!(back.tokens_history[0].tokens, 123_456);
+    assert!(back.tokens_incomplete);
 }
 
 #[test]

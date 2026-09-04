@@ -1,4 +1,4 @@
-export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
+﻿export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
 export type VisibleSurfaceMode = Exclude<SurfaceMode, "hidden">;
 export type SettingsTabId =
   | "general"
@@ -43,6 +43,7 @@ export type MetricPreference =
   | "tertiary"
   | "credits"
   | "extraUsage"
+  | "monthlyPlan"
   | "average";
 
 export type Language =
@@ -52,7 +53,8 @@ export type Language =
   | "japanese"
   | "korean"
   | "spanish"
-  | "russian";
+  | "russian"
+  | "turkish";
 
 /** Language catalog entry from the Rust backend. */
 export type LanguageOption = {
@@ -67,6 +69,9 @@ export type UpdateChannel = "stable" | "beta";
 export type ThemePreference = "auto" | "light" | "dark";
 
 export type MenuBarDisplayMode = "minimal" | "compact" | "detailed";
+
+/** How cost is rendered on provider MenuCards (#2976). */
+export type CostSummaryDisplayStyle = "compact" | "detailed" | "hidden";
 export type FloatBarOrientation = "horizontal" | "vertical";
 export type FloatBarStyle = "floating" | "taskbar";
 
@@ -171,6 +176,7 @@ export interface SettingsSnapshot {
   adaptiveRefresh: boolean;
   refreshAllProvidersOnMenuOpen: boolean;
   lowPowerMode: boolean;
+  lowPowerModePreference?: "off" | "on" | "automatic";
   startAtLogin: boolean;
   startMinimized: boolean;
   showNotifications: boolean;
@@ -181,6 +187,7 @@ export interface SettingsSnapshot {
   criticalUsageThreshold: number;
   providerUsageThresholds?: Record<string, UsageThresholdOverride>;
   predictivePaceWarningEnabled: boolean;
+  showPace?: boolean;
   trayIconMode: TrayIconMode;
   switcherShowsIcons: boolean;
   menuBarShowsHighestUsage: boolean;
@@ -236,6 +243,8 @@ export interface SettingsSnapshot {
   /** When true, render with dark text/glass for light desktops. */
   floatBarDarkText: boolean;
   /** When true, append each quota window's compact reset beside its percentage. */
+  /** When true, render the next primary reset inline in each provider pill. */
+  /** When true, render the selected metric's next reset inline in each provider pill. */
   floatBarShowResetInline: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
@@ -243,10 +252,24 @@ export interface SettingsSnapshot {
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
   claudeDailyRoutinesUsageVisible: boolean;
+  /**
+   * Explicit consent to read (and refresh) Claude Code's own OAuth
+   * credentials for the Claude provider. Default false — without consent
+   * OAuth stays closed and Auto falls back to labeled reduced-fidelity CLI
+   * usage (upstream #2634/#2745).
+   */
+  claudeAllowReadingClaudeCodeCredentials: boolean;
   /** Alibaba Token Plan region: cn | intl | cn-personal | intl-personal. */
   alibabaTokenPlanRegion: string;
   /** Optional work-week length [2,6] for session-equivalent weekly forecast. */
   weeklyProgressWorkDays?: number | null;
+  /** How cost is rendered on provider cards (#2976). */
+  costSummaryDisplayStyle: CostSummaryDisplayStyle;
+  /** Opt-in read-only OpenCodex usage.jsonl import. */
+  openCodexUsageLogsEnabled?: boolean;
+  hideNativeCodexCostWhenOpenCodexPresent?: boolean;
+  /** Per-provider accent color overrides (CLI name → hex color, #2972). */
+  providerAccentColors: Record<string, string>;
 }
 
 /** Partial settings object — only include fields you want to change. */
@@ -256,6 +279,7 @@ export interface SettingsUpdate {
   adaptiveRefresh?: boolean;
   refreshAllProvidersOnMenuOpen?: boolean;
   lowPowerMode?: boolean;
+  lowPowerModePreference?: "off" | "on" | "automatic";
   startAtLogin?: boolean;
   startMinimized?: boolean;
   showNotifications?: boolean;
@@ -266,6 +290,7 @@ export interface SettingsUpdate {
   criticalUsageThreshold?: number;
   providerUsageThresholds?: Record<string, UsageThresholdOverride>;
   predictivePaceWarningEnabled?: boolean;
+  showPace?: boolean;
   trayIconMode?: TrayIconMode;
   switcherShowsIcons?: boolean;
   menuBarShowsHighestUsage?: boolean;
@@ -295,6 +320,7 @@ export interface SettingsUpdate {
   trayScalePercent?: number;
   powertoysStatusPipeEnabled?: boolean;
   claudeAvoidKeychainPrompts?: boolean;
+  claudeAllowReadingClaudeCodeCredentials?: boolean;
   codexSparkUsageVisible?: boolean;
   disableKeychainAccess?: boolean;
   /** Map of provider CLI name → metric preference label. */
@@ -317,6 +343,10 @@ export interface SettingsUpdate {
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;
   weeklyProgressWorkDays?: number | null;
+  costSummaryDisplayStyle?: CostSummaryDisplayStyle;
+  openCodexUsageLogsEnabled?: boolean;
+  hideNativeCodexCostWhenOpenCodexPresent?: boolean;
+  providerAccentColors?: Record<string, string | null>;
 }
 
 export interface UsageThresholdOverride {
@@ -325,13 +355,22 @@ export interface UsageThresholdOverride {
 }
 
 /** One provider row for Settings → Usage & Spend. */
+export interface UsageSpendDailyPoint {
+  day: string;
+  amount: number;
+}
+
 export interface UsageSpendRow {
   providerId: string;
   displayName: string;
   sevenDay: number | null;
   thirtyDay: number | null;
+  sevenDayTokens?: number | null;
+  thirtyDayTokens?: number | null;
   currency: string;
   source: string;
+  includedInOverview?: boolean;
+  daily?: UsageSpendDailyPoint[];
   /** F8: true when served from stale cache while a re-scan is in progress. */
   refreshing?: boolean;
   /** ISO 8601 timestamp of the stale snapshot when refreshing. */
@@ -340,6 +379,57 @@ export interface UsageSpendRow {
 
 export interface UsageSpendSummary {
   rows: UsageSpendRow[];
+  contract: SpendContract;
+}
+
+export type CostProvenance = "listPriceEstimate" | "vendorMetered" | "mixed" | "unknown";
+
+export interface CostCoverageCounts {
+  priced: number;
+  unpriced: number;
+  unmetered: number;
+  estimated: number;
+}
+
+export interface SpendTokenMix {
+  inputTokens: number | null;
+  outputTokens: number | null;
+  cacheReadTokens: number | null;
+  cacheCreationTokens: number | null;
+  reasoningTokens: number | null;
+}
+
+export interface SpendModelRow {
+  model: string;
+  costUsd: number | null;
+  inputTokens: number;
+  outputTokens: number;
+  cacheReadTokens: number;
+  totalTokens: number;
+  customPricing: boolean;
+}
+
+export interface SpendDailyPoint {
+  day: string;
+  costUsd: number | null;
+  totalTokens: number | null;
+}
+
+export interface SpendActivityCell {
+  weekday: number;
+  hour: number;
+  conversations: number;
+}
+
+export interface ImportedSpendSource {
+  sourceId: string;
+  displayName: string;
+  requestCount: number;
+  conversationCount: number;
+  tokenMix: SpendTokenMix;
+  coverage: CostCoverageCounts;
+  models: SpendModelRow[];
+  hourlyActivity: SpendActivityCell[];
 }
 
 /** Codex local Workspaces snapshot (get_codex_workspaces_snapshot). */
@@ -400,9 +490,33 @@ export interface CodexLocalProjectUsageSnapshot {
   indexedFileCount: number;
   skippedFileCount: number;
   total: CodexWorkspacesUsageTotals;
+  /** All indexed conversations in the selected history window. */
+  sessions: CodexWorkspacesSessionUsage[];
   projects: CodexWorkspacesProjectUsage[];
   daily: CodexWorkspacesDailyPoint[];
   sourceStatus: CodexWorkspacesSourceStatus;
+}
+
+
+export interface SpendContract {
+  providerId: string;
+  historyDays: number;
+  knownCostUsd: number | null;
+  knownZero: boolean;
+  provenance: CostProvenance;
+  priceCoverage: CostCoverageCounts;
+  priceCoverageRatio: number | null;
+  historyCoverageEstablished: boolean;
+  tokenMix: SpendTokenMix;
+  conversationCount: number;
+  models: SpendModelRow[];
+  projects: CodexWorkspacesProjectUsage[];
+  conversations: CodexWorkspacesSessionUsage[];
+  daily: SpendDailyPoint[];
+  hourlyActivity: SpendActivityCell[];
+  projectSourceStatus: CodexWorkspacesSourceStatus | null;
+  customPricingActive: boolean;
+  imports: ImportedSpendSource[];
 }
 
 
@@ -428,17 +542,25 @@ export interface RateWindowSnapshot {
   reserveEtaSeconds?: number | null;
 }
 
+export interface CostDailyPoint {
+  day: string;
+  amount: number;
+}
+
 export interface CostSnapshotBridge {
   used: number;
   limit: number | null;
   remaining: number | null;
   currencyCode: string;
+  /** Optional currency symbol (e.g. "€", "$", "¥") for localized rendering. */
+  currencySymbol?: string | null;
   period: string;
   resetsAt: string | null;
   formattedUsed: string;
   formattedLimit: string | null;
   balance?: number | null;
   formattedBalance?: string | null;
+  daily?: CostDailyPoint[];
 }
 
 export interface PaceSnapshot {
@@ -459,10 +581,20 @@ export interface SessionEquivalentForecastSnapshot {
   weeklyUsedPercent: number;
 }
 
+/** Backend-classified provider availability state (camelCase serde on the bridge). */
+export type ProviderStateKind =
+  | "ready"
+  | "needsAuthentication"
+  | "expiredSession"
+  | "localRuntimeOffline"
+  | "unknown";
+
 export interface ProviderUsageSnapshot {
   providerId: string;
   displayName: string;
   primary: RateWindowSnapshot;
+  /** Settings-selected metric shared by native and webview presentation surfaces. */
+  selectedMetric: RateWindowSnapshot;
   primaryLabel?: string;
   secondary: RateWindowSnapshot | null;
   secondaryLabel?: string;
@@ -481,6 +613,7 @@ export interface ProviderUsageSnapshot {
   sourceLabel: string;
   updatedAt: string;
   error: string | null;
+  errorState: ProviderStateKind;
   pace: PaceSnapshot | null;
   accountOrganization: string | null;
   trayStatusLabel: string | null;
@@ -601,6 +734,12 @@ export interface DailyCostPoint {
   value: number;
 }
 
+/** Exact local token totals per day (upstream 0.50.0 #2930). */
+export interface DailyTokenPoint {
+  date: string;
+  tokens: number;
+}
+
 export interface ServiceUsagePoint {
   service: string;
   creditsUsed: number;
@@ -628,6 +767,8 @@ export interface ProviderChartData {
   creditsHistory: DailyCostPoint[];
   usageBreakdown: DailyUsageBreakdown[];
   localUsage: ProviderLocalUsageSummary | null;
+  tokensHistory: DailyTokenPoint[];
+  tokensIncomplete: boolean;
 }
 
 // ── Token account types ──────────────────────────────────────────────
@@ -739,6 +880,7 @@ export interface ProviderDetail {
   pace: PaceSnapshot | null;
 
   lastError: string | null;
+  errorState: ProviderStateKind | null;
 
   dashboardUrl: string | null;
   statusPageUrl: string | null;
@@ -746,6 +888,8 @@ export interface ProviderDetail {
 
   hasSnapshot: boolean;
 
+  /** Persisted provider usage source (auto | cli | oauth | web). */
+  usageSource?: string | null;
   /** Phase 6c — currently-persisted cookie source value ("auto" | "manual" | "off" | …).
    *  `null` for providers that do not expose a cookie-source picker. */
   cookieSource: string | null;

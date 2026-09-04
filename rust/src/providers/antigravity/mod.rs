@@ -1,4 +1,4 @@
-//! Antigravity provider implementation
+﻿//! Antigravity provider implementation
 //!
 //! Fetches usage data from Antigravity's local language server probe
 //! Uses Windows process detection to find CSRF token
@@ -9,6 +9,8 @@
 //! `GetUserStatus` / `clientModelConfigs` model-level parse unchanged when the
 //! summary is unavailable or unusable.
 
+pub mod local_sessions;
+
 use async_trait::async_trait;
 use regex_lite::Regex;
 use serde::Deserialize;
@@ -18,8 +20,8 @@ use std::process::Command;
 use std::sync::{LazyLock, OnceLock};
 
 use crate::core::{
-    FetchContext, Provider, ProviderError, ProviderFetchResult, ProviderId, ProviderMetadata,
-    RateWindow, SourceMode, UsageSnapshot,
+    FetchContext, NamedRateWindow, Provider, ProviderError, ProviderFetchResult, ProviderId,
+    ProviderMetadata, RateWindow, SourceMode, UsageSnapshot,
 };
 
 const NOT_RUNNING_MESSAGE: &str =
@@ -207,7 +209,10 @@ impl AntigravityProvider {
         // SECURITY: TLS verification is disabled because the local language server uses a
         // self-signed certificate. This is scoped to 127.0.0.1 only; we confirm a port by
         // checking that it answers the expected gRPC endpoint.
+        // The language server is a local loopback endpoint. Do not route it
+        // through the app-wide outbound proxy.
         let client = crate::core::credentialed_http_client_builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(2))
             .danger_accept_invalid_certs(true)
             .redirect(reqwest::redirect::Policy::none())
@@ -317,7 +322,10 @@ impl AntigravityProvider {
         let api_port = Self::find_api_port(process_info.extension_port, process_info.pid).await?;
 
         // SECURITY: TLS verification disabled for local language server (see find_api_port)
+        // The language server is a local loopback endpoint. Do not route it
+        // through the app-wide outbound proxy.
         let client = crate::core::credentialed_http_client_builder()
+            .no_proxy()
             .timeout(std::time::Duration::from_secs(8))
             .danger_accept_invalid_certs(true)
             .redirect(reqwest::redirect::Policy::none())
@@ -581,6 +589,15 @@ impl AntigravityProvider {
 
             let status = resp.status();
             let text = resp.text().await.unwrap_or_default();
+            if process_info.source == ProcessSource::Cli
+                && (status == reqwest::StatusCode::UNAUTHORIZED
+                    || status == reqwest::StatusCode::FORBIDDEN
+                    || text.to_ascii_lowercase().contains("not logged")
+                    || text.to_ascii_lowercase().contains("login method")
+                    || text.to_ascii_lowercase().contains("keyring"))
+            {
+                return Err(ProviderError::AuthRequired);
+            }
             return Err(ProviderError::Other(format!(
                 "API error {}: {}",
                 status, text
@@ -655,18 +672,32 @@ impl AntigravityProvider {
             snapshot = snapshot.with_model_specific(ter);
         }
 
+        // Upstream 0.50.1 #2963: one lane per quota bucket. When Antigravity
+        // emits multiple model configs that map to the same quota bucket
+        // (e.g. multiple Claude variants in the same 5h session), show one
+        // lane per quota bucket, not one per model. Dedup by (remaining,
+        // reset_time) — models sharing the same quota state collapse.
+        let mut seen_buckets: Vec<(Option<f64>, Option<String>)> = Vec::new();
         for config in quota_configs {
             let Some(quota) = &config.quota_info else {
                 continue;
             };
+            let bucket = (quota.remaining_fraction, quota.reset_time.clone());
+            if seen_buckets.contains(&bucket) {
+                continue;
+            }
+            seen_buckets.push(bucket);
             let title = clean_model_label(model_label(config));
             if title.is_empty() {
                 continue;
             }
-            snapshot = snapshot.with_extra_rate_window(
-                model_window_id(config),
-                title,
-                rate_window_from_quota(quota),
+            snapshot.extra_rate_windows.push(
+                NamedRateWindow::new(
+                    model_window_id(config),
+                    title,
+                    rate_window_from_quota(quota),
+                )
+                .with_usage_known(quota.remaining_fraction.is_some()),
             );
         }
 
@@ -715,6 +746,19 @@ impl Provider for AntigravityProvider {
         match self.fetch_usage_snapshot().await {
             Ok(usage) => Ok(ProviderFetchResult::new(usage, "local")),
             Err(e) => {
+                let count = local_sessions::offline_conversation_count();
+                if count > 0 {
+                    let noun = if count == 1 {
+                        "conversation"
+                    } else {
+                        "conversations"
+                    };
+                    let usage = UsageSnapshot::new(RateWindow::informational(format!(
+                        "Offline · {count} {noun}"
+                    )))
+                    .with_login_method("offline");
+                    return Ok(ProviderFetchResult::new(usage, "offline"));
+                }
                 tracing::warn!("Antigravity probe failed: {}", e);
                 Err(e)
             }
@@ -727,6 +771,21 @@ impl Provider for AntigravityProvider {
 
     fn supports_cli(&self) -> bool {
         true
+    }
+
+    /// Antigravity's `NotInstalled` reports the local language-server probe
+    /// finding nothing to talk to — a runtime that is not running, not a
+    /// credential problem — so it surfaces as an offline runtime.
+    fn error_state_kind(&self, error: &ProviderError) -> crate::core::ProviderStateKind {
+        match error {
+            // Only the not-running marker proves the runtime is down; a failed
+            // probe (PowerShell unavailable etc.) is inconclusive, not offline.
+            ProviderError::NotInstalled(msg) if msg.contains("not running") => {
+                crate::core::ProviderStateKind::LocalRuntimeOffline
+            }
+            ProviderError::NotInstalled(_) => crate::core::ProviderStateKind::Unknown,
+            _ => error.state_kind(),
+        }
     }
 }
 
@@ -751,7 +810,10 @@ struct UserStatusResponse {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct UserStatus {
-    #[allow(dead_code)]
+    #[allow(
+        dead_code,
+        reason = "field mirrors the Antigravity API user payload; deserialized for round-trip fidelity but not read yet"
+    )]
     email: Option<String>,
     plan_status: Option<PlanStatus>,
     cascade_model_config_data: Option<ModelConfigData>,
@@ -919,9 +981,9 @@ fn is_bucket_cadence(bucket: &QuotaSummaryBucket, cadence: BucketCadence) -> boo
                 || tokens
                     .windows(2)
                     .any(|pair| pair[0] == "five" && matches!(pair[1], "hour" | "hours"))
-                || tokens.iter().any(|t| *t == "session")
+                || tokens.contains(&"session")
         }
-        BucketCadence::Weekly => tokens.iter().any(|t| *t == "weekly"),
+        BucketCadence::Weekly => tokens.contains(&"weekly"),
     }
 }
 
@@ -1094,12 +1156,28 @@ fn model_label(config: &ModelConfig) -> &str {
     }
 }
 
+fn canonical_model_id(raw: &str) -> &str {
+    match raw.trim().to_ascii_lowercase().as_str() {
+        "gemini-3.6-flash"
+        | "gemini-3.6-flash-low"
+        | "gemini-3.6-flash-medium"
+        | "gemini-3.6-flash-high"
+        | "gemini-3.5-flash-extra-low"
+        | "gemini-3.5-flash-low"
+        | "gemini-3.5-flash-mid"
+        | "gemini-3.5-flash-high"
+        | "gemini-3-flash-agent" => "gemini-3.7-flash",
+        _ => raw,
+    }
+}
+
 fn model_window_id(config: &ModelConfig) -> String {
     let raw = config
         .model_id
         .as_deref()
         .or(config.id.as_deref())
         .unwrap_or_else(|| model_label(config));
+    let raw = canonical_model_id(raw);
     let slug = raw
         .chars()
         .map(|ch| {

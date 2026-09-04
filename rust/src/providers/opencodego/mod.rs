@@ -6,6 +6,7 @@
 //! scrape only; Cli is local-only.
 
 pub(crate) mod local;
+mod usage_api;
 
 use async_trait::async_trait;
 use chrono::Utc;
@@ -215,6 +216,10 @@ impl OpenCodeGoProvider {
 
             let percent = super::extract_number(&percent_pattern, text);
             if let Some(p) = percent {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "resetInSec values are whole-second counts scraped as integral numbers"
+                )]
                 let reset = super::extract_number(&reset_pattern, text)
                     .map(|n| n as i64)
                     .unwrap_or(0);
@@ -236,6 +241,10 @@ impl OpenCodeGoProvider {
                 super::extract_number(&limit_pattern, text),
             ) && limit > 0.0
             {
+                #[allow(
+                    clippy::cast_possible_truncation,
+                    reason = "resetInSec values are whole-second counts scraped as integral numbers"
+                )]
                 let reset = super::extract_number(&reset_pattern, text)
                     .map(|n| n as i64)
                     .unwrap_or(0);
@@ -561,7 +570,7 @@ impl Provider for OpenCodeGoProvider {
                 if Self::auto_prefers_web_first(ctx) {
                     match self.fetch_web(ctx).await {
                         Ok(result) => return Ok(result),
-                        Err(e) if Self::web_error_allows_local_fallback(&e) => {
+                        Err(e) if Self::web_error_allows_local_fallback(ctx, &e) => {
                             tracing::debug!(
                                 "OpenCode Go web failed in scoped Auto; trying local: {e}"
                             );
@@ -574,14 +583,30 @@ impl Provider for OpenCodeGoProvider {
                 match self.fetch_local_with_balance(ctx).await {
                     Ok(result) => return Ok(result),
                     Err(e) => {
-                        tracing::debug!("OpenCode Go local failed in Auto; trying web: {e}");
+                        tracing::debug!("OpenCode Go local failed in Auto; trying API/web: {e}");
+                    }
+                }
+                if let Some(api_key) = usage_api::resolve_api_key(ctx) {
+                    match usage_api::fetch(&self.client, ctx, &api_key, "api").await {
+                        Ok(result) => return Ok(result),
+                        Err(e) => {
+                            tracing::debug!("OpenCode Go API failed in Auto; trying web: {e}")
+                        }
                     }
                 }
                 self.fetch_web(ctx).await
             }
             SourceMode::Web => self.fetch_web(ctx).await,
             SourceMode::Cli => self.fetch_local_with_balance(ctx).await,
-            SourceMode::OAuth => Err(ProviderError::UnsupportedSource(SourceMode::OAuth)),
+            SourceMode::OAuth => {
+                let api_key = usage_api::resolve_api_key(ctx).ok_or_else(|| {
+                    ProviderError::NotInstalled(
+                        "Missing OpenCode Go API key. Add one in Settings or set OPENCODE_API_KEY."
+                            .to_string(),
+                    )
+                })?;
+                usage_api::fetch(&self.client, ctx, &api_key, "api").await
+            }
         }
     }
 
@@ -613,7 +638,15 @@ impl OpenCodeGoProvider {
         ctx.auto_prefer_web
     }
 
-    fn web_error_allows_local_fallback(err: &ProviderError) -> bool {
+    fn web_error_allows_local_fallback(ctx: &FetchContext, err: &ProviderError) -> bool {
+        // Upstream 0.53: an explicitly selected/manual token is an account
+        // choice. Never mask that account's auth failure with account-agnostic
+        // local SQLite estimates. Workspace-only scoping may still fall back.
+        if matches!(err, ProviderError::AuthRequired | ProviderError::NoCookies)
+            && (ctx.manual_cookie_header.is_some() || ctx.auto_prefer_web)
+        {
+            return false;
+        }
         matches!(
             err,
             ProviderError::AuthRequired
@@ -635,6 +668,11 @@ impl OpenCodeGoProvider {
     ) -> Result<ProviderFetchResult, ProviderError> {
         let snap = local::fetch_local_usage(Utc::now())?;
         let mut result = snap.to_fetch_result();
+        if let Some(api_key) = usage_api::resolve_api_key(ctx)
+            && let Ok(api_result) = usage_api::fetch(&self.client, ctx, &api_key, "local+api").await
+        {
+            result = api_result;
+        }
         if !ctx.include_credits {
             return Ok(result);
         }
@@ -653,7 +691,8 @@ impl OpenCodeGoProvider {
         if let Some(balance) =
             Self::join_zen_balance(task, started, ctx.requires_optional_usage_completeness).await
         {
-            result = Self::with_zen_balance(result.usage, "local", Some(balance));
+            result =
+                Self::with_zen_balance(result.usage, &result.source_label.clone(), Some(balance));
         }
         Ok(result)
     }
@@ -783,6 +822,25 @@ mod tests {
         let snap = OpenCodeGoProvider::parse_usage_text(text).unwrap();
         assert!((snap.primary.used_percent - 1.0).abs() < 0.001);
         assert!((snap.secondary.as_ref().unwrap().used_percent - 0.5).abs() < 0.001);
+    }
+
+    #[test]
+    fn selected_token_auth_failure_does_not_fall_back_to_local_estimate() {
+        let mut selected = FetchContext {
+            auto_prefer_web: true,
+            ..FetchContext::default()
+        };
+        assert!(!OpenCodeGoProvider::web_error_allows_local_fallback(
+            &selected,
+            &ProviderError::AuthRequired
+        ));
+
+        selected.auto_prefer_web = false;
+        selected.workspace_id = Some("wrk_example".to_string());
+        assert!(OpenCodeGoProvider::web_error_allows_local_fallback(
+            &selected,
+            &ProviderError::AuthRequired
+        ));
     }
 
     #[test]

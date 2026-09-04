@@ -31,6 +31,8 @@ pub struct ProviderDetail {
 
     // Error / state.
     pub last_error: Option<String>,
+    /// Backend-classified availability state for the latest refresh.
+    pub error_state: Option<codexbar::core::ProviderStateKind>,
 
     // URLs for quick-actions (button visibility).
     pub dashboard_url: Option<String>,
@@ -43,6 +45,7 @@ pub struct ProviderDetail {
     // Phase 6c — currently-persisted cookie source & region for round-tripping
     // into the settings UI pickers. `None` for providers that do not support
     // one of the pickers.
+    pub usage_source: Option<String>,
     pub cookie_source: Option<String>,
     pub region: Option<String>,
 }
@@ -86,6 +89,7 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
         cost: None,
         pace: None,
         last_error: None,
+        error_state: None,
         dashboard_url: dashboard_url.clone(),
         status_page_url: metadata.status_page_url.map(|s| s.to_string()),
         // Buy-credits currently mirrors the dashboard URL for providers that
@@ -96,6 +100,7 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
             None
         },
         has_snapshot: false,
+        usage_source: provider_usage_source_lookup(&settings, id.cli_name()),
         cookie_source: provider_cookie_source_lookup(&settings, id.cli_name()),
         region: provider_region_lookup(&settings, id.cli_name()),
     })
@@ -140,6 +145,7 @@ pub fn get_provider_detail(
             detail.pace = snapshot.pace.clone();
         }
         detail.last_error = snapshot.error.clone();
+        detail.error_state = Some(snapshot.error_state);
         detail.has_snapshot = true;
     }
 

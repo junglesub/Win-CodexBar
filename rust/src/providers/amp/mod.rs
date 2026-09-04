@@ -313,21 +313,41 @@ pub fn parse_amp_free_percent_remaining(text: &str) -> Option<f64> {
     None
 }
 
-/// Parse Amp subscription display text (Megawatt dual other/orb windows).
+fn normalize_amp_subscription_line(line: &str) -> String {
+    let trimmed = line.trim();
+    let Some(rest) = trimmed.strip_prefix("Amp ") else {
+        return line.to_string();
+    };
+    let Some((plan, suffix)) = rest.split_once(" Subscription:") else {
+        return line.to_string();
+    };
+    let plan = plan.trim();
+    if plan.is_empty() {
+        return line.to_string();
+    }
+    format!("Subscription {plan}:{suffix}")
+}
+
+/// Parse Amp subscription display text (Megawatt/Gigawatt dual other/orb windows).
 ///
 /// Matches:
 /// `Subscription Megawatt: 42% other usage and 88% orb usage remaining - resets upon renewal in 12 days`
+/// `Subscription Gigawatt: 10% other usage and 95% orb usage remaining - resets upon renewal in 2 months`
+///
+/// Upstream 0.49.6 #2601: monthly (Gigawatt) renewals advance by calendar
+/// month, not 30-day buckets.
 pub fn parse_amp_subscription_usage(
     text: &str,
     now: chrono::DateTime<chrono::Utc>,
 ) -> Option<AmpSubscriptionUsage> {
     let re = regex_lite::Regex::new(
-        r"(?im)^\s*Subscription\s+(.+?):\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*%\s+other\s+usage\s+and\s+([0-9][0-9,]*(?:\.[0-9]+)?)\s*%\s+orb\s+usage\s+remaining\s*-\s*resets\s+upon\s+renewal\s+in\s+([0-9][0-9,]*)\s+days?(?:\s+-\s+https?://\S+)?\s*$",
+        r"(?im)^\s*Subscription\s+(.+?):\s*([0-9][0-9,]*(?:\.[0-9]+)?)\s*%\s+other\s+usage\s+and\s+([0-9][0-9,]*(?:\.[0-9]+)?)\s*%\s+orb\s+usage\s+remaining\s*-\s*resets\s+upon\s+renewal\s+in\s+([0-9][0-9,]*)\s+(days?|months?)(?:\s+-\s+https?://\S+)?\s*$",
     )
     .ok()?;
 
     for line in text.lines() {
-        let Some(caps) = re.captures(line) else {
+        let normalized_line = normalize_amp_subscription_line(line);
+        let Some(caps) = re.captures(&normalized_line) else {
             continue;
         };
         let plan = caps.get(1)?.as_str().trim();
@@ -336,24 +356,44 @@ pub fn parse_amp_subscription_usage(
         }
         let other_remaining = parse_amp_number(caps.get(2)?.as_str())?;
         let orb_remaining = parse_amp_number(caps.get(3)?.as_str())?;
-        let renewal_days: i64 = caps.get(4)?.as_str().replace(',', "").parse().ok()?;
-        if renewal_days < 0 {
+        let renewal_value: i64 = caps.get(4)?.as_str().replace(',', "").parse().ok()?;
+        if renewal_value < 0 {
             continue;
         }
-        let reset_description = if renewal_days == 1 {
-            "renews in 1 day".to_string()
+        let unit = caps.get(5)?.as_str().to_ascii_lowercase();
+        let resets_at = if unit.starts_with("month") {
+            add_calendar_months(now, renewal_value)?
         } else {
-            format!("renews in {renewal_days} days")
+            now + chrono::Duration::days(renewal_value)
+        };
+        let singular_unit = if unit.starts_with("month") {
+            "month"
+        } else {
+            "day"
+        };
+        let reset_description = if renewal_value == 1 {
+            format!("renews in 1 {singular_unit}")
+        } else {
+            format!("renews in {renewal_value} {singular_unit}s")
         };
         return Some(AmpSubscriptionUsage {
             plan: plan.to_string(),
             other_used_percent: 100.0 - other_remaining.clamp(0.0, 100.0),
             orb_used_percent: 100.0 - orb_remaining.clamp(0.0, 100.0),
-            resets_at: now + chrono::Duration::days(renewal_days),
+            resets_at,
             reset_description,
         });
     }
     None
+}
+
+/// Add whole calendar months via chrono's calendar arithmetic, mirroring
+/// upstream `Calendar.date(byAdding: .month:)` for monthly renewals.
+fn add_calendar_months(
+    now: chrono::DateTime<chrono::Utc>,
+    months: i64,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    now.checked_add_months(chrono::Months::new(u32::try_from(months).ok()?))
 }
 
 /// Build a [`UsageSnapshot`] from Amp Free / subscription display text.
@@ -392,13 +432,36 @@ pub fn usage_snapshot_from_amp_display_text(
     }
 
     let free_used = parse_amp_free_percent_remaining(text)?;
+    // Upstream 0.49.6 #2601: the Amp Free daily tier resets at 8:00 PM
+    // America/New_York, not local midnight.
     let primary = RateWindow::with_details(
         free_used,
         Some(24 * 60),
-        None,
+        next_free_tier_reset(now),
         Some("resets daily".to_string()),
     );
     Some(UsageSnapshot::new(primary).with_login_method("Amp Free"))
+}
+
+/// Next 8:00 PM America/New_York boundary strictly after `now`.
+fn next_free_tier_reset(
+    now: chrono::DateTime<chrono::Utc>,
+) -> Option<chrono::DateTime<chrono::Utc>> {
+    use chrono::{Datelike, TimeZone};
+    let tz = chrono_tz::America::New_York;
+    let local_now = now.with_timezone(&tz);
+    let today = local_now.date_naive();
+    let today_reset = tz
+        .with_ymd_and_hms(today.year(), today.month(), today.day(), 20, 0, 0)
+        .single()?
+        .with_timezone(&chrono::Utc);
+    if today_reset > now {
+        return Some(today_reset);
+    }
+    let tomorrow = today + chrono::Duration::days(1);
+    tz.with_ymd_and_hms(tomorrow.year(), tomorrow.month(), tomorrow.day(), 20, 0, 0)
+        .single()
+        .map(|dt| dt.with_timezone(&chrono::Utc))
 }
 
 fn parse_amp_number(raw: &str) -> Option<f64> {
@@ -489,6 +552,46 @@ Subscription Megawatt: 42% other usage and 88% orb usage remaining - resets upon
     }
 
     #[test]
+    fn gigawatt_monthly_renewal_advances_calendar_months() {
+        // Upstream 0.49.6 #2601: monthly renewals (Gigawatt) use calendar
+        // months, not 30-day buckets.
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 12, 0, 0).unwrap();
+        let text = "Subscription Gigawatt: 10% other usage and 95% orb usage remaining - resets upon renewal in 2 months";
+        let sub = parse_amp_subscription_usage(text, now).expect("subscription");
+        assert_eq!(sub.plan, "Gigawatt");
+        assert_eq!(sub.reset_description, "renews in 2 months");
+        assert_eq!(
+            sub.resets_at,
+            Utc.with_ymd_and_hms(2026, 10, 17, 12, 0, 0).unwrap()
+        );
+    }
+
+    #[test]
+    fn free_tier_resets_at_8pm_new_york() {
+        // Upstream 0.49.6 #2601: Amp Free resets at 8:00 PM America/New_York.
+        // 2026-08-17 18:00 UTC = 14:00 EDT → same-day 20:00 EDT = 00:00 UTC Aug 18.
+        let now = Utc.with_ymd_and_hms(2026, 8, 17, 18, 0, 0).unwrap();
+        let snapshot =
+            usage_snapshot_from_amp_display_text("Amp Free: 72% remaining (resets daily)", now)
+                .expect("snapshot");
+        assert_eq!(
+            snapshot.primary.resets_at,
+            Some(Utc.with_ymd_and_hms(2026, 8, 18, 0, 0, 0).unwrap())
+        );
+
+        // 2026-08-18 00:30 UTC = 20:30 EDT Aug 17 (after the boundary) → the
+        // next reset is Aug 18 20:00 EDT = Aug 19 00:00 UTC.
+        let later = Utc.with_ymd_and_hms(2026, 8, 18, 0, 30, 0).unwrap();
+        let snapshot =
+            usage_snapshot_from_amp_display_text("Amp Free: 72% remaining (resets daily)", later)
+                .expect("snapshot");
+        assert_eq!(
+            snapshot.primary.resets_at,
+            Some(Utc.with_ymd_and_hms(2026, 8, 19, 0, 0, 0).unwrap())
+        );
+    }
+
+    #[test]
     fn free_path_still_builds_snapshot() {
         let now = Utc.with_ymd_and_hms(2026, 7, 1, 0, 0, 0).unwrap();
         let text = "Amp Free: 72% remaining today";
@@ -496,5 +599,26 @@ Subscription Megawatt: 42% other usage and 88% orb usage remaining - resets upon
         assert!((snapshot.primary.used_percent - 28.0).abs() < f64::EPSILON);
         assert!(snapshot.secondary.is_none());
         assert_eq!(snapshot.login_method.as_deref(), Some("Amp Free"));
+    }
+}
+
+#[cfg(test)]
+mod current_subscription_tests {
+    use super::*;
+    use chrono::{TimeZone, Utc};
+    #[test]
+    fn parses_current_amp_subscription_line_format() {
+        let now = Utc.with_ymd_and_hms(2026, 8, 18, 12, 0, 0).unwrap();
+        let text = "Signed in as user@example.com\nAmp Megawatt Subscription: 100% other usage and 100% orb usage remaining - resets upon renewal in 1 month\n";
+        let sub = parse_amp_subscription_usage(text, now).expect("subscription");
+
+        assert_eq!(sub.plan, "Megawatt");
+        assert!((sub.other_used_percent - 0.0).abs() < f64::EPSILON);
+        assert!((sub.orb_used_percent - 0.0).abs() < f64::EPSILON);
+        assert_eq!(
+            sub.resets_at,
+            Utc.with_ymd_and_hms(2026, 9, 18, 12, 0, 0).unwrap()
+        );
+        assert_eq!(sub.reset_description, "renews in 1 month");
     }
 }

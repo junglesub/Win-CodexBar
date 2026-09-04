@@ -3,8 +3,10 @@
 use std::sync::Mutex;
 
 use crate::commands::ProviderCatalogEntry;
+#[cfg(test)]
 use codexbar::core::ProviderId;
-use codexbar::settings::{MetricPreference, Settings, TrayIconMode};
+use codexbar::settings::MetricPreference;
+use codexbar::settings::{Settings, TrayIconMode};
 use tauri::image::Image;
 use tauri::menu::{CheckMenuItemBuilder, IsMenuItem, Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -553,19 +555,48 @@ fn provider_status_label(
     snapshot: &crate::commands::ProviderUsageSnapshot,
     lang: codexbar::settings::Language,
 ) -> (String, String) {
-    // F5 (upstream 0.48.0): for Codex, prefer the first non-informational lane so
-    // a monthly-only plan shows the monthly window with its reset countdown
-    // instead of the informational "No active 5h session" placeholder.
-    let window = if snapshot.provider_id == "codex" {
-        codex_lane_headline_window(snapshot)
-    } else {
-        &snapshot.primary
-    };
-    let label = crate::commands::compact_tray_status_label(window, lang);
+    // MonthlyPlan metric (PAYG spend, e.g. Mistral): show formatted cost.
+    let provider = codexbar::core::ProviderId::from_cli_name(&snapshot.provider_id);
+    let preference = provider
+        .map(|id| Settings::load().get_provider_metric(id))
+        .unwrap_or_default();
+    if preference == MetricPreference::MonthlyPlan
+        && let Some(cost) = snapshot.cost.as_ref()
+    {
+        let amount = if !cost.formatted_used.is_empty() {
+            cost.formatted_used.clone()
+        } else {
+            crate::commands::format_cost_amount(cost)
+        };
+        return (
+            snapshot.provider_id.clone(),
+            format!("{} {}", snapshot.display_name, amount),
+        );
+    }
+
+    let label = crate::commands::compact_tray_status_label(headline_window(snapshot), lang);
     (
         snapshot.provider_id.clone(),
         format!("{} {}", snapshot.display_name, label),
     )
+}
+
+/// Window that headline tray surfaces should label for a provider.
+///
+/// F5 (upstream 0.48.0): for Codex, prefer the first non-informational lane so
+/// a monthly-only plan shows the monthly window with its reset countdown
+/// instead of the informational "No active 5h session" placeholder.
+///
+/// Shared by the tray menu rows (`provider_status_label`) and the tray tooltip
+/// (`build_tooltip`) so the two cannot drift apart.
+fn headline_window(
+    snapshot: &crate::commands::ProviderUsageSnapshot,
+) -> &crate::commands::RateWindowSnapshot {
+    if snapshot.provider_id == "codex" {
+        codex_lane_headline_window(snapshot)
+    } else {
+        &snapshot.primary
+    }
 }
 
 /// F5 (upstream 0.48.0): pick the first non-informational Codex lane in
@@ -631,160 +662,19 @@ fn selected_tray_percents(
     snapshot: &crate::commands::ProviderUsageSnapshot,
     settings: &Settings,
 ) -> (f64, Option<f64>) {
-    let provider = ProviderId::from_cli_name(snapshot.provider_id.as_str());
-    let preference = provider
-        .map(|id| settings.get_provider_metric(id))
-        .unwrap_or(MetricPreference::Automatic);
-    let primary = selected_metric_percent(snapshot, provider, preference)
-        .or_else(|| selected_metric_percent(snapshot, provider, MetricPreference::Automatic))
-        .unwrap_or(snapshot.primary.used_percent);
-
-    let secondary = snapshot
-        .secondary
-        .as_ref()
-        .map(|w| display_metric_percent(w.used_percent, settings.show_as_used));
-
+    let (selected, companion) =
+        crate::usage_metric::selected_usage_icon_windows(snapshot, settings);
     (
-        display_metric_percent(primary, settings.show_as_used),
-        secondary,
+        display_metric_percent(selected.used_percent, settings.show_as_used),
+        companion
+            .as_ref()
+            .map(|window| display_metric_percent(window.used_percent, settings.show_as_used)),
     )
 }
 
 fn display_metric_percent(used_percent: f64, show_as_used: bool) -> f64 {
     let used = used_percent.clamp(0.0, 100.0);
     if show_as_used { used } else { 100.0 - used }
-}
-
-fn selected_metric_percent(
-    snapshot: &crate::commands::ProviderUsageSnapshot,
-    provider: Option<ProviderId>,
-    preference: MetricPreference,
-) -> Option<f64> {
-    match preference {
-        MetricPreference::Automatic => automatic_metric_percent(snapshot, provider),
-        // Informational primaries (e.g. Claude null five_hour placeholder) must
-        // not paint a phantom session percent; fall through to Automatic.
-        MetricPreference::Session if snapshot.primary.is_informational => None,
-        MetricPreference::Session => Some(snapshot.primary.used_percent),
-        MetricPreference::Weekly => snapshot
-            .secondary
-            .as_ref()
-            .filter(|w| !w.is_informational)
-            .map(|w| w.used_percent)
-            .or_else(|| {
-                (!snapshot.primary.is_informational).then_some(snapshot.primary.used_percent)
-            }),
-        MetricPreference::Model => snapshot
-            .model_specific
-            .as_ref()
-            .map(|w| w.used_percent)
-            .or_else(|| {
-                (!snapshot.primary.is_informational).then_some(snapshot.primary.used_percent)
-            }),
-        MetricPreference::Tertiary => snapshot
-            .tertiary
-            .as_ref()
-            .map(|w| w.used_percent)
-            .or_else(|| snapshot.secondary.as_ref().map(|w| w.used_percent))
-            .or_else(|| {
-                (!snapshot.primary.is_informational).then_some(snapshot.primary.used_percent)
-            }),
-        MetricPreference::Credits => cost_metric_percent(snapshot),
-        MetricPreference::ExtraUsage => {
-            extra_rate_window_percent(snapshot).or_else(|| cost_metric_percent(snapshot))
-        }
-        MetricPreference::Average => average_metric_percent(snapshot),
-    }
-}
-
-fn automatic_metric_percent(
-    snapshot: &crate::commands::ProviderUsageSnapshot,
-    provider: Option<ProviderId>,
-) -> Option<f64> {
-    match provider {
-        // When a model carve-out is exhausted but account weekly still has
-        // remaining, prefer weekly for Automatic display (upstream 0.46).
-        Some(ProviderId::Claude) => claude_automatic_metric_percent(snapshot),
-        // Highest used_percent across windows so exhausted (≥100%) surfaces first
-        // (upstream #2352). Provider-specific overrides above stay intact.
-        _ => highest_window_metric_percent(snapshot),
-    }
-}
-
-fn claude_automatic_metric_percent(
-    snapshot: &crate::commands::ProviderUsageSnapshot,
-) -> Option<f64> {
-    let weekly = snapshot.secondary.as_ref().filter(|w| !w.is_informational);
-    let model = snapshot.model_specific.as_ref();
-
-    if let (Some(model), Some(weekly)) = (model, weekly) {
-        let model_exhausted = model.is_exhausted || model.used_percent >= 100.0;
-        let weekly_has_remaining = !weekly.is_exhausted && weekly.used_percent < 100.0;
-        if model_exhausted && weekly_has_remaining {
-            return Some(weekly.used_percent);
-        }
-    }
-
-    if snapshot.primary.is_informational {
-        return weekly.map(|w| w.used_percent);
-    }
-
-    // Fall through to highest-window among Claude lanes when no carve-out rule hits.
-    highest_window_metric_percent(snapshot)
-}
-
-/// Automatic tray metric: highest used_percent across non-informational windows.
-fn highest_window_metric_percent(snapshot: &crate::commands::ProviderUsageSnapshot) -> Option<f64> {
-    let mut values = Vec::with_capacity(4 + snapshot.extra_rate_windows.len());
-    if !snapshot.primary.is_informational {
-        values.push(snapshot.primary.used_percent);
-    }
-    if let Some(w) = snapshot.secondary.as_ref().filter(|w| !w.is_informational) {
-        values.push(w.used_percent);
-    }
-    if let Some(w) = snapshot
-        .model_specific
-        .as_ref()
-        .filter(|w| !w.is_informational)
-    {
-        values.push(w.used_percent);
-    }
-    if let Some(w) = snapshot.tertiary.as_ref().filter(|w| !w.is_informational) {
-        values.push(w.used_percent);
-    }
-    for extra in &snapshot.extra_rate_windows {
-        if !extra.window.is_informational {
-            values.push(extra.window.used_percent);
-        }
-    }
-    values
-        .into_iter()
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
-}
-
-fn average_metric_percent(snapshot: &crate::commands::ProviderUsageSnapshot) -> Option<f64> {
-    if snapshot.primary.is_informational {
-        return snapshot.secondary.as_ref().map(|w| w.used_percent);
-    }
-    let secondary = snapshot.secondary.as_ref()?;
-    Some((snapshot.primary.used_percent + secondary.used_percent) / 2.0)
-}
-
-fn cost_metric_percent(snapshot: &crate::commands::ProviderUsageSnapshot) -> Option<f64> {
-    let cost = snapshot.cost.as_ref()?;
-    let limit = cost.limit?;
-    if limit <= 0.0 {
-        return None;
-    }
-    Some(((cost.used / limit) * 100.0).clamp(0.0, 100.0))
-}
-
-fn extra_rate_window_percent(snapshot: &crate::commands::ProviderUsageSnapshot) -> Option<f64> {
-    snapshot
-        .extra_rate_windows
-        .iter()
-        .map(|extra| extra.window.used_percent)
-        .max_by(|a, b| a.partial_cmp(b).unwrap_or(std::cmp::Ordering::Equal))
 }
 
 /// Build a compact multi-line tooltip string from provider snapshots.
@@ -805,7 +695,7 @@ fn build_tooltip(
             let short = truncate_tooltip_text(err, 36);
             format!("{}: {} ({})", s.display_name, error_label, short)
         } else {
-            let label = crate::commands::compact_tray_status_label(&s.primary, lang);
+            let label = crate::commands::compact_tray_status_label(headline_window(s), lang);
             format!("{}: {}", s.display_name, truncate_tooltip_text(&label, 42))
         };
         lines.push(status);
@@ -824,7 +714,10 @@ fn truncate_tooltip_text(text: &str, max_chars: usize) -> String {
     }
 }
 
-#[allow(dead_code)]
+#[allow(
+    dead_code,
+    reason = "tray bridge helper reserved for future system tray integration"
+)]
 fn menu_contains(menu: &[TrayMenuEntry], id: &str) -> bool {
     menu.iter().any(|entry| {
         entry.id.as_deref() == Some(id)
@@ -1174,18 +1067,21 @@ mod tests {
                 limit: Some(limit),
                 remaining: Some((limit - used).max(0.0)),
                 currency_code: "USD".to_string(),
+                currency_symbol: None,
                 period: "monthly".to_string(),
                 resets_at: None,
                 formatted_used: format!("${used:.2}"),
                 formatted_limit: Some(format!("${limit:.2}")),
                 balance: None,
                 formatted_balance: None,
+                daily: Vec::new(),
             }),
             plan_name: None,
             account_email: None,
             source_label: String::new(),
             updated_at: "2025-01-01T00:00:00Z".into(),
             error: None,
+            error_state: codexbar::core::ProviderStateKind::Ready,
             pace: None,
             account_organization: None,
             tray_status_label: None,
@@ -1343,6 +1239,21 @@ mod tests {
     }
 
     #[test]
+    fn tooltip_skips_informational_codex_primary() {
+        // Weekly-only Codex plan: the 5h lane is an informational placeholder,
+        // so the tooltip must label the real weekly lane instead of echoing
+        // "No active 5h session" back at the user.
+        let mut codex = fake_snapshot_with("codex", "Codex", 0.0, Some(16.0), None, None);
+        codex.primary.is_informational = true;
+        codex.primary.reset_description = Some("No active 5h session".to_string());
+        codex.secondary.as_mut().unwrap().reset_description = Some("3d 17h".to_string());
+
+        let tooltip = build_tooltip(&[codex], codexbar::settings::Language::English);
+
+        assert_eq!(tooltip, "CodexBar\nCodex: 16% • Resets in 3d 17h");
+    }
+
+    #[test]
     fn tooltip_truncates_long_provider_lines() {
         let mut claude = fake_snapshot("claude", "Claude", 13.0);
         claude.primary.reset_description =
@@ -1473,6 +1384,43 @@ mod tests {
     }
 
     #[test]
+    fn single_meaningful_secondary_quota_uses_full_single_meter() {
+        let settings = Settings::default();
+        let mut snapshot = fake_snapshot_with("claude", "Claude", 0.0, Some(42.0), None, None);
+        snapshot.primary.is_informational = true;
+
+        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+
+        assert_eq!(primary, 42.0);
+        assert_eq!(secondary, None);
+    }
+
+    #[test]
+    fn selected_secondary_quota_is_not_duplicated_when_tertiary_is_meaningful() {
+        let settings = Settings::default();
+        let mut snapshot =
+            fake_snapshot_with("claude", "Claude", 0.0, Some(42.0), Some(30.0), None);
+        snapshot.primary.is_informational = true;
+
+        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+
+        assert_eq!(primary, 42.0);
+        assert_eq!(secondary, Some(30.0));
+    }
+
+    #[test]
+    fn two_meaningful_quotas_keep_two_meter_layout() {
+        let mut settings = Settings::default();
+        settings.set_provider_metric(ProviderId::Cursor, MetricPreference::Session);
+        let snapshot = fake_snapshot_with("cursor", "Cursor", 15.0, Some(40.0), None, None);
+
+        let (primary, secondary) = selected_tray_percents(&snapshot, &settings);
+
+        assert_eq!(primary, 15.0);
+        assert_eq!(secondary, Some(40.0));
+    }
+
+    #[test]
     fn informational_primary_skips_session_and_automatic_phantom_zero() {
         let mut settings = Settings::default();
         settings.set_provider_metric(ProviderId::Claude, MetricPreference::Session);
@@ -1489,16 +1437,6 @@ mod tests {
         settings.set_provider_metric(ProviderId::Claude, MetricPreference::Automatic);
         let (primary, _) = selected_tray_percents(&snapshot, &settings);
         assert_eq!(primary, 42.0);
-
-        // Direct Session arm returns None when primary is informational.
-        assert_eq!(
-            selected_metric_percent(
-                &snapshot,
-                Some(ProviderId::Claude),
-                MetricPreference::Session
-            ),
-            None
-        );
     }
 
     #[test]

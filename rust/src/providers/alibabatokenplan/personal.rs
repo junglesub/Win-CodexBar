@@ -12,86 +12,131 @@ use super::{
 };
 use crate::core::{FetchContext, ProviderError};
 
+struct PersonalApiContext<'a> {
+    client: &'a reqwest::Client,
+    cookie_header: &'a str,
+    region: AlibabaTokenPlanRegion,
+    sec_token: Option<&'a str>,
+    fetch_context: &'a FetchContext,
+}
+
 pub(super) async fn fetch_personal_usage(
     client: &reqwest::Client,
     cookie_header: &str,
     region: AlibabaTokenPlanRegion,
-    ctx: &FetchContext,
+    sec_token: Option<&str>,
+    fetch_context: &FetchContext,
 ) -> Result<TokenPlanSnapshot, ProviderError> {
-    let usage_body = post_personal_api(
+    let context = PersonalApiContext {
         client,
-        PERSONAL_USAGE_API,
-        Map::new(),
         cookie_header,
         region,
-        ctx,
-    )
-    .await?;
-
+        sec_token,
+        fetch_context,
+    };
     let mut subscription_params = Map::new();
     subscription_params.insert(
         "commodityCode".into(),
         Value::String(region.product_code().to_string()),
     );
-    let subscription_body = post_personal_api_optional(
-        client,
-        PERSONAL_SUBSCRIPTION_API,
-        subscription_params,
-        cookie_header,
-        region,
-        ctx,
-    )
-    .await;
+    let subscription_body =
+        post_personal_api_optional(&context, PERSONAL_SUBSCRIPTION_API, subscription_params).await;
 
-    let quota_config_body = post_personal_api_optional(
-        client,
-        PERSONAL_QUOTA_CONFIG_API,
-        Map::new(),
-        cookie_header,
-        region,
-        ctx,
-    )
-    .await;
+    let quota_config_body =
+        post_personal_api_optional(&context, PERSONAL_QUOTA_CONFIG_API, Map::new()).await;
 
-    parse_personal_usage(
-        &usage_body,
-        subscription_body.as_deref(),
-        quota_config_body.as_deref(),
-    )
+    const MAX_USAGE_ATTEMPTS: usize = 3;
+    const RETRY_DELAY: std::time::Duration = std::time::Duration::from_millis(400);
+    for attempt in 0..MAX_USAGE_ATTEMPTS {
+        if attempt > 0 {
+            tokio::time::sleep(RETRY_DELAY).await;
+        }
+        let usage_body = post_personal_api(&context, PERSONAL_USAGE_API, Map::new()).await?;
+        match parse_personal_usage(
+            &usage_body,
+            subscription_body.as_deref(),
+            quota_config_body.as_deref(),
+        ) {
+            Ok(snapshot) => return Ok(snapshot),
+            Err(error) if personal_usage_success_without_windows(&usage_body) => {
+                tracing::info!(
+                    attempt = attempt + 1,
+                    max_attempts = MAX_USAGE_ATTEMPTS,
+                    "Alibaba Token Plan Personal usage returned no windows; retrying"
+                );
+                if attempt + 1 == MAX_USAGE_ATTEMPTS {
+                    return Err(ProviderError::Other(
+                        "Alibaba Token Plan usage is temporarily unavailable; it will refresh automatically."
+                            .into(),
+                    ));
+                }
+                let _ = error;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("bounded usage retry loop always returns")
+}
+
+fn personal_usage_success_without_windows(data: &[u8]) -> bool {
+    let Ok(value) = serde_json::from_slice::<Value>(data) else {
+        return false;
+    };
+    let expanded = expand_json_strings(value);
+    let has_windows =
+        find_object_containing_any_of(&expanded, &["per5HourPercentage", "per1WeekPercentage"])
+            .is_some();
+    if has_windows {
+        return false;
+    }
+    let code_success = expanded
+        .get("code")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_some_and(|code| code.eq_ignore_ascii_case("SUCCESS") || code == "200");
+    let response_success = expanded
+        .get("successResponse")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+    let error_empty = expanded
+        .get("errorCode")
+        .and_then(Value::as_str)
+        .map(str::trim)
+        .is_none_or(str::is_empty);
+    code_success && response_success && error_empty
 }
 
 async fn post_personal_api(
-    client: &reqwest::Client,
+    context: &PersonalApiContext<'_>,
     api: &str,
     data_parameters: Map<String, Value>,
-    cookie_header: &str,
-    region: AlibabaTokenPlanRegion,
-    ctx: &FetchContext,
 ) -> Result<Vec<u8>, ProviderError> {
-    let url = personal_api_url(api, region);
-    let params_json = build_personal_params_json(api, data_parameters, cookie_header, region);
-    let form = [
-        ("product", PERSONAL_CONSOLE_PRODUCT.to_string()),
-        ("action", region.personal_api_action().to_string()),
-        ("region", region.current_region_id().to_string()),
-        ("language", LANGUAGE.to_string()),
-        ("params", params_json),
-    ];
+    let url = personal_api_url(api, context.region);
+    let form = build_personal_form(
+        api,
+        data_parameters,
+        context.cookie_header,
+        context.region,
+        context.sec_token,
+    );
 
-    let mut request = client
+    let mut request = context
+        .client
         .post(&url)
-        .timeout(std::time::Duration::from_secs(ctx.web_timeout.max(1)))
-        .header("Cookie", cookie_header)
+        .timeout(std::time::Duration::from_secs(
+            context.fetch_context.web_timeout.max(1),
+        ))
+        .header("Cookie", context.cookie_header)
         .header("Accept", "application/json, text/plain, */*")
         .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Origin", region.gateway_base_url())
-        .header("Referer", region.dashboard_url())
+        .header("Origin", context.region.gateway_base_url())
+        .header("Referer", context.region.dashboard_url())
         .header("User-Agent", USER_AGENT)
         .header("X-Requested-With", "XMLHttpRequest")
         .form(&form);
 
-    if let Some(csrf) = cookie_value("login_aliyunid_csrf", cookie_header)
-        .or_else(|| cookie_value("csrf", cookie_header))
+    if let Some(csrf) = cookie_value("login_aliyunid_csrf", context.cookie_header)
+        .or_else(|| cookie_value("csrf", context.cookie_header))
     {
         request = request
             .header("x-xsrf-token", csrf.clone())
@@ -113,16 +158,32 @@ async fn post_personal_api(
 }
 
 async fn post_personal_api_optional(
-    client: &reqwest::Client,
+    context: &PersonalApiContext<'_>,
+    api: &str,
+    data_parameters: Map<String, Value>,
+) -> Option<Vec<u8>> {
+    post_personal_api(context, api, data_parameters).await.ok()
+}
+
+fn build_personal_form(
     api: &str,
     data_parameters: Map<String, Value>,
     cookie_header: &str,
     region: AlibabaTokenPlanRegion,
-    ctx: &FetchContext,
-) -> Option<Vec<u8>> {
-    post_personal_api(client, api, data_parameters, cookie_header, region, ctx)
-        .await
-        .ok()
+    sec_token: Option<&str>,
+) -> Vec<(&'static str, String)> {
+    let params_json = build_personal_params_json(api, data_parameters, cookie_header, region);
+    let mut form = vec![
+        ("product", PERSONAL_CONSOLE_PRODUCT.to_string()),
+        ("action", region.personal_api_action().to_string()),
+        ("region", region.current_region_id().to_string()),
+        ("language", LANGUAGE.to_string()),
+        ("params", params_json),
+    ];
+    if let Some(token) = sec_token.filter(|token| !token.trim().is_empty()) {
+        form.push(("sec_token", token.to_string()));
+    }
+    form
 }
 
 fn personal_api_url(api: &str, region: AlibabaTokenPlanRegion) -> String {
@@ -157,7 +218,8 @@ fn build_personal_params_json(
     cornerstone.insert("protocol".into(), Value::String("V2".into()));
     cornerstone.insert("console".into(), Value::String("ONE_CONSOLE".into()));
     cornerstone.insert("productCode".into(), Value::String("p_efm".into()));
-    cornerstone.insert("switchAgent".into(), json!(1_233_135));
+    // Let the gateway resolve the Personal/Solo session workspace. A captured
+    // Teams switchAgent is workspace-bound and rejects other accounts.
     cornerstone.insert("switchUserType".into(), json!(3));
     cornerstone.insert("domain".into(), Value::String(domain.to_string()));
     cornerstone.insert(
@@ -306,6 +368,118 @@ mod tests {
     use crate::providers::alibabatokenplan::AlibabaTokenPlanProvider;
 
     #[test]
+    fn personal_form_forwards_optional_sec_token() {
+        let with_token = build_personal_form(
+            PERSONAL_USAGE_API,
+            Map::new(),
+            "cna=test-anon",
+            AlibabaTokenPlanRegion::IntlPersonal,
+            Some("personal-sec-token"),
+        );
+        assert!(
+            with_token
+                .iter()
+                .any(|(key, value)| { *key == "sec_token" && value == "personal-sec-token" })
+        );
+
+        let without_token = build_personal_form(
+            PERSONAL_USAGE_API,
+            Map::new(),
+            "cna=test-anon",
+            AlibabaTokenPlanRegion::IntlPersonal,
+            None,
+        );
+        assert!(!without_token.iter().any(|(key, _)| *key == "sec_token"));
+    }
+
+    #[test]
+    fn personal_request_omits_captured_workspace_agent() {
+        let params = build_personal_params_json(
+            PERSONAL_USAGE_API,
+            Map::new(),
+            "cna=test-anon",
+            AlibabaTokenPlanRegion::IntlPersonal,
+        );
+        let value: Value = serde_json::from_str(&params).unwrap();
+        let cornerstone = value
+            .get("Data")
+            .and_then(|data| data.get("cornerstoneParam"))
+            .and_then(Value::as_object)
+            .unwrap();
+
+        assert!(!cornerstone.contains_key("switchAgent"));
+        assert_eq!(cornerstone.get("switchUserType"), Some(&json!(3)));
+    }
+
+    #[test]
+    fn nested_workspace_error_surfaces_real_code_without_auth_eviction() {
+        let payload = json!({
+            "code": "200",
+            "successResponse": true,
+            "data": {
+                "success": false,
+                "httpStatus": 200,
+                "errorCode": "BailianGateway.Workspace.NotAuthorised"
+            }
+        });
+
+        let error =
+            crate::providers::alibabatokenplan::throw_if_error_payload(&payload).unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderError::Other(message)
+                if message.contains("BailianGateway.Workspace.NotAuthorised")
+        ));
+    }
+
+    #[test]
+    fn nested_gateway_error_prefers_error_message() {
+        let payload = json!({
+            "code": "200",
+            "successResponse": true,
+            "data": {
+                "success": false,
+                "httpStatus": 200,
+                "errorCode": "BailianGateway.Quota.ServiceUnavailable",
+                "errorMsg": "quota service unavailable"
+            }
+        });
+
+        let error =
+            crate::providers::alibabatokenplan::throw_if_error_payload(&payload).unwrap_err();
+        assert!(matches!(
+            error,
+            ProviderError::Other(message) if message.contains("quota service unavailable")
+        ));
+    }
+
+    #[test]
+    fn success_envelope_without_windows_is_transient() {
+        let payload = json!({
+            "code": "SUCCESS",
+            "successResponse": true,
+            "errorCode": "",
+            "data": {"success": true, "httpStatus": 200}
+        });
+        assert!(personal_usage_success_without_windows(
+            payload.to_string().as_bytes()
+        ));
+    }
+
+    #[test]
+    fn success_envelope_with_windows_is_not_transient() {
+        let payload = json!({
+            "code": "SUCCESS",
+            "successResponse": true,
+            "errorCode": "",
+            "data": {"per5HourPercentage": 0.5}
+        });
+        assert!(!personal_usage_success_without_windows(
+            payload.to_string().as_bytes()
+        ));
+    }
+
+    #[test]
     fn parses_personal_usage_fixture_with_plan_name() {
         let usage = serde_json::json!({
             "code": "200",
@@ -367,5 +541,44 @@ mod tests {
             Some(10080)
         );
         assert_eq!(usage_snap.login_method.as_deref(), Some("Pro"));
+    }
+
+    #[test]
+    fn weekly_only_personal_payload_promotes_weekly_window() {
+        let usage = serde_json::json!({
+            "code": "200",
+            "data": {
+                "DataV2": {
+                    "ret": [{}],
+                    "data": {
+                        "msg": "",
+                        "code": "SUCCESS",
+                        "data": {
+                            "per1WeekResetTime": 1788640320000_i64,
+                            "per1WeekPercentage": 0.4145182484706
+                        },
+                        "success": true
+                    }
+                },
+                "success": true,
+                "httpStatus": 200,
+                "errorCode": "",
+                "api": "zeldaHttp.apikeyMgr./tokenplan/personal/api/v2/usage",
+                "errorMsg": ""
+            },
+            "successResponse": true
+        });
+
+        let snapshot = parse_personal_usage(usage.to_string().as_bytes(), None, None).unwrap();
+        assert!(snapshot.five_hour_used_percent.is_none());
+        assert!((snapshot.weekly_used_percent.unwrap() - 41.45182484706).abs() < 1e-9);
+        assert!(snapshot.weekly_resets_at.is_some());
+
+        let usage_snap: UsageSnapshot =
+            AlibabaTokenPlanProvider::snapshot_to_usage(snapshot).unwrap();
+        assert!((usage_snap.primary.used_percent - 41.45182484706).abs() < 1e-9);
+        assert_eq!(usage_snap.primary.window_minutes, Some(10080));
+        assert!(usage_snap.secondary.is_none());
+        assert_eq!(usage_snap.login_method.as_deref(), Some("Personal"));
     }
 }

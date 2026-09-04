@@ -44,6 +44,14 @@ pub struct NamedRateWindow {
     pub id: String,
     pub title: String,
     pub window: RateWindow,
+    /// Whether the provider explicitly reported usage for this lane.
+    /// In-memory presentation metadata only; external snapshot JSON stays stable.
+    #[serde(default = "named_rate_window_usage_known_default", skip_serializing)]
+    pub usage_known: bool,
+}
+
+fn named_rate_window_usage_known_default() -> bool {
+    true
 }
 
 impl NamedRateWindow {
@@ -52,7 +60,13 @@ impl NamedRateWindow {
             id: id.into(),
             title: title.into(),
             window,
+            usage_known: true,
         }
+    }
+
+    pub fn with_usage_known(mut self, usage_known: bool) -> Self {
+        self.usage_known = usage_known;
+        self
     }
 }
 
@@ -205,6 +219,12 @@ impl UsageSnapshot {
     }
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CostDailyPoint {
+    pub day: String,
+    pub amount: f64,
+}
+
 /// Cost/credits snapshot for providers that support it
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct CostSnapshot {
@@ -217,6 +237,12 @@ pub struct CostSnapshot {
 
     /// Currency code (e.g., "USD")
     pub currency_code: String,
+
+    /// Optional currency symbol (e.g. "€", "$", "¥"). When present,
+    /// surfaces carry it to the UI for localized currency rendering instead
+    /// of deriving the symbol from the code.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub currency_symbol: Option<String>,
 
     /// Period description (e.g., "Monthly", "Daily")
     pub period: String,
@@ -231,6 +257,10 @@ pub struct CostSnapshot {
     /// Remaining prepaid balance (currency units), separate from used/limit spend.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub balance: Option<f64>,
+
+    /// Exact daily spend points when the provider supplies them.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub daily: Vec<CostDailyPoint>,
 }
 
 impl CostSnapshot {
@@ -240,10 +270,12 @@ impl CostSnapshot {
             used: finite_amount(used).unwrap_or(0.0),
             limit: None,
             currency_code: currency_code.into(),
+            currency_symbol: None,
             period: period.into(),
             resets_at: None,
             updated_at: Utc::now(),
             balance: None,
+            daily: Vec::new(),
         }
     }
 
@@ -256,6 +288,17 @@ impl CostSnapshot {
     /// Builder pattern: set remaining prepaid balance (finite, ≥ 0 only)
     pub fn with_balance(mut self, balance: f64) -> Self {
         self.balance = finite_amount(balance);
+        self
+    }
+
+    pub fn with_daily(mut self, daily: Vec<CostDailyPoint>) -> Self {
+        self.daily = daily;
+        self
+    }
+
+    /// Builder pattern: set currency symbol for localized rendering.
+    pub fn with_currency_symbol(mut self, symbol: impl Into<String>) -> Self {
+        self.currency_symbol = Some(symbol.into());
         self
     }
 

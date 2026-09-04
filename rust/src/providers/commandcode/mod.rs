@@ -65,6 +65,11 @@ const PLANS: &[CommandCodePlan] = &[
         monthly_credits_usd: 30.0,
     },
     CommandCodePlan {
+        id: "individual-pro-v1",
+        display_name: "Pro",
+        monthly_credits_usd: 80.0,
+    },
+    CommandCodePlan {
         id: "individual-max",
         display_name: "Max",
         monthly_credits_usd: 150.0,
@@ -172,7 +177,8 @@ impl CommandCodeProvider {
 
         let cookie_header = crate::providers::browser_cookie_header(&["commandcode.ai"])?;
         let result = self.fetch_web(&cookie_header).await?;
-        let _ = CookieHeaderCache::store(ProviderId::CommandCode, &cookie_header, "browser");
+        // Best-effort cookie cache write; a failed write just re-fetches next run.
+        let _stored = CookieHeaderCache::store(ProviderId::CommandCode, &cookie_header, "browser");
         Ok(result)
     }
 }
@@ -400,7 +406,13 @@ fn coerce_reset_at(value: Option<&Value>) -> Option<DateTime<Utc>> {
         } else {
             timestamp
         };
-        return DateTime::from_timestamp(seconds as i64, 0);
+        // Epoch seconds; the sub-second fraction is below timestamp resolution.
+        #[expect(
+            clippy::cast_possible_truncation,
+            reason = "epoch seconds; sub-second fraction below timestamp resolution"
+        )]
+        let whole_seconds = seconds as i64;
+        return DateTime::from_timestamp(whole_seconds, 0);
     }
     value.as_str().and_then(|text| parse_datetime(text.trim()))
 }
@@ -712,6 +724,10 @@ mod tests {
         assert_eq!(
             find_plan("individual-goat").unwrap().monthly_credits_usd,
             70.0
+        );
+        assert_eq!(
+            find_plan("individual-pro-v1").unwrap().monthly_credits_usd,
+            80.0
         );
         assert_eq!(find_plan("Individual-ULTRA").unwrap().display_name, "Ultra");
         assert!(find_plan("team").is_none());

@@ -18,7 +18,7 @@
 - **Settings**: `%config%/CodexBar/settings.json` via `Settings::load` / `save` and `secure_file` (DPAPI-capable on Windows). Frontend `updateSettings` patch → save → `codexbar:settings-updated` / float-bar config events.
 - **Tray**: `tray_bridge` + `tray_menu`. Icon pixels from shared `codexbar::tray::{render_bar_icon_rgba, render_percent_icon_rgba}`.
 - **Float bar**: `floatbar/` owns the auxiliary always-on-top window. The builder must pin `.theme(Some(tauri::Theme::Dark))` — WebView2 resolves `prefers-color-scheme` on a shared process profile; an unpinned window flips other webviews under theme `auto`.
-- **Proof harness**: env `CODEXBAR_PROOF_MODE` (e.g. `settings:menu`) opens a target surface and suppresses blur-dismiss for automation / CUA capture.
+- **Proof harness**: env `CODEXBAR_PROOF_MODE` (e.g. `settings:menu`) opens a target surface and suppresses blur-dismiss for automation / CUA capture. `CODEXBAR_SEED_USAGE_JSON=<abs-path>` seeds one synthetic bridge-shaped Codex `ProviderUsageSnapshot` into the provider cache at launch (pinned against refresh eviction; malformed files are warned about and skipped).
 
 ## Key Directories
 
@@ -85,6 +85,9 @@ pnpm run tauri:build
 - Secrets (manual cookies, API keys, token accounts): use existing redaction, `secure_file`, and keyring helpers.
 - Do not add dependencies or tooling without confirmation.
 - Do not open issues or PRs against upstream `steipete/CodexBar` unless the user explicitly asks. This repo is Win-CodexBar only.
+- **GitHub write safety:** for any mutating `gh` command (comment, review, merge, close, edit, create, label, release, etc.), always pass the explicit `--repo owner/repo`; never rely on the current remote or a PR/issue number alone.
+- Before any GitHub mutation, perform a read-back against that same explicit repo and verify the returned owner/repo or URL exactly matches the intended target. Abort on any mismatch.
+- Treat `steipete/CodexBar` as **read-only by default**. A GitHub write to upstream requires explicit user authorization in the current turn; prior permission never carries forward.
 
 ## Important Files
 
@@ -174,3 +177,5 @@ Then follow post-install instructions (permissions / accessibility as prompted).
 - Keep stable package identity and installer behavior unchanged unless there is a real packaging reason: `PackageIdentifier`, `InstallerType`, `Scope`, `ProductCode`, `Publisher`, package URLs, and silent install behavior.
 - Before opening a Winget PR, verify the release installer URL resolves and recompute the SHA-256 from the downloaded asset. On Windows, run `winget validate` when available.
 - The first Winget package submission was approved in `microsoft/winget-pkgs#366653`; the v0.23.5 update was approved in `microsoft/winget-pkgs#366794`. Future updates should be faster, but still expect Microsoft validation/review.
+- Agents must route GitHub mutations through `scripts/gh-safe.sh` instead of calling mutating `gh` subcommands directly. This is the sole supported mutation wrapper. It owns repo binding, performs read-back verification, blocks repo overrides, and fails closed on target mismatch.
+- For object mutations (PR/issue/release), bind both the exact `owner/repo` and exact object number/tag. Use repo-only verification only for creates where the target object does not exist yet.

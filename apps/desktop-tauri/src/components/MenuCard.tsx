@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { type CSSProperties, useCallback, useEffect, useState } from "react";
 import type {
+  CostSummaryDisplayStyle,
   ProviderChartData,
   ProviderUsageSnapshot,
 } from "../types/bridge";
@@ -45,16 +46,21 @@ export interface MenuCardDisplayOptions {
   hideEmail: boolean;
   resetTimeRelative: boolean;
   showResetWhenExhausted?: boolean;
+  showPace?: boolean;
   showAsUsed?: boolean;
   compactMetrics?: boolean;
+  costSummaryDisplayStyle?: CostSummaryDisplayStyle;
 }
 
 interface MenuCardProps {
   provider: ProviderUsageSnapshot;
   display: MenuCardDisplayOptions;
   isRefreshing?: boolean;
+  /** Per-provider accent color override (hex); applied as CSS --provider-accent. */
+  accentColor?: string;
   onLayoutChange?: () => void;
 }
+
 
 export function maskEmail(email: string): string {
   const at = email.indexOf("@");
@@ -66,8 +72,18 @@ export function maskEmail(email: string): string {
 function localizeWindowLabel(
   raw: string | undefined,
   t: (key: LocaleKey) => string,
+  language?: string,
+  windowMinutes?: number | null,
 ): string {
   const normalized = raw?.trim().toLowerCase();
+  // Upstream 0.55.0 #3070: quota windows in Simplified Chinese use their
+  // actual duration instead of the conversational Session wording.
+  if (language === "chinese" && normalized === "session" && windowMinutes != null) {
+    if (windowMinutes === 7 * 24 * 60) return t("ProviderWeeklyLabel");
+    if (windowMinutes >= 60 && windowMinutes <= 12 * 60 && windowMinutes % 60 === 0) {
+      return `${windowMinutes / 60} 小时`;
+    }
+  }
   if (normalized === "weekly") {
     return t("ProviderWeeklyLabel");
   }
@@ -109,16 +125,19 @@ export default function MenuCard({
   provider,
   display,
   isRefreshing = false,
+  accentColor,
   onLayoutChange,
 }: MenuCardProps) {
   const {
     hideEmail,
     resetTimeRelative,
     showResetWhenExhausted = false,
+    showPace = true,
     showAsUsed = false,
     compactMetrics = false,
+    costSummaryDisplayStyle,
   } = display;
-  const { t } = useLocale();
+  const { t, language } = useLocale();
   const [chartData, setChartData] = useState<ProviderChartData | null>(null);
   const [pricingStatus, setPricingStatus] = useState<DeepSeekPricingStatus | null>(null);
 
@@ -170,7 +189,7 @@ export default function MenuCard({
       : [
           {
             id: "primary",
-            label: provider.primaryLabel ?? t("DetailWindowPrimary"),
+            label: localizeWindowLabel(provider.primaryLabel, t, language, provider.primary.windowMinutes) || t("DetailWindowPrimary"),
             snap: provider.primary,
           },
         ]),
@@ -206,7 +225,13 @@ export default function MenuCard({
   }
   const visibleMetrics = compactMetrics ? metrics.slice(0, 2) : metrics;
 
-  const presence = describeCard(provider, chartData, visibleMetrics);
+  const presence = describeCard(
+    provider,
+    chartData,
+    visibleMetrics,
+    costSummaryDisplayStyle,
+    showPace,
+  );
   const { hasDetails } = presence;
   const cardClassName = [
     "menu-card",
@@ -218,7 +243,11 @@ export default function MenuCard({
     .join(" ");
 
   return (
-    <article className={cardClassName} aria-busy={isRefreshing}>
+    <article
+      className={cardClassName}
+      aria-busy={isRefreshing}
+      style={accentColor ? ({ "--provider-accent": accentColor } as CSSProperties) : undefined}
+    >
       <header className="menu-card__header">
         <div className="menu-card__title-row">
           <div className="menu-card__name-group">
@@ -253,7 +282,9 @@ export default function MenuCard({
           display={{
             resetTimeRelative,
             showResetWhenExhausted,
+            showPace,
             showAsUsed,
+            costSummaryDisplayStyle,
           }}
           metrics={visibleMetrics}
           chartData={chartData}
@@ -290,7 +321,10 @@ export default function MenuCard({
       )}
 
       {provider.providerId === "codex" && (
-        <CodexAccountsMenu hideEmail={hideEmail} />
+        <CodexAccountsMenu
+          hideEmail={hideEmail}
+          resetTimeRelative={resetTimeRelative}
+        />
       )}
     </article>
   );

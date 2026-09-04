@@ -4,6 +4,7 @@
 //! Route handlers here are pure functions of an injected [`DashboardState`] so
 //! every route stays socket-testable end to end.
 
+mod antigravity;
 pub mod coordinator;
 pub mod html;
 pub mod icons;
@@ -17,7 +18,9 @@ use snapshot::DashboardIdentity;
 #[derive(Clone)]
 pub struct DashboardState {
     pub coordinator: SnapshotCoordinator,
-    pub identity: DashboardIdentity,
+    /// `None` = follow the app's `hide_personal_info` setting per request
+    /// (upstream 0.50.1 #2960).
+    pub identity: Option<DashboardIdentity>,
     pub refresh_seconds: u32,
 }
 
@@ -33,7 +36,7 @@ impl std::fmt::Debug for DashboardState {
 
 impl DashboardState {
     /// Production wiring: live producer behind the TTL coordinator.
-    pub fn live(refresh_seconds: u32, identity: DashboardIdentity) -> Self {
+    pub fn live(refresh_seconds: u32, identity: Option<DashboardIdentity>) -> Self {
         let producer = source::SnapshotProducer::new(refresh_seconds, identity);
         let coordinator = SnapshotCoordinator::new(
             std::time::Duration::from_secs(refresh_seconds.max(1) as u64),
@@ -51,7 +54,7 @@ impl DashboardState {
     pub fn stub(
         build: coordinator::SnapshotBuildFn,
         ttl_seconds: u32,
-        identity: DashboardIdentity,
+        identity: Option<DashboardIdentity>,
     ) -> Self {
         Self {
             coordinator: SnapshotCoordinator::new(

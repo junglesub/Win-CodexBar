@@ -107,23 +107,26 @@ function snapshot(
     tertiaryLabel?: string;
   } = {},
 ): ProviderUsageSnapshot {
+  const primary = rateWindow(used, {
+    exhausted: opts.exhausted,
+    informational: opts.informational,
+    resetsAt: opts.resetsAt,
+    resetDescription: opts.resetDescription,
+    // Common fixture realism: a present primary is a 5-hour window by default,
+    // unless the test explicitly supplies a null/other duration.
+    windowMinutes:
+      opts.primaryWindowMinutes !== undefined
+        ? opts.primaryWindowMinutes
+        : opts.windowMinutes !== undefined
+          ? opts.windowMinutes
+          : 300,
+  });
   return {
     providerId: id,
     displayName: display,
-    primary: rateWindow(used, {
-      exhausted: opts.exhausted,
-      informational: opts.informational,
-      resetsAt: opts.resetsAt,
-      resetDescription: opts.resetDescription,
-      // Common fixture realism: a present primary is a 5-hour window by default,
-      // unless the test explicitly supplies a null/other duration.
-      windowMinutes:
-        opts.primaryWindowMinutes !== undefined
-          ? opts.primaryWindowMinutes
-          : opts.windowMinutes !== undefined
-            ? opts.windowMinutes
-            : 300,
-    }),
+    primary,
+    selectedMetric: primary,
+    errorState: "ready",
     primaryLabel: opts.primaryLabel,
     secondary: opts.secondary
       ? rateWindow(opts.secondary.used, {
@@ -220,7 +223,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     alibabaTokenPlanRegion: "cn",
     weeklyProgressWorkDays: null,
     ...overrides,
-  };
+  } as SettingsSnapshot;
 }
 
 function bootstrap(settingsOverrides: Partial<SettingsSnapshot> = {}): BootstrapState {

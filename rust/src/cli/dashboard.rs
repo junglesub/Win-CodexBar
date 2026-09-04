@@ -39,7 +39,7 @@ pub async fn run(args: DashboardArgs) -> anyhow::Result<()> {
     };
     let fetch_timeout = parse_timeout(args.timeout)?;
 
-    let producer = SnapshotProducer::new(60, identity).with_fetch_timeout(fetch_timeout);
+    let producer = SnapshotProducer::new(60, Some(identity)).with_fetch_timeout(fetch_timeout);
     let payload = producer.collect().await.map_err(anyhow::Error::msg)?;
 
     let body = if args.pretty {
@@ -102,7 +102,8 @@ pub fn write_atomic(path: &Path, bytes: &[u8]) -> anyhow::Result<()> {
     if result.is_err()
         && let Ok(file) = std::fs::OpenOptions::new().write(true).open(&temp)
     {
-        let _ = file.set_len(0);
+        // Best-effort truncate; the abandoned temp file is unlinked by callers.
+        let _truncated = file.set_len(0);
     }
     result
 }
@@ -181,7 +182,8 @@ mod tests {
         impl Drop for CwdGuard {
             fn drop(&mut self) {
                 if self.restore {
-                    let _ = std::env::set_current_dir(&self.original);
+                    // Best-effort CWD restore; a failed chdir only affects the already-failing test.
+                    let _restored = std::env::set_current_dir(&self.original);
                 }
             }
         }

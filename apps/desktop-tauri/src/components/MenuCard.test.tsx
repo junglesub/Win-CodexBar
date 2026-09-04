@@ -59,6 +59,7 @@ function provider(
     providerId: "claude",
     displayName: "Claude",
     primary: rateWindow(usedPercent, opts),
+    selectedMetric: rateWindow(usedPercent, opts),
     primaryLabel: "Session",
     secondary: null,
     modelSpecific: null,
@@ -70,6 +71,7 @@ function provider(
     sourceLabel: "oauth",
     updatedAt: "2026-05-24T00:00:00Z",
     error,
+    errorState: "unknown",
     pace: null,
     accountOrganization: null,
     trayStatusLabel: null,
@@ -82,6 +84,7 @@ function renderCard(
   opts: {
     showAsUsed?: boolean;
     showResetWhenExhausted?: boolean;
+    showPace?: boolean;
     onLayoutChange?: () => void;
   } = {},
 ) {
@@ -94,6 +97,7 @@ function renderCard(
           resetTimeRelative: true,
           showAsUsed: opts.showAsUsed,
           showResetWhenExhausted: opts.showResetWhenExhausted,
+          showPace: opts.showPace,
         }}
         onLayoutChange={opts.onLayoutChange}
       />
@@ -372,6 +376,31 @@ describe("MenuCard", () => {
     expect(screen.queryByText("Session")).not.toBeInTheDocument();
   });
 
+  it("uses explicit hourly quota labels in Simplified Chinese", async () => {
+    tauriMocks.getLocaleStrings.mockResolvedValue(buildBundle({}, "chinese"));
+    const snapshot = provider(null, 31);
+    snapshot.primary = rateWindow(31, { windowMinutes: 3 * 60 });
+    snapshot.selectedMetric = snapshot.primary;
+
+    renderCard(snapshot);
+
+    expect(await screen.findByText("3 小时")).toBeInTheDocument();
+    expect(screen.queryByText("Session")).not.toBeInTheDocument();
+  });
+
+  it("maps a Simplified Chinese session-labelled weekly window to Weekly", async () => {
+    tauriMocks.getLocaleStrings.mockResolvedValue(
+      buildBundle({ ProviderWeeklyLabel: "本周" }, "chinese"),
+    );
+    const snapshot = provider(null, 31);
+    snapshot.primary = rateWindow(31, { windowMinutes: 7 * 24 * 60 });
+    snapshot.selectedMetric = snapshot.primary;
+
+    renderCard(snapshot);
+
+    expect(await screen.findByText("本周")).toBeInTheDocument();
+  });
+
   it("notifies the tray panel after async local usage data loads", async () => {
     const onLayoutChange = vi.fn();
 
@@ -400,6 +429,30 @@ describe("MenuCard", () => {
         "⚠ Runs out in 2h",
       );
     });
+  });
+
+  it("hides pace, budgets, and forecast text when Show pace is off", async () => {
+    const resetAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
+    const snapshot = provider(null, 31);
+    snapshot.pace = {
+      stage: "far_ahead",
+      deltaPercent: 20,
+      expectedUsedPercent: 20,
+      actualUsedPercent: 40,
+      etaSeconds: 90 * 60,
+      willLastToReset: false,
+    };
+    snapshot.primary = rateWindow(31, {
+      windowMinutes: 7 * 24 * 60,
+      resetsAt: resetAt.toISOString(),
+    });
+
+    const { container } = renderCard(snapshot, { showPace: false });
+
+    expect(await screen.findByText("69% left")).toBeInTheDocument();
+    expect(container.querySelector(".menu-card__pace")).not.toBeInTheDocument();
+    expect(screen.queryByText("On-pace budget")).not.toBeInTheDocument();
+    expect(container.querySelector(".menu-metric__forecast")).not.toBeInTheDocument();
   });
 
   it("renders local token and cost totals after chart data loads", async () => {

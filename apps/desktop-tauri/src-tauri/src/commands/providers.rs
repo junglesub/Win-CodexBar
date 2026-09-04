@@ -35,6 +35,8 @@ pub(crate) fn build_fetch_context(
     let api_key = active_token_api_key.or(stored_api_key);
     let has_kimi_code_api_key =
         id == ProviderId::Kimi && api_key.as_deref().is_some_and(|key| !key.trim().is_empty());
+    let has_opencodego_api_key = id == ProviderId::OpenCodeGo
+        && api_key.as_deref().is_some_and(|key| !key.trim().is_empty());
 
     let (mut source_mode, mut cookie_header) = if id.cookie_domain().is_none() {
         let source_mode = if active_token_env.is_some() {
@@ -46,10 +48,13 @@ pub(crate) fn build_fetch_context(
     } else {
         match cookie_source {
             _ if active_token_env.is_some() => (SourceMode::OAuth, None),
-            "off" if id == ProviderId::Claude && usage_source != SourceMode::Cli => {
+            "off" if provider_uses_oauth_without_cookies(id, usage_source) => {
                 (SourceMode::OAuth, None)
             }
-            "off" if has_kimi_code_api_key && usage_source == SourceMode::Auto => {
+            "off"
+                if (has_kimi_code_api_key || has_opencodego_api_key)
+                    && usage_source == SourceMode::Auto =>
+            {
                 (SourceMode::Auto, None)
             }
             // Droid/Factory: cookie-off must never scrape browser cookies. Map to
@@ -58,11 +63,13 @@ pub(crate) fn build_fetch_context(
             "off" => (SourceMode::Cli, None),
             "manual" => {
                 let cookie_header = active_token_cookie.or(stored_cookie);
-                let source_mode = if has_kimi_code_api_key && usage_source == SourceMode::Auto {
+                let source_mode = if (has_kimi_code_api_key || has_opencodego_api_key)
+                    && usage_source == SourceMode::Auto
+                {
                     SourceMode::Auto
                 } else if cookie_header.is_some() {
                     SourceMode::Web
-                } else if id == ProviderId::Claude && usage_source != SourceMode::Cli {
+                } else if provider_uses_oauth_without_cookies(id, usage_source) {
                     SourceMode::OAuth
                 } else {
                     SourceMode::Cli
@@ -125,6 +132,14 @@ pub(crate) fn build_fetch_context(
         gateway_url,
         auto_prefer_web,
         ..FetchContext::default()
+    }
+}
+
+fn provider_uses_oauth_without_cookies(id: ProviderId, usage_source: SourceMode) -> bool {
+    match id {
+        ProviderId::Claude => usage_source != SourceMode::Cli,
+        ProviderId::Grok => matches!(usage_source, SourceMode::Auto | SourceMode::OAuth),
+        _ => false,
     }
 }
 
@@ -292,6 +307,12 @@ fn begin_provider_refresh(
 }
 
 fn provider_cache_can_skip_refresh(guard: &AppState, force: bool) -> bool {
+    // Proof-harness seed: pin the synthetic snapshot for the whole run so a
+    // periodic auto-refresh cannot overwrite seeded capture conditions.
+    if !force && crate::proof_harness::seed_usage_json_active() && !guard.provider_cache.is_empty()
+    {
+        return true;
+    }
     !force
         && !guard.provider_cache.is_empty()
         && is_provider_cache_fresh(guard.provider_cache_updated_at, PROVIDER_CACHE_STALE_AFTER)
@@ -614,9 +635,15 @@ async fn fetch_provider_snapshot(
             Ok(Err(e)) => ProviderUsageSnapshot::from_error(
                 id,
                 &metadata,
-                codexbar::logging::safe_error_message(e),
+                codexbar::logging::safe_error_message(&e),
+                provider.error_state_kind(&e),
             ),
-            Err(_) => ProviderUsageSnapshot::from_error(id, &metadata, "Timeout".to_string()),
+            Err(_) => ProviderUsageSnapshot::from_error(
+                id,
+                &metadata,
+                "Timeout".to_string(),
+                codexbar::core::ProviderStateKind::Unknown,
+            ),
         };
 
     record_provider_fetch_duration(id, &mut snapshot, started);
@@ -963,17 +990,21 @@ pub async fn refresh_providers_if_stale(app: tauri::AppHandle) -> Result<(), Str
 #[tauri::command]
 pub fn get_cached_providers(
     state: tauri::State<'_, Mutex<AppState>>,
-) -> Vec<ProviderUsageSnapshot> {
+) -> Vec<ProviderUsagePresentationSnapshot> {
     let mut snapshots = state
         .lock()
         .map(|guard| guard.provider_cache.clone())
         .unwrap_or_default();
-    let spark_usage_visible = Settings::load().codex_spark_usage_visible();
+    let settings = Settings::load();
+    let spark_usage_visible = settings.codex_spark_usage_visible();
     for snapshot in &mut snapshots {
         super::filter_hidden_codex_spark_rows(snapshot, spark_usage_visible);
     }
 
     snapshots
+        .into_iter()
+        .map(|snapshot| ProviderUsagePresentationSnapshot::new(snapshot, &settings))
+        .collect()
 }
 
 #[cfg(test)]
@@ -1032,7 +1063,12 @@ mod predictive_warning_tests {
         let metadata = codexbar::core::instantiate_provider(ProviderId::Claude)
             .metadata()
             .clone();
-        ProviderUsageSnapshot::from_error(ProviderId::Claude, &metadata, "unused".to_string())
+        ProviderUsageSnapshot::from_error(
+            ProviderId::Claude,
+            &metadata,
+            "unused".to_string(),
+            codexbar::core::ProviderStateKind::Unknown,
+        )
     }
 
     #[test]
@@ -1138,6 +1174,7 @@ mod reset_backfill_tests {
             source_label: String::new(),
             updated_at: "2026-01-01T00:00:00Z".into(),
             error: None,
+            error_state: codexbar::core::ProviderStateKind::Ready,
             pace: None,
             account_organization: None,
             tray_status_label: None,

@@ -209,6 +209,21 @@ struct ModelsDevCatalog {
     providers: HashMap<String, ModelsDevProvider>,
 }
 
+/// Immutable models.dev view for callers that price many rows in one pass.
+/// Loading this once avoids repeating cache metadata checks for every row.
+#[derive(Debug, Clone)]
+pub struct ModelsDevPricingSnapshot {
+    artifact: Option<Arc<ModelsDevCacheArtifact>>,
+}
+
+impl ModelsDevPricingSnapshot {
+    pub fn lookup(&self, provider_id: &str, model_id: &str) -> Option<DynamicModelPricing> {
+        self.artifact
+            .as_ref()
+            .and_then(|artifact| artifact.catalog.lookup(provider_id, model_id))
+    }
+}
+
 #[derive(Debug, Deserialize)]
 #[serde(untagged)]
 enum ModelsDevCatalogWire {
@@ -689,7 +704,9 @@ impl ModelsDevRefreshCoordinator {
         let state = Arc::clone(&self.state);
         tokio::spawn(async move {
             let result = operation.await;
-            let _ = sender.send(Some(result));
+            // Fire-and-forget result delivery; send fails only if all receivers
+            // dropped, and the watch channel keeps the latest value regardless.
+            let _delivered = sender.send(Some(result));
             state
                 .lock()
                 .await
@@ -713,6 +730,13 @@ async fn wait_for_refresh(mut receiver: watch::Receiver<Option<bool>>) -> bool {
 
 static REFRESH_COORDINATOR: LazyLock<ModelsDevRefreshCoordinator> =
     LazyLock::new(ModelsDevRefreshCoordinator::default);
+
+/// Loads the cached models.dev catalog once for bulk-pricing callers.
+pub fn pricing_snapshot() -> ModelsDevPricingSnapshot {
+    let load = ModelsDevCache::load(SystemTime::now(), None);
+    let artifact = (!load.is_stale).then_some(load.artifact).flatten();
+    ModelsDevPricingSnapshot { artifact }
+}
 
 /// Looks up a cached models.dev price for a provider/model pair.
 pub fn lookup(provider_id: &str, model_id: &str) -> Option<DynamicModelPricing> {
