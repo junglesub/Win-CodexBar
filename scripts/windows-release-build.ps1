@@ -278,6 +278,11 @@ try {
     $version = Get-AppVersion -CargoTomlPath (Join-Path $SourceDir "rust\Cargo.toml")
 
     $env:APP_VERSION = $version
+    $buildSha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA.Trim() } else { $commit }
+    $env:CODEXBAR_BUILD_SHA = $buildSha
+    if (-not $env:BUILD_NUMBER) {
+        $env:BUILD_NUMBER = $buildSha.Substring(0, [Math]::Min(7, $buildSha.Length))
+    }
     $env:CARGO_TARGET_DIR = $DesktopCargoTargetDir
     if (-not $env:CARGO_BUILD_TARGET -and [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows

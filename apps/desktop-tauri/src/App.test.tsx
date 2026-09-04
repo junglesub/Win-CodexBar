@@ -200,11 +200,21 @@ describe("App window-label routing", () => {
     expect(queryByTestId("surface-tray-panel")).toBeNull();
   });
 
-  it("does not invoke the update check or download on the startup timer", async () => {
-    // The delayed startup update check / auto-download is deactivated while
-    // the in-app updater is disabled, so advancing well past the old 2s
-    // timer must never touch the update bridge functions.
+  it("invokes the update check on the startup timer and downloads if auto-download is enabled", async () => {
     webviewWindowMocks.label = "main";
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ autoDownloadUpdates: true })
+    );
+    tauriMocks.checkForUpdates.mockResolvedValue({
+      status: "available",
+      version: "personal-latest-1234567",
+      error: null,
+      progress: null,
+      releaseUrl: null,
+      canDownload: true,
+      canApply: false,
+      lastCheckedAt: null,
+    });
 
     render(<App />);
 
@@ -214,8 +224,8 @@ describe("App window-label routing", () => {
 
     await new Promise((resolve) => setTimeout(resolve, 2_100));
 
-    expect(tauriMocks.checkForUpdates).not.toHaveBeenCalled();
-    expect(tauriMocks.downloadUpdate).not.toHaveBeenCalled();
+    expect(tauriMocks.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(tauriMocks.downloadUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("does not route the shared main window to TrayPanel while hidden", async () => {

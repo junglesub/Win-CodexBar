@@ -149,9 +149,10 @@ pub(crate) fn build_tray_menu_with(
         "settings",
         text(LocaleKey::TraySettings),
     ));
-    // In-app updates are temporarily disabled until `personal-latest`
-    // release integration is designed. The "Check for Updates" tray item
-    // is not added while the updater is dormant.
+    menu.push(TrayMenuEntry::item(
+        "check_for_updates",
+        text(LocaleKey::TrayCheckForUpdates),
+    ));
     menu.push(TrayMenuEntry::item("about", text(LocaleKey::MenuAbout)));
     menu.push(TrayMenuEntry::separator());
     menu.push(TrayMenuEntry::item("quit", text(LocaleKey::MenuQuit)));
@@ -192,9 +193,9 @@ mod tests {
     }
 
     #[test]
-    fn check_for_updates_item_is_absent_while_updater_disabled() {
+    fn check_for_updates_item_is_present() {
         let menu = build_tray_menu(&sample_provider_catalog(), &[], &both_enabled());
-        assert!(!menu_contains(&menu, "check_for_updates"));
+        assert!(menu_contains(&menu, "check_for_updates"));
     }
 
     #[test]

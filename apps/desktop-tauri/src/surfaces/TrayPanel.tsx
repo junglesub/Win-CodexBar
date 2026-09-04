@@ -11,6 +11,7 @@ import {
 } from "../hooks/useTrayPanelController";
 import MenuCard from "../components/MenuCard";
 import MenuSurface, { MenuEmpty } from "../components/MenuSurface";
+import UpdateBanner from "../components/UpdateBanner";
 import ProviderGrid from "../components/ProviderGrid";
 import AgentSessions from "../components/AgentSessions";
 
@@ -63,6 +64,12 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
     requestLayout,
     headerActions,
     footerRows,
+    updateState,
+    checkNow,
+    download,
+    apply,
+    dismiss,
+    openRelease,
     openSettings,
     handleGridClick,
     handleReorder,
@@ -91,9 +98,17 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
     </div>
   );
 
-  // In-app updates are temporarily disabled until `personal-latest` release
-  // integration is designed. Update banners are not rendered while the
-  // updater is dormant.
+  const banner = (
+    <UpdateBanner
+      updateState={updateState}
+      onCheck={checkNow}
+      onDownload={download}
+      onApply={apply}
+      onDismiss={dismiss}
+      onOpenRelease={openRelease}
+    />
+  );
+
   const renderProviderCard = (p: ProviderUsageSnapshot) => {
     const isSelected =
       selectedProviderId !== null && p.providerId === selectedProviderId;
@@ -130,6 +145,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
           onRefresh={refresh}
           isRefreshing={isRefreshing}
           actions={headerActions}
+          banner={banner}
           footerLead={zoomRow}
           footerRows={footerRows}
           style={{ zoom: trayScale }}
@@ -152,6 +168,7 @@ export default function TrayPanel({ state }: { state: BootstrapState }) {
         onRefresh={refresh}
         isRefreshing={isRefreshing}
         actions={headerActions}
+        banner={banner}
         footerLead={zoomRow}
         footerRows={footerRows}
         style={{ zoom: trayScale }}

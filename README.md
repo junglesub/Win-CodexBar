@@ -103,6 +103,6 @@ documentation, see [junglesub/Win-CodexBar](https://github.com/junglesub/Win-Cod
 This fork builds on the Windows port by [nesszer/Win-CodexBar](https://github.com/nesszer/Win-CodexBar),
 originally created for macOS by [steipete/CodexBar](https://github.com/steipete/CodexBar).
 
-The in-app updater is temporarily disabled; install the latest build from the
+GitHub Actions release builds check the rolling
 [personal release](https://github.com/junglesub/Win-CodexBar/releases/tag/personal-latest)
-instead.
+and can download and install a newer build. Local development builds skip update checks.

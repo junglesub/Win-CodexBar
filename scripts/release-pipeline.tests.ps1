@@ -91,6 +91,8 @@ Assert-True ($workflowText -notmatch '--jq\s+''[^'']*"personal-latest"') 'native
 Assert-True ($workflowText -notmatch 'git/ref/tags/personal-latest') 'publisher does not probe a missing tag with a failing command'
 Assert-True ($workflowText -match "github\.ref == 'refs/heads/personal'") 'manual runs are restricted to personal'
 Assert-True ($workflowText -match 'persist-credentials:\s*false') 'build checkout does not retain write credentials'
+Assert-True ($builderText -match '\$env:CODEXBAR_BUILD_SHA\s*=\s*\$buildSha') 'release builder stamps compile-time build SHA'
+Assert-True ($builderText -match '\$buildSha\s*=\s*if\s*\(\$env:GITHUB_SHA\)') 'release builder prefers GITHUB_SHA when present'
 Assert-True ($workflowText -match 'windows-release-build\.ps1') 'workflow reuses Windows release builder'
 Assert-True ($workflowText -match 'Expected four release assets') 'workflow checks the complete asset set'
 Assert-True ($workflowText -match 'actions/upload-artifact@v4') 'build passes assets without a write token'

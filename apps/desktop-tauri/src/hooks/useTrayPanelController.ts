@@ -15,6 +15,7 @@ import {
 } from "../lib/tauri";
 import { useProviders } from "./useProviders";
 import { useSettings } from "./useSettings";
+import { useUpdateState } from "./useUpdateState";
 import { useLocale } from "./useLocale";
 import { useSurfaceTarget } from "./useSurfaceMode";
 import { useTrayPanelLayout } from "./useTrayPanelLayout";
@@ -61,6 +62,8 @@ export function useTrayPanelController(state: BootstrapState) {
     initialRefreshDelayMs: TRAY_INITIAL_REFRESH_DELAY_MS,
     forceRefreshOnMount: settings.refreshAllProvidersOnMenuOpen,
   });
+  const { updateState, checkNow, download, apply, dismiss, openRelease } =
+    useUpdateState();
 
   const { t } = useLocale();
   const surfaceTarget = useSurfaceTarget("trayPanel");
@@ -176,6 +179,9 @@ export function useTrayPanelController(state: BootstrapState) {
         selectedProviderId ?? "overview",
         gridExpanded ? "expanded" : "collapsed",
         isRefreshing ? "refreshing" : "idle",
+        updateState.status,
+        updateState.version ?? "",
+        updateState.error ?? "",
         expectsDenseOverview ? "dense" : "normal",
         hasLoadedCache ? "cache-ready" : "cache-pending",
         visibleProviders.map((provider) => provider.providerId).join(","),
@@ -185,6 +191,9 @@ export function useTrayPanelController(state: BootstrapState) {
       selectedProviderId,
       gridExpanded,
       isRefreshing,
+      updateState.status,
+      updateState.version,
+      updateState.error,
       expectsDenseOverview,
       hasLoadedCache,
       visibleProviders,
@@ -372,6 +381,12 @@ export function useTrayPanelController(state: BootstrapState) {
     requestLayout,
     headerActions,
     footerRows,
+    updateState,
+    checkNow,
+    download,
+    apply,
+    dismiss,
+    openRelease,
     openSettings,
     handleGridClick,
     handleReorder,

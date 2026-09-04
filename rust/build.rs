@@ -22,6 +22,15 @@ fn main() {
 
     println!("cargo:rustc-env=GIT_COMMIT={}", git_commit);
 
+    println!("cargo:rerun-if-env-changed=CODEXBAR_BUILD_SHA");
+    println!("cargo:rerun-if-env-changed=GITHUB_SHA");
+    if let Ok(sha) = std::env::var("CODEXBAR_BUILD_SHA").or_else(|_| std::env::var("GITHUB_SHA")) {
+        let sha = sha.trim();
+        if !sha.is_empty() {
+            println!("cargo:rustc-env=CODEXBAR_BUILD_SHA={}", sha);
+        }
+    }
+
     // Re-run if git HEAD changes
     println!("cargo:rerun-if-changed=.git/HEAD");
     if let Ok(head) = std::fs::read_to_string(".git/HEAD") {

@@ -2,6 +2,8 @@ import { Suspense, lazy, useCallback, useEffect, useState } from "react";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import {
+  checkForUpdates,
+  downloadUpdate,
   getBootstrapState,
   getSettingsSnapshot,
   setSurfaceMode,
@@ -88,20 +90,15 @@ function AppInner() {
 
     // Fire-and-forget update checks after the first paint so startup/tray open
     // is not competing with network work.
-    //
-    // In-app updates are temporarily disabled until `personal-latest` release
-    // integration is designed. The delayed startup check / auto-download is
-    // deactivated; the check/download commands and update-state hook remain
-    // dormant and untouched.
-    // const updateTimer = window.setTimeout(() => {
-    //   Promise.all([checkForUpdates(), getSettingsSnapshot()])
-    //     .then(([update, settings]) => {
-    //       if (settings.autoDownloadUpdates && update.canDownload) {
-    //         void downloadUpdate().catch(() => {});
-    //       }
-    //     })
-    //     .catch(() => {});
-    // }, 2_000);
+    const updateTimer = window.setTimeout(() => {
+      Promise.all([checkForUpdates(), getSettingsSnapshot()])
+        .then(([update, settings]) => {
+          if (settings.autoDownloadUpdates && update.canDownload) {
+            void downloadUpdate().catch(() => {});
+          }
+        })
+        .catch(() => {});
+    }, 2_000);
 
     // Listen for user-registered global shortcut events from the
     // `register_global_shortcut` command. The persistent shortcut (bound via
@@ -144,7 +141,7 @@ function AppInner() {
       void unlistenSettingsChangePromise
         .then((unlisten) => unlisten?.())
         .catch(() => {});
-      // window.clearTimeout(updateTimer);
+      window.clearTimeout(updateTimer);
       window.removeEventListener("codexbar:settings-updated", onSettingsUpdated);
     };
   }, [reloadBootstrapState]);

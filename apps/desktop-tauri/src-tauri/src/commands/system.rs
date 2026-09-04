@@ -3,10 +3,16 @@ use super::*;
 #[tauri::command]
 pub fn get_app_info() -> AppInfoBridge {
     let settings = Settings::load();
+    let build_number = option_env!("BUILD_NUMBER")
+        .map(str::to_owned)
+        .or_else(|| {
+            option_env!("CODEXBAR_BUILD_SHA").map(|sha| sha.chars().take(7).collect::<String>())
+        })
+        .unwrap_or_else(|| "dev".to_string());
     AppInfoBridge {
         name: "CodexBar".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        build_number: option_env!("BUILD_NUMBER").unwrap_or("dev").to_string(),
+        build_number,
         update_channel: update_channel_label(settings.update_channel).to_string(),
         tagline: "May your tokens never run out—keep agent limits in view.".to_string(),
     }
@@ -194,16 +200,13 @@ pub fn reanchor_tray_panel(app: tauri::AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 pub fn quit_app(app: tauri::AppHandle) {
-    // In-app updates are temporarily disabled until `personal-latest` release
-    // integration is designed. Install-on-quit is deactivated; the apply
-    // command and `install_updates_on_quit` setting remain dormant.
-    // let settings = Settings::load();
-    // if settings.install_updates_on_quit
-    //     && let Some(state) = app.try_state::<std::sync::Mutex<crate::state::AppState>>()
-    //     && let Err(error) = super::updater::apply_ready_update(&state)
-    // {
-    //     tracing::debug!("install-on-quit skipped: {error}");
-    // }
+    let settings = Settings::load();
+    if settings.install_updates_on_quit
+        && let Some(state) = app.try_state::<std::sync::Mutex<crate::state::AppState>>()
+        && let Err(error) = super::updater::apply_ready_update(&state)
+    {
+        tracing::debug!("install-on-quit skipped: {error}");
+    }
     app.exit(0);
 }
 

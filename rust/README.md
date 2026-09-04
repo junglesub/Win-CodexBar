@@ -72,10 +72,10 @@ This launches the system tray application:
 - Use the Cookies, API Keys, or provider account sections to recover credentials if status stops updating
 - Use the About button for version info
 
-The in-app updater (startup check, About update controls, tray
-**Check for Updates**, update banners, and install-on-quit) is temporarily
-disabled; download the latest build from the
-[Releases](https://github.com/junglesub/Win-CodexBar/releases) page instead.
+GitHub Actions release builds check `personal-latest` for a newer build.
+Updates can be checked from About or the tray menu, downloaded in the
+background, and installed immediately or on quit. Local development builds
+skip update checks.
 
 On Windows Remote Desktop sessions, CodexBar now exits with a direct error dialog instead of crashing with renderer errors. Use the local Windows desktop session for the native UI, or run installed CLI commands like `codexbar-cli usage -p claude` while connected over RDP.
 
