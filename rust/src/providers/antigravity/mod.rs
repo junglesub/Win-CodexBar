@@ -981,9 +981,9 @@ fn is_bucket_cadence(bucket: &QuotaSummaryBucket, cadence: BucketCadence) -> boo
                 || tokens
                     .windows(2)
                     .any(|pair| pair[0] == "five" && matches!(pair[1], "hour" | "hours"))
-                || tokens.iter().any(|t| *t == "session")
+                || tokens.contains(&"session")
         }
-        BucketCadence::Weekly => tokens.iter().any(|t| *t == "weekly"),
+        BucketCadence::Weekly => tokens.contains(&"weekly"),
     }
 }
 

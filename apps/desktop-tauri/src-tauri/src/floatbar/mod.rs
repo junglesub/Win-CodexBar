@@ -291,9 +291,11 @@ mod tests {
         };
         assert!(!patch.is_empty());
 
-        let mut s = Settings::default();
-        s.float_bar_background_color = "#ABCDEF".into();
-        s.float_bar_background_opacity = 42;
+        let mut s = Settings {
+            float_bar_background_color: "#ABCDEF".into(),
+            float_bar_background_opacity: 42,
+            ..Settings::default()
+        };
         let original_enabled = s.float_bar_enabled;
         let original_style = s.float_bar_style.clone();
 
