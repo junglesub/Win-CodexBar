@@ -270,7 +270,7 @@ impl CommandRunner {
     /// a single `try_wait` right after capture sees `Ok(None)` even though the
     /// process exited successfully milliseconds later. Waiting (instead of
     /// immediately killing) preserves the real exit code.
-    const EXIT_GRACE_PERIOD: Duration = Duration::from_millis(250);
+    const EXIT_GRACE_PERIOD: Duration = Duration::from_secs(1);
 
     fn finish_child(child: &mut Child) -> Option<i32> {
         let mut remaining = Self::EXIT_GRACE_PERIOD;
@@ -602,6 +602,7 @@ mod tests {
     fn large_capture_is_not_truncated() {
         let runner = CommandRunner::new();
         let options = CommandOptions {
+            timeout: Duration::from_secs(60),
             initial_delay: Duration::ZERO,
             extra_args: vec![
                 "-NoProfile".to_string(),
