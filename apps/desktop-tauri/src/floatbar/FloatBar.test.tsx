@@ -738,6 +738,40 @@ describe("FloatBar", () => {
     });
   });
 
+  it("classifies Grok weekly quota as weekly (slot 'w') instead of monthly", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("grok", "Grok", 35, {
+        primaryLabel: "Weekly",
+        primaryWindowMinutes: 10_080,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings({ enabledProviders: ["grok"] }));
+
+    const { container } = renderFloatBar(bootstrap({ enabledProviders: ["grok"] }));
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—", "35%", "—"]);
+    });
+  });
+
+  it("classifies Grok weekly quota as weekly by label when windowMinutes is absent", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("grok", "Grok", 35, {
+        primaryLabel: "Weekly",
+        primaryWindowMinutes: null,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings({ enabledProviders: ["grok"] }));
+
+    const { container } = renderFloatBar(bootstrap({ enabledProviders: ["grok"] }));
+    await waitFor(() => {
+      expect(
+        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+      ).toEqual(["—", "35%", "—"]);
+    });
+  });
+
   it("does not classify a window above 31 days as monthly", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, {

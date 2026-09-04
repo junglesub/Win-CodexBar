@@ -16,7 +16,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::core::{
     FetchContext, Provider, ProviderError, ProviderFetchResult, ProviderId, ProviderMetadata,
-    RateWindow, SourceMode, UsageSnapshot,
+    RateWindow, SourceMode, UsageSnapshot, WEEKLY_WINDOW_MINUTES,
 };
 
 const BILLING_ENDPOINT: &str = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig";
@@ -33,7 +33,7 @@ impl GrokProvider {
             metadata: ProviderMetadata {
                 id: ProviderId::Grok,
                 display_name: "Grok",
-                session_label: "Monthly",
+                session_label: "Weekly",
                 weekly_label: "On-demand",
                 supports_opus: false,
                 supports_credits: false,
@@ -443,12 +443,16 @@ fn result_from_billing(
     team_id: Option<String>,
     login_method: Option<String>,
 ) -> ProviderFetchResult {
-    // Upstream #2431 / #2566: do not infer windowMinutes from time-until-reset.
-    // A monthly quota near its reset would otherwise be misclassified as weekly.
     let primary = match billing.used_percent {
-        Some(used_percent) => RateWindow::with_details(used_percent, None, billing.resets_at, None),
+        Some(used_percent) => RateWindow::with_details(
+            used_percent,
+            Some(WEEKLY_WINDOW_MINUTES),
+            billing.resets_at,
+            None,
+        ),
         None => {
             let mut window = RateWindow::informational("Usage unavailable");
+            window.window_minutes = Some(WEEKLY_WINDOW_MINUTES);
             window.resets_at = billing.resets_at;
             window
         }
@@ -794,8 +798,7 @@ mod tests {
     }
 
     #[test]
-    fn billing_snapshot_leaves_window_minutes_unset() {
-        // A monthly quota with six days left must not be reported as weekly.
+    fn billing_snapshot_sets_weekly_window_minutes() {
         let resets = Utc::now() + chrono::Duration::days(6);
         let result = result_from_billing(
             GrokBillingSnapshot {
@@ -807,7 +810,10 @@ mod tests {
             None,
             Some("SuperGrok".into()),
         );
-        assert_eq!(result.usage.primary.window_minutes, None);
+        assert_eq!(
+            result.usage.primary.window_minutes,
+            Some(WEEKLY_WINDOW_MINUTES)
+        );
         assert_eq!(result.usage.primary.resets_at, Some(resets));
         assert_eq!(result.usage.login_method.as_deref(), Some("SuperGrok"));
     }
@@ -827,6 +833,10 @@ mod tests {
         );
 
         assert!(result.usage.primary.is_informational);
+        assert_eq!(
+            result.usage.primary.window_minutes,
+            Some(WEEKLY_WINDOW_MINUTES)
+        );
         assert_eq!(result.usage.primary.resets_at, Some(resets));
         assert_eq!(
             result.usage.account_email.as_deref(),
@@ -836,5 +846,11 @@ mod tests {
             result.usage.login_method.as_deref(),
             Some("SuperGrok Heavy")
         );
+    }
+
+    #[test]
+    fn grok_metadata_uses_weekly_session_label() {
+        let provider = GrokProvider::new();
+        assert_eq!(provider.metadata().session_label, "Weekly");
     }
 }
