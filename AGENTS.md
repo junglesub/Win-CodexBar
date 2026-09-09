@@ -32,7 +32,7 @@
 - `rust/src/cli/` — CLI subcommands (`codexbar` binary)
 - `scripts/` — `dev.ps1`, `local-check.ps1`, release and smoke scripts
 - `docs/` — Windows port docs (`ARCHITECTURE`, `CLI`, `CONFIGURATION`, `PROVIDERS`, `BUILDING`, `COOKIES`, `WINDOWS_PROOF`, ADRs). Upstream macOS docs are read-only reference only.
-- `.github/workflows/` — `pr-check.yml` (hosted gate), `interaction-guard.yml`
+- `.github/workflows/` — `pr-check.yml` (automatic `personal` PR gate), `personal-release.yml` (rolling personal delivery), and `upstream-sync.yml` (sync PR creation).
 
 ## Development Commands
 
@@ -103,13 +103,13 @@ pnpm run tauri:build
 - `apps/desktop-tauri/src-tauri/src/surface_target.rs` — proof / settings tab whitelist
 - `apps/desktop-tauri/src-tauri/tauri.conf.json` — active Tauri config
 - `scripts/local-check.ps1` — local CI slice
-- `.github/workflows/pr-check.yml` — hosted PR gate
-- `CONTEXT.md` — CI budget glossary (Blacksmith pool / `CI_BUDGET_MODE`)
+- `.github/workflows/pr-check.yml` — GitHub-hosted `personal` PR gate
+- `CONTEXT.md` — personal CI and release context
 
 ## Runtime/Tooling Preferences
 
 - Package manager: **pnpm@10.18.1** (`packageManager` in `apps/desktop-tauri/package.json` + lockfile). Do not introduce npm or yarn lockfiles.
-- Node: CI uses Node 20; no `.nvmrc` in repo — prefer Node 20 locally for parity.
+- Node: personal workflows pin **Node 20**; no `.nvmrc` in repo. Prefer Node 20 locally for hosted parity.
 - Rust: edition **2024**, stable toolchain; CI target `x86_64-pc-windows-msvc`. No committed `rust-toolchain.toml` / `rustfmt.toml` / `clippy.toml` — defaults plus CI flags (`clippy -- -D warnings`).
 - Tray / DPAPI / browser-cookie behavior: validate on **Windows-native** hosts. WSL/Linux is insufficient for those paths.
 - **CUA (computer-use) for UI proof** — see [Testing & QA](#testing--qa). Project: [trycua/cua](https://github.com/trycua/cua). On this machine the Windows driver is typically `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`.
@@ -119,8 +119,8 @@ pnpm run tauri:build
 
 - Rust: prefer focused `#[cfg(test)]` unit tests near the changed module. Run both manifests after Rust changes.
 - Frontend: Vitest 3 + jsdom + Testing Library. From `apps/desktop-tauri`: `pnpm test` (`src/**/*.{test,spec}.{ts,tsx}`).
-- **Hosted PR check** (when `vars.CI_BUDGET_MODE != 'off'`): `cargo fmt --check`, clippy both crates with `-D warnings`, cargo test both crates, `pnpm --dir apps/desktop-tauri test`, `pnpm --dir apps/desktop-tauri run build` on Blacksmith Windows. Budget details: `CONTEXT.md`, ADRs under `docs/adr/`.
-- **Local mirror**: `.\scripts\local-check.ps1` (default Rust + Tauri + Frontend). Does not run full installer / smoke unless you pass the matching flags.
+- **Hosted PR check**: `.github/workflows/pr-check.yml` runs automatically for pull requests targeting `personal` on GitHub-hosted `windows-2025` with Node 20 and pnpm 10.18.1. It checks Rust formatting, workspace Clippy/tests, and frontend tests/build.
+- **Local mirror**: `.\scripts\local-check.ps1` (default Rust + Tauri + frontend). It does not run full installer/smoke unless requested.
 - Parser / fetcher changes: add deterministic samples or fixtures where practical.
 - No coverage thresholds are configured — do not invent any.
 
@@ -164,7 +164,7 @@ Then follow post-install instructions (permissions / accessibility as prompted).
   - Commands run (`cargo test`, `pnpm test`, `.\scripts\local-check.ps1`, etc.)
   - Screenshots / GIFs for UI changes (Windows)
   - Linked issue / reference when relevant
-- Hosted PR check exists (`.github/workflows/pr-check.yml`); still run and report the local slice. Do not claim there is no CI.
+- Hosted PR check exists in `.github/workflows/pr-check.yml` for PRs targeting `personal`; still run and report the relevant local checks.
 - UI / tray / settings / float-bar / visual PRs: **CUA Driver proof is the default** ([trycua/cua](https://github.com/trycua/cua)) after a **fresh local rebuild** — see [UI validation with CUA](#ui-validation-with-cua-trycuacua). If CUA cannot be used, explain why and attach equivalent manual proof (PR template checkboxes).
 - Before non-trivial merge: thermo-nuclear structure review when the project process requires it.
 

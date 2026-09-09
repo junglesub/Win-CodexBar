@@ -16,6 +16,40 @@ Commits are listed **oldest first**. Author is `junglesub` / Jungsub Ryoo throug
 
 ---
 
+## Sync resolution record — 2026-09-09
+
+PR `junglesub/Win-CodexBar#3` merges `sync/upstream` into `personal` with
+normal merge ancestry. The reviewed inputs were:
+
+| Ref | SHA |
+| --- | --- |
+| Merge base | `8fdcc663ded4ea75d47f218913c3d2dbb3b78506` |
+| `junglesub/main` | `1e3d04c7ef03353d4cae73afb76e7256a3c71144` |
+| `junglesub/sync/upstream` | `1e3d04c7ef03353d4cae73afb76e7256a3c71144` |
+| `junglesub/personal` | `6b04f5c6e38083925790e613f3b70793018e8530` |
+
+Developer-confirmed collision decisions:
+
+- **CI-1:** retain the personal `.github/workflows/pr-check.yml` and personal
+  `CONTEXT.md`: automatic checks target `personal` on GitHub-hosted
+  `windows-2025` with Node 20 and pnpm 10.18.1. Do not adopt `main`'s manual
+  Blacksmith-reserve / CircleCI-primary policy.
+- **Grok-3:** use `main`'s full billing-cycle cadence extraction so complete
+  cycles are classified dynamically as weekly or monthly. Keep `Weekly` as
+  `GrokProvider`'s metadata fallback when the response does not expose a
+  complete cycle.
+- **Updater-2:** preserve current `personal` commit `6b04f5c6`: release builds
+  use the `junglesub/Win-CodexBar` `personal-latest` commit-SHA updater, including
+  startup/manual checks, banners, optional auto-download, and install-on-quit.
+  The earlier updater-disable design is historical.
+
+The personal deletions of CircleCI configuration and publisher scripts, the
+interaction guard, GitHub templates/dependabot configuration, and localized
+READMEs remain intentional. `main` added no new files in those removed
+categories in this sync range.
+
+---
+
 ## How to use this document
 
 1. When upstream/`main` changes a file or concept listed under **Collision risk**, read the matching commits here before merging.
@@ -24,7 +58,7 @@ Commits are listed **oldest first**. Author is `junglesub` / Jungsub Ryoo throug
 
    - `float-bar-usage` — overlay quota display model
    - `antigravity` — Gemini quota fetch / CLI detection
-   - `identity-updater` — fork identity and disabled in-app updates
+   - `identity-updater` — fork identity and the `personal-latest` updater
    - `release-ci` — personal GitHub Actions, installer, CodeRabbit
    - `settings-ui` — Float Bar appearance settings
    - `docs` — README / architecture / design specs only
@@ -73,7 +107,11 @@ Prefer local `RetrieveUserQuotaSummary` and map **Gemini Models** group:
 
 Canonical repo `junglesub/Win-CodexBar`, site `https://junglesub.github.io/Win-CodexBar/`. Keep `steipete/CodexBar` credit, `nesszer/Win-CodexBar` as upstream-sync source, `Finesssee.Win-CodexBar` as Winget ID.
 
-In-app updater **activation is disabled** (startup check, About controls, tray “Check for Updates”, quit-install, banners). Implementation, commands, settings fields, and DTOs remain. Dormant GitHub repo constant points at `junglesub/Win-CodexBar`. Rolling `personal-latest` GitHub release is independent of the app updater.
+Release builds embed their commit SHA and compare it with the
+`junglesub/Win-CodexBar` `personal-latest` tag. Startup and manual checks,
+tray/pop-out banners, optional auto-download, and install-on-quit are active;
+local development builds without an embedded SHA skip the check. The rolling
+GitHub release and in-app updater therefore form one fork-specific channel.
 
 ### 4. Personal delivery (`release-ci`)
 
@@ -410,7 +448,7 @@ Read this table when reviewing an upstream/`main` diff. “Same files” means t
 | Float Bar pill | `7d060749` … `6c2703bb`, `7d57b026`, `ba637a40` | `FloatBar.tsx`, `FloatBar.css`, `FloatBar.test.tsx`, `usageWindows.ts` (still used on `main` and other surfaces) | Three used-% slots + cadence-less fallback; ignore `showAsUsed` on this surface; per-metric color; append countdown; `modelSpecific` fallback-only |
 | Float Bar settings | `94e6bb24`, `ba637a40` | `settings.rs`, `raw.rs`, `commands/settings.rs`, `floatbar/mod.rs`, `bridge.ts`, `SettingsSection.tsx` | `provider_metrics` notifies overlay; background color/opacity independent of window opacity |
 | Antigravity fetch | `bc595aaa`, `bb7b4a78`, `7d57b026` | `rust/src/providers/antigravity/mod.rs` | Summary-first Gemini 5h/weekly mapping; legacy fallback; CLI regex; no `model_specific` from summary |
-| Updater | `acccc72e` | `App.tsx`, `AboutTab.tsx`, `tray_menu.rs`, `tray_bridge.rs`, `updater.rs`, `system.rs` | Keep implementation, keep activation **off** until a personal-latest design exists |
+| Updater | `acccc72e`, `6b04f5c6` | `App.tsx`, `AboutTab.tsx`, `tray_menu.rs`, `tray_bridge.rs`, `updater.rs`, `system.rs` | Keep the active `junglesub` `personal-latest` commit-SHA update channel; local dev builds skip checks |
 | Identity / URLs | `acccc72e` | Cargo.toml, ISS/WiX, About, README*, PRIVACY | `junglesub` current; `nesszer` upstream-sync; `Finesssee` Winget; `steipete` credit |
 | CI / release | `ca40b594` … `3b9df0a0`, `d2e164a3` | `.github/**`, `.circleci/**`, `docs/release/**`, `CONTEXT.md` | Keep `personal-release.yml`, `upstream-sync.yml`, `install-personal.ps1`. Decide whether to take upstream `pr-check.yml` (Blacksmith) or keep the slim personal one. Do not resurrect CircleCI as the personal publisher |
 | Docs only | several README/spec commits | `README.md`, `ARCHITECTURE.md`, `PROVIDERS.md` | Personal README is fork-specific; architecture Float Bar paragraph is the three-window contract |
@@ -436,7 +474,7 @@ When `main` has new upstream commits:
 2. Diff both branches against their merge base. The workflow lists every path changed by both branches in the sync PR as requiring a developer decision.
 3. For each hit, decide **keep personal concept**, **take upstream concept**, or **re-implement personal concept on the new code**.
 4. Highest-cost files if both sides touched them: `FloatBar.tsx`, `antigravity/mod.rs`, `settings.rs` / `raw.rs`, `App.tsx` / `AboutTab.tsx`, `.github/workflows/pr-check.yml`, `README.md`.
-5. After merge, re-verify Float Bar slot classification (minutes bounds), Antigravity summary-then-fallback, updater still dormant, and background color settings still load.
+5. After merge, re-verify Float Bar slot classification (minutes bounds), Antigravity summary-then-fallback, the active fork-specific updater, and background color settings load.
 
 The PR must use a normal merge commit. Do not squash or rebase it: preserving
 `main` as an ancestor prevents later sync runs from reconsidering the same

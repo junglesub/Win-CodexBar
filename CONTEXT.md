@@ -17,21 +17,21 @@ Canonical `vX.Y.Z` releases and Winget updates are separate. Never point
 Winget at `personal-latest`, because the tag and assets are replaced on every
 successful personal build.
 
-## Delivery vs. application behavior (updater disabled)
+## Rolling delivery and application updates
 
-Delivery and the app's update behavior are intentionally split while the
-in-app updater is disabled:
+Release builds embed their source commit SHA and use the in-app updater to
+compare it with the commit referenced by the mutable `personal-latest` tag.
+Local development builds without an embedded SHA skip this network check.
 
-- The personal workflow continues to build and publish the rolling
-  `personal-latest` prerelease, and the manual
-  `scripts/install-personal.ps1` installer continues to fetch and install it.
-- Installed apps do **not** query or consume `personal-latest`: the startup
-  update check / auto-download, About updater controls, tray
-  **Check for Updates**, update banners, and install-on-quit are all
-  deactivated. The updater implementation, Tauri commands, settings fields,
-  and bridge types remain dormant.
+- The personal workflow publishes the installer and portable app under
+  `personal-latest`; `scripts/install-personal.ps1` remains the manual install
+  path.
+- Release builds check for a different `personal-latest` commit after startup.
+  About and the tray menu also expose manual checks, while tray/pop-out banners
+  surface an available update.
+- Auto-download and install-on-quit remain controlled by their existing user
+  settings. Installer downloads continue to require the published SHA-256
+  digest before automatic application.
 
-Re-enabling in-app updates requires a separate design covering
-release-channel selection, prerelease semantics, asset selection, and
-rollout. Do not re-activate the updater activation edges as part of a release
-or packaging change.
+Canonical `vX.Y.Z` releases remain independent of this rolling personal update
+channel.

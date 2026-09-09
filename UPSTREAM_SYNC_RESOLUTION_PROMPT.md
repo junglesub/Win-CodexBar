@@ -13,7 +13,7 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 
 1. Read the root `AGENTS.md` and `docs/personal/commits-after-main.md`, especially the collision map and suggested merge checklist.
 2. Run `git fetch --prune junglesub`.
-3. Record the current SHAs of `junglesub/personal`, `junglesub/main`, and `junglesub/sync/upstream`. If the open PR does not target `personal` from `sync/upstream`, stop and report it.
+3. Record the current SHAs of `junglesub/personal`, `junglesub/main`, and `junglesub/sync/upstream`. Read back the open PR from the exact `junglesub/Win-CodexBar` repository (use `gh` when available or the read-only GitHub REST API otherwise). If it does not target `personal` from `sync/upstream`, stop and report it.
 4. Start a normal merge:
 
    ```powershell
@@ -21,7 +21,7 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
    git merge junglesub/personal
    ```
 
-5. Review paths changed by both branches, including files Git merged automatically.
+5. Review paths changed by both branches, including files Git merged automatically. Also review policy-bearing files changed only by `main` when their content can contradict `personal`, especially `AGENTS.md`, CI/release documentation, and `scripts/gh-safe.sh`.
 
 ## Resolution Rules
 
@@ -29,6 +29,10 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 - Preserve behavior changed only by `personal`.
 - Accept features and fixes changed only by `main`.
 - When changes in the same file are independent, retain both.
+- Compare the result with both parents. During the merge, `HEAD` is the `main`
+  parent and `MERGE_HEAD` is the `personal` parent; use result-vs-parent diffs
+  to distinguish newly accepted upstream work from the large staged
+  `personal` delta.
 - When both branches implement the same feature differently, ask the developer and include:
   - the file and relevant symbol;
   - the `personal` behavior;
@@ -52,10 +56,20 @@ Treat deletions on `personal` as deliberate product decisions, not as missing up
 - Float Bar: three used-percentage slots, per-metric colors, countdowns, and `modelSpecific` as fallback only.
 - Float Bar settings: `provider_metrics` notifications and independent background color and opacity.
 - Antigravity: summary-first Gemini five-hour and weekly mapping with the legacy fallback.
-- Keep updater activation disabled.
+- Updater: keep the active fork-specific update channel. Release builds embed
+  their source commit SHA and compare it with the
+  `junglesub/Win-CodexBar` `personal-latest` tag. Preserve startup and manual
+  checks, tray/pop-out banners, optional auto-download, and install-on-quit.
+  Local development builds without an embedded SHA must skip update checks.
 - Keep `junglesub` as the current repository identity and `nesszer` as the upstream sync source.
 - Keep `personal-release.yml`, `upstream-sync.yml`, and `install-personal.ps1`.
+- Keep `.github/workflows/pr-check.yml` as the automatic GitHub-hosted
+  `windows-2025` gate for PRs targeting `personal`, using Node.js 20 and
+  `pnpm@10.18.1`, unless the developer explicitly chooses another CI policy.
 - Do not replace personal release delivery with the upstream CircleCI publisher.
+- Keep `scripts/gh-safe.sh` bound to `junglesub/Win-CodexBar` for normal
+  mutations. `nesszer/Win-CodexBar` is a read-only sync source, not the
+  personal mutation target. Preserve repository-scoped `gh api` validation.
 - Ask the developer about policy collisions such as `.github/workflows/pr-check.yml`.
 
 ## Decision Gate
@@ -74,11 +88,28 @@ git ls-files -u
 
 Run focused tests for the changed areas. Do not build the application unless the user explicitly requests it. Do not add dependencies.
 
+Run `cargo fmt --all --check` and both Rust Clippy manifests with
+`-D warnings` when Rust changed. If a gate exposes a failure in a file unchanged
+by the merge, first verify that the file is identical on both parents and
+reproduce the failure. Do not silently mix unrelated cleanup into the merge;
+apply only a minimal behavior-preserving integration fix when it is necessary
+for the selected hosted gate, and document it in the final report.
+
+For frontend tests, use the repository-pinned pnpm version. If Node.js 20 is
+not already installed, do not install or switch tooling without approval; run
+only compatible checks with the available runtime and report the exact version
+mismatch.
+
 If the merge changes documented behavior, update the existing related documentation.
 
 ## Commit and Push
 
 Create a normal merge commit. Do not squash, rebase, or amend it.
+
+Before committing, verify that the commit will have exactly two intended
+parents: `main` as the first parent and `personal` as the second. Before
+pushing, read back the `junglesub` remote URL and PR head/base from the exact
+repository. Abort on any repository or PR mismatch.
 
 ```powershell
 git push junglesub sync/upstream
@@ -94,6 +125,8 @@ Report:
 - the intentional deletions retained, including newly added files removed by category policy;
 - the important changes accepted from `main`;
 - every overlapping decision confirmed by the developer;
+- any behavior-preserving integration fix added solely to keep the selected CI gate green;
 - tests run and their results;
+- the exact local Node.js/pnpm versions used for frontend verification when they differ from the pinned CI toolchain;
 - the merge commit SHA;
 - the PR mergeability and check status.

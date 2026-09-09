@@ -16,7 +16,7 @@ use std::os::windows::process::CommandExt;
 
 use crate::core::{
     FetchContext, Provider, ProviderError, ProviderFetchResult, ProviderId, ProviderMetadata,
-    RateWindow, SourceMode, UsageSnapshot, WEEKLY_WINDOW_MINUTES,
+    RateWindow, SourceMode, UsageSnapshot,
 };
 
 const BILLING_ENDPOINT: &str = "https://grok.com/grok_api_v2.GrokBuildBilling/GetGrokCreditsConfig";
@@ -33,6 +33,9 @@ impl GrokProvider {
             metadata: ProviderMetadata {
                 id: ProviderId::Grok,
                 display_name: "Grok",
+                // Preserve the personal fork's known-cadence fallback label.
+                // Billing snapshots still override this dynamically when a
+                // complete weekly or monthly cycle can be derived.
                 session_label: "Weekly",
                 weekly_label: "On-demand",
                 supports_opus: false,
@@ -434,6 +437,25 @@ fn text_field(value: &Value, key: &str) -> Option<String> {
 struct GrokBillingSnapshot {
     used_percent: Option<f64>,
     resets_at: Option<DateTime<Utc>>,
+    window_minutes: Option<u32>,
+}
+
+/// Classify Grok from the full billing-cycle duration, not time remaining.
+/// This preserves the upstream #2431/#2566 invariant that a monthly plan near
+/// its reset must not become a weekly plan.
+fn primary_label_for_cycle_minutes(minutes: u32) -> Option<&'static str> {
+    const DAY_MINUTES: u32 = 24 * 60;
+    if minutes <= 60 {
+        return None;
+    }
+    let days = (minutes + DAY_MINUTES / 2) / DAY_MINUTES;
+    if (4..=12).contains(&days) {
+        Some("Weekly")
+    } else if (20..=45).contains(&days) {
+        Some("Monthly")
+    } else {
+        None
+    }
 }
 
 fn result_from_billing(
@@ -443,21 +465,30 @@ fn result_from_billing(
     team_id: Option<String>,
     login_method: Option<String>,
 ) -> ProviderFetchResult {
+    // Dynamic cadence is provider-owned and comes only from a complete billing
+    // cycle. A reset timestamp alone is insufficient because monthly quotas can
+    // have only a few days remaining.
+    let primary_label = billing
+        .window_minutes
+        .and_then(primary_label_for_cycle_minutes);
     let primary = match billing.used_percent {
         Some(used_percent) => RateWindow::with_details(
             used_percent,
-            Some(WEEKLY_WINDOW_MINUTES),
+            billing.window_minutes,
             billing.resets_at,
             None,
         ),
         None => {
             let mut window = RateWindow::informational("Usage unavailable");
-            window.window_minutes = Some(WEEKLY_WINDOW_MINUTES);
             window.resets_at = billing.resets_at;
+            window.window_minutes = billing.window_minutes;
             window
         }
     };
     let mut usage = UsageSnapshot::new(primary);
+    if let Some(label) = primary_label {
+        usage = usage.with_primary_label(label);
+    }
     usage.account_email = email;
     usage.account_organization = team_id;
     usage.login_method = login_method;
@@ -536,27 +567,48 @@ fn parse_grpc_web_response(data: &[u8]) -> Result<GrokBillingSnapshot, ProviderE
         })
         .map(|field| field.value as f64);
 
+    let now = Utc::now();
     let resets_at = scan
         .varints
         .iter()
-        .filter_map(|field| {
-            // Varint timestamps are Unix seconds inside the range checked below.
-            #[allow(
-                clippy::cast_possible_wrap,
-                reason = "varint timestamps are bounded to the Unix-seconds range checked below"
-            )]
-            let seconds = field.value as i64;
-            (1_700_000_000..=2_100_000_000)
-                .contains(&field.value)
-                .then(|| Utc.timestamp_opt(seconds, 0).single())
-                .flatten()
-        })
-        .filter(|dt| *dt > Utc::now())
+        .filter_map(varint_timestamp)
+        .filter(|dt| *dt > now)
         .min();
     Ok(GrokBillingSnapshot {
         used_percent,
         resets_at,
+        window_minutes: current_period_window_minutes(&scan, now),
     })
+}
+
+fn varint_timestamp(field: &VarintField) -> Option<DateTime<Utc>> {
+    // Varint timestamps are Unix seconds inside the range checked below.
+    #[allow(
+        clippy::cast_possible_wrap,
+        reason = "varint timestamps are bounded to the Unix-seconds range checked below"
+    )]
+    let seconds = field.value as i64;
+    (1_700_000_000..=2_100_000_000)
+        .contains(&field.value)
+        .then(|| Utc.timestamp_opt(seconds, 0).single())
+        .flatten()
+}
+
+fn current_period_window_minutes(scan: &ProtoScan, now: DateTime<Utc>) -> Option<u32> {
+    let timestamp_at = |path: &[u64]| {
+        scan.varints
+            .iter()
+            .find(|field| field.path.as_slice() == path)
+            .and_then(varint_timestamp)
+    };
+    let start = timestamp_at(&[1, 8, 2, 1])?;
+    let end = timestamp_at(&[1, 8, 3, 1])?;
+    if start > now || end <= now || end <= start {
+        return None;
+    }
+    u32::try_from((end - start).num_minutes())
+        .ok()
+        .filter(|minutes| *minutes > 0)
 }
 
 fn grpc_web_data_frames(data: &[u8]) -> Vec<Vec<u8>> {
@@ -595,6 +647,7 @@ struct Fixed32Field {
 }
 
 struct VarintField {
+    path: Vec<u64>,
     value: u64,
 }
 
@@ -628,7 +681,7 @@ impl ProtoScan {
         wire: u64,
     ) -> Option<usize> {
         match wire {
-            0 => self.scan_varint(data, i),
+            0 => self.scan_varint(data, i, path),
             2 => self.scan_length_delimited(data, i, path, depth),
             5 => self.scan_fixed32(data, i, path),
             1 => Some(i.saturating_add(8)),
@@ -636,9 +689,12 @@ impl ProtoScan {
         }
     }
 
-    fn scan_varint(&mut self, data: &[u8], i: usize) -> Option<usize> {
+    fn scan_varint(&mut self, data: &[u8], i: usize, path: &[u64]) -> Option<usize> {
         let (value, next) = read_varint(data, i)?;
-        self.varints.push(VarintField { value });
+        self.varints.push(VarintField {
+            path: path.to_vec(),
+            value,
+        });
         Some(next)
     }
 
@@ -798,12 +854,14 @@ mod tests {
     }
 
     #[test]
-    fn billing_snapshot_sets_weekly_window_minutes() {
-        let resets = Utc::now() + chrono::Duration::days(6);
+    fn billing_snapshot_uses_full_weekly_cycle_for_pace() {
+        let now = Utc::now();
+        let resets = now + chrono::Duration::days(2);
         let result = result_from_billing(
             GrokBillingSnapshot {
                 used_percent: Some(12.0),
                 resets_at: Some(resets),
+                window_minutes: Some(crate::core::WEEKLY_WINDOW_MINUTES),
             },
             "web",
             None,
@@ -812,10 +870,89 @@ mod tests {
         );
         assert_eq!(
             result.usage.primary.window_minutes,
-            Some(WEEKLY_WINDOW_MINUTES)
+            Some(crate::core::WEEKLY_WINDOW_MINUTES)
         );
-        assert_eq!(result.usage.primary.resets_at, Some(resets));
-        assert_eq!(result.usage.login_method.as_deref(), Some("SuperGrok"));
+        assert_eq!(result.usage.primary_label.as_deref(), Some("Weekly"));
+        let pace = crate::core::UsagePace::weekly(
+            &result.usage.primary,
+            Some(now),
+            crate::core::WEEKLY_WINDOW_MINUTES,
+        );
+        assert!(pace.is_some(), "weekly window + reset must yield pace");
+    }
+
+    #[test]
+    fn monthly_cycle_stays_monthly_with_six_days_remaining() {
+        let now = Utc::now();
+        let resets = now + chrono::Duration::days(6);
+        let monthly_minutes = 31 * 24 * 60;
+        let result = result_from_billing(
+            GrokBillingSnapshot {
+                used_percent: Some(40.0),
+                resets_at: Some(resets),
+                window_minutes: Some(monthly_minutes),
+            },
+            "cli",
+            None,
+            None,
+            Some("SuperGrok Heavy".into()),
+        );
+        assert_eq!(result.usage.primary_label.as_deref(), Some("Monthly"));
+        assert_eq!(result.usage.primary.window_minutes, Some(monthly_minutes));
+    }
+
+    #[test]
+    fn reset_distance_alone_does_not_invent_a_cadence() {
+        let resets = Utc::now() + chrono::Duration::days(6);
+        let result = result_from_billing(
+            GrokBillingSnapshot {
+                used_percent: Some(80.0),
+                resets_at: Some(resets),
+                window_minutes: None,
+            },
+            "web",
+            None,
+            None,
+            Some("SuperGrok".into()),
+        );
+        assert_eq!(result.usage.primary.window_minutes, None);
+        assert_eq!(result.usage.primary_label, None);
+    }
+
+    #[test]
+    fn grok_metadata_uses_weekly_fallback_label() {
+        let provider = GrokProvider::new();
+        assert_eq!(provider.metadata().session_label, "Weekly");
+    }
+
+    #[test]
+    fn current_period_paths_define_the_full_cycle() {
+        let now = Utc.timestamp_opt(1_800_000_000, 0).single().unwrap();
+        let start = now - chrono::Duration::days(25);
+        let end = now + chrono::Duration::days(6);
+        let scan = ProtoScan {
+            fixed32: Vec::new(),
+            varints: vec![
+                VarintField {
+                    path: vec![1, 8, 2, 1],
+                    value: u64::try_from(start.timestamp()).unwrap(),
+                },
+                VarintField {
+                    path: vec![1, 8, 3, 1],
+                    value: u64::try_from(end.timestamp()).unwrap(),
+                },
+            ],
+            order: 0,
+        };
+
+        assert_eq!(
+            current_period_window_minutes(&scan, now),
+            Some(31 * 24 * 60)
+        );
+        assert_eq!(
+            primary_label_for_cycle_minutes(current_period_window_minutes(&scan, now).unwrap()),
+            Some("Monthly")
+        );
     }
 
     #[test]
@@ -825,6 +962,7 @@ mod tests {
             GrokBillingSnapshot {
                 used_percent: None,
                 resets_at: Some(resets),
+                window_minutes: None,
             },
             "cli",
             Some("user@example.com".into()),
@@ -833,10 +971,6 @@ mod tests {
         );
 
         assert!(result.usage.primary.is_informational);
-        assert_eq!(
-            result.usage.primary.window_minutes,
-            Some(WEEKLY_WINDOW_MINUTES)
-        );
         assert_eq!(result.usage.primary.resets_at, Some(resets));
         assert_eq!(
             result.usage.account_email.as_deref(),
@@ -846,11 +980,5 @@ mod tests {
             result.usage.login_method.as_deref(),
             Some("SuperGrok Heavy")
         );
-    }
-
-    #[test]
-    fn grok_metadata_uses_weekly_session_label() {
-        let provider = GrokProvider::new();
-        assert_eq!(provider.metadata().session_label, "Weekly");
     }
 }

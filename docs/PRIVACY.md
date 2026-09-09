@@ -5,17 +5,18 @@ displays AI provider usage quotas on your own machine. It applies to the
 installer and portable builds published on
 [GitHub Releases](https://github.com/junglesub/Win-CodexBar/releases).
 
-Last updated: 2026-08-19.
+Last updated: 2026-09-09.
 
 ## Summary
 
 - Win-CodexBar sends **nothing** to project-controlled servers. There are none.
 - **No analytics, no telemetry, no crash reporting, no advertising SDKs.**
-- Everything the app reads or stores stays on your device unless you
-  explicitly configure a provider, in which case the app talks only to that
-  provider's API using the credentials you supplied.
-- The in-app updater is currently disabled: the app makes no GitHub Releases
-  API or download requests.
+- Everything the app reads or stores stays on your device unless it contacts a
+  provider you configured or checks the fork's GitHub release channel.
+- Release builds check the `junglesub/Win-CodexBar` `personal-latest` tag for a
+  different commit SHA. If enabled in settings, the app can download and apply
+  the published installer after SHA-256 verification. Local development builds
+  without an embedded commit SHA skip update checks.
 
 ## What the app collects
 
@@ -81,7 +82,13 @@ The app makes outbound connections only for the following purposes:
    to the corresponding provider, subject to that provider's own privacy
    policy. Optionally, provider *status pages* may be polled for incident
    status where that toggle is enabled.
-2. **The optional PowerShell installer, when you run it.** The
+2. **The in-app updater in release builds.** After startup, and when you invoke
+   a manual check from About or the tray menu, the app contacts GitHub's API for
+   the `junglesub/Win-CodexBar` `personal-latest` tag. When that tag points to a
+   different commit, it reads the corresponding release metadata. If
+   auto-download is enabled, it downloads the installer asset and verifies its
+   published SHA-256 digest before making it available for application.
+3. **The optional PowerShell installer, when you run it.** The
    `scripts/install-personal.ps1` download script contacts GitHub
    (`https://api.github.com/repos/junglesub/Win-CodexBar/...` and the release
    asset URLs) only when you explicitly invoke it. It sends no identifiers,
@@ -89,17 +96,16 @@ The app makes outbound connections only for the following purposes:
    resolve the release tag, followed by the installer download. GitHub's own
    privacy statement applies to these requests.
 
-There is no other update or telemetry channel. The in-app updater is currently
-disabled: the application itself does **not** contact GitHub for release
-checks or downloads, and no request is made before you enable a provider or
-run the installer script.
+There is no telemetry channel. GitHub receives ordinary API/download request
+metadata when the in-app updater or optional installer accesses the rolling
+release; no provider credentials or usage data are included in those requests.
 
 ## Third-party data processors
 
-**None.** No analytics vendor, crash-reporting service, or other third party
-receives data from Win-CodexBar. The only external parties that ever see a
-request are (a) the AI providers you deliberately configure and (b) GitHub,
-only when you run the optional PowerShell installer script.
+No analytics vendor, crash-reporting service, or advertising service receives
+data from Win-CodexBar. The external parties that can see a request are (a) the
+AI providers you deliberately configure and (b) GitHub when the release-build
+updater or optional PowerShell installer accesses `personal-latest`.
 
 ## Retention
 

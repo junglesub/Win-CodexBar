@@ -1,5 +1,9 @@
 # Project identity cleanup and updater disable design
 
+> Historical design: updater activation was restored by personal commit
+> `6b04f5c6` with a fork-specific `personal-latest` commit-SHA protocol. Current
+> behavior is documented in `README.md`, `CONTEXT.md`, and `docs/PRIVACY.md`.
+
 ## Goal
 
 Make `junglesub/Win-CodexBar` the clear current project identity across the
