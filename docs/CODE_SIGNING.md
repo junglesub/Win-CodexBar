@@ -7,9 +7,9 @@ Free code signing of Win-CodexBar releases via SignPath.io, certificate by SignP
 ## Project identity
 
 - **Project name:** Win-CodexBar
-- **Homepage:** https://github.com/nesszer/Win-CodexBar
-- **Source code:** https://github.com/nesszer/Win-CodexBar
-- **Releases:** https://github.com/nesszer/Win-CodexBar/releases
+- **Homepage:** https://junglesub.github.io/Win-CodexBar/
+- **Source code:** https://github.com/junglesub/Win-CodexBar
+- **Releases:** https://github.com/junglesub/Win-CodexBar/releases
 - **License:** MIT
 
 ## Roles
@@ -24,7 +24,7 @@ Free code signing of Win-CodexBar releases via SignPath.io, certificate by SignP
 
 - CI runs on GitHub Actions (`.github/workflows/pr-check.yml`).
 - The Windows release pipeline is driven by `scripts/windows-release-build.ps1`, which builds the Tauri release binary plus the console CLI and packages them with Inno Setup into the installer (`CodexBar-<version>-Setup.exe`) and portable build, writing SHA-256 sidecar files for every artifact.
-- Release artifacts are published to [GitHub Releases](https://github.com/nesszer/Win-CodexBar/releases).
+- Release artifacts are published to [GitHub Releases](https://github.com/junglesub/Win-CodexBar/releases).
 - **Not yet wired:** release signing will be submitted to SignPath from this pipeline once SignPath onboarding completes; each release-signing request is approved manually by the approver listed above before signed binaries are published.
 
 ## Privacy

@@ -32,7 +32,7 @@
 - `rust/src/cli/` — CLI subcommands (`codexbar` binary)
 - `scripts/` — `dev.ps1`, `local-check.ps1`, release and smoke scripts
 - `docs/` — Windows port docs (`ARCHITECTURE`, `CLI`, `CONFIGURATION`, `PROVIDERS`, `BUILDING`, `COOKIES`, `WINDOWS_PROOF`, ADRs). Upstream macOS docs are read-only reference only.
-- `.circleci/config.yml` — primary hosted Windows PR/push gate; `.github/workflows/pr-check.yml` — manual Blacksmith Windows reserve; `.github/workflows/interaction-guard.yml` — lightweight GitHub-hosted policy guard.
+- `.github/workflows/` — `pr-check.yml` (automatic `personal` PR gate), `personal-release.yml` (rolling personal delivery), and `upstream-sync.yml` (sync PR creation).
 
 ## Development Commands
 
@@ -103,13 +103,13 @@ pnpm run tauri:build
 - `apps/desktop-tauri/src-tauri/src/surface_target.rs` — proof / settings tab whitelist
 - `apps/desktop-tauri/src-tauri/tauri.conf.json` — active Tauri config
 - `scripts/local-check.ps1` — local CI slice
-- `.circleci/config.yml` — primary hosted PR/push gate; `.github/workflows/pr-check.yml` — manual Blacksmith reserve
-- `CONTEXT.md` — CI budget glossary (Blacksmith pool / `CI_BUDGET_MODE`)
+- `.github/workflows/pr-check.yml` — GitHub-hosted `personal` PR gate
+- `CONTEXT.md` — personal CI and release context
 
 ## Runtime/Tooling Preferences
 
-- Package manager: **pnpm@11.24.0** (`packageManager` in `apps/desktop-tauri/package.json` + lockfile). Do not introduce npm or yarn lockfiles.
-- Node: CircleCI pins **Node 24.18.0**; no `.nvmrc` in repo. Prefer Node 24.18.0 locally for hosted parity.
+- Package manager: **pnpm@10.18.1** (`packageManager` in `apps/desktop-tauri/package.json` + lockfile). Do not introduce npm or yarn lockfiles.
+- Node: personal workflows pin **Node 20**; no `.nvmrc` in repo. Prefer Node 20 locally for hosted parity.
 - Rust: edition **2024**, stable toolchain; CI target `x86_64-pc-windows-msvc`. No committed `rust-toolchain.toml` / `rustfmt.toml` / `clippy.toml` — defaults plus CI flags (`clippy -- -D warnings`).
 - Tray / DPAPI / browser-cookie behavior: validate on **Windows-native** hosts. WSL/Linux is insufficient for those paths.
 - **CUA (computer-use) for UI proof** — see [Testing & QA](#testing--qa). Project: [trycua/cua](https://github.com/trycua/cua). On this machine the Windows driver is typically `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`.
@@ -119,8 +119,8 @@ pnpm run tauri:build
 
 - Rust: prefer focused `#[cfg(test)]` unit tests near the changed module. Run both manifests after Rust changes.
 - Frontend: Vitest 3 + jsdom + Testing Library. From `apps/desktop-tauri`: `pnpm test` (`src/**/*.{test,spec}.{ts,tsx}`).
-- **Hosted PR check**: CircleCI Windows is primary and runs `scripts/local-check.ps1 -Slice ci` for ordinary/canonical PRs and `main`; micro PRs targeting `port/upstream-*` intentionally skip hosted Windows compute; a micro-named PR targeting `main` does not. `.github/workflows/pr-check.yml` is manual Blacksmith Windows reserve only. Budget details: `CONTEXT.md`, `.github/CI.md`, and ADRs under `docs/adr/`.
-- **Hosted mirror**: `.\scripts\local-check.ps1 -Slice ci`. The default no-parameter developer slice remains available and does not run full installer/smoke unless requested.
+- **Hosted PR check**: `.github/workflows/pr-check.yml` runs automatically for pull requests targeting `personal` on GitHub-hosted `windows-2025` with Node 20 and pnpm 10.18.1. It checks Rust formatting, workspace Clippy/tests, and frontend tests/build.
+- **Local mirror**: `.\scripts\local-check.ps1` (default Rust + Tauri + frontend). It does not run full installer/smoke unless requested.
 - Parser / fetcher changes: add deterministic samples or fixtures where practical.
 - No coverage thresholds are configured — do not invent any.
 
@@ -164,7 +164,7 @@ Then follow post-install instructions (permissions / accessibility as prompted).
   - Commands run (`cargo test`, `pnpm test`, `.\scripts\local-check.ps1`, etc.)
   - Screenshots / GIFs for UI changes (Windows)
   - Linked issue / reference when relevant
-- Hosted PR check exists: `ci/circleci: pr-check` is the primary Windows gate; `.github/workflows/pr-check.yml` is manual Blacksmith backup. Porting micro PRs targeting `port/upstream-*` use focused local evidence and intentionally skip automatic hosted Windows CI; `main`-bound PRs always get the hosted gate.
+- Hosted PR check exists in `.github/workflows/pr-check.yml` for PRs targeting `personal`; still run and report the relevant local checks.
 - UI / tray / settings / float-bar / visual PRs: **CUA Driver proof is the default** ([trycua/cua](https://github.com/trycua/cua)) after a **fresh local rebuild** — see [UI validation with CUA](#ui-validation-with-cua-trycuacua). If CUA cannot be used, explain why and attach equivalent manual proof (PR template checkboxes).
 - Before non-trivial merge: thermo-nuclear structure review when the project process requires it.
 

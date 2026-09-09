@@ -3,10 +3,16 @@ use super::*;
 #[tauri::command]
 pub fn get_app_info() -> AppInfoBridge {
     let settings = Settings::load();
+    let build_number = option_env!("BUILD_NUMBER")
+        .map(str::to_owned)
+        .or_else(|| {
+            option_env!("CODEXBAR_BUILD_SHA").map(|sha| sha.chars().take(7).collect::<String>())
+        })
+        .unwrap_or_else(|| "dev".to_string());
     AppInfoBridge {
         name: "CodexBar".to_string(),
         version: env!("CARGO_PKG_VERSION").to_string(),
-        build_number: option_env!("BUILD_NUMBER").unwrap_or("dev").to_string(),
+        build_number,
         update_channel: update_channel_label(settings.update_channel).to_string(),
         tagline: "May your tokens never run out—keep agent limits in view.".to_string(),
     }

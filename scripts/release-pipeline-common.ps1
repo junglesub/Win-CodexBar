@@ -1,7 +1,7 @@
 #Requires -Version 5.1
 <##
-Shared, side-effect-free helpers for the hosted Windows release pipeline.
-This file is dot-sourced by the preflight, manifest, publisher, and focused tests.
+Shared, side-effect-free helpers for Windows release tooling.
+This file is dot-sourced by prerequisite checks and focused tests.
 #>
 
 Set-StrictMode -Version Latest

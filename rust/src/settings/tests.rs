@@ -27,6 +27,8 @@ fn test_settings_default() {
         settings.low_power_mode_preference,
         LowPowerModePreference::Off
     );
+    assert_eq!(settings.float_bar_background_color, "#FFFFFF");
+    assert_eq!(settings.float_bar_background_opacity, 8);
 }
 
 #[test]

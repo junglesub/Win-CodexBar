@@ -3,19 +3,20 @@
 This is the privacy policy for **Win-CodexBar**, a Windows tray/desktop app that
 displays AI provider usage quotas on your own machine. It applies to the
 installer and portable builds published on
-[GitHub Releases](https://github.com/nesszer/Win-CodexBar/releases).
+[GitHub Releases](https://github.com/junglesub/Win-CodexBar/releases).
 
-Last updated: 2026-08-06.
+Last updated: 2026-09-09.
 
 ## Summary
 
 - Win-CodexBar sends **nothing** to project-controlled servers. There are none.
 - **No analytics, no telemetry, no crash reporting, no advertising SDKs.**
-- Everything the app reads or stores stays on your device unless you
-  explicitly configure a provider, in which case the app talks only to that
-  provider's API using the credentials you supplied.
-- Update checks contact GitHub only (details below), with no identifiers or
-  usage data attached.
+- Everything the app reads or stores stays on your device unless it contacts a
+  provider you configured or checks the fork's GitHub release channel.
+- Release builds check the `junglesub/Win-CodexBar` `personal-latest` tag for a
+  different commit SHA. If enabled in settings, the app can download and apply
+  the published installer after SHA-256 verification. Local development builds
+  without an embedded commit SHA skip update checks.
 
 ## What the app collects
 
@@ -81,27 +82,30 @@ The app makes outbound connections only for the following purposes:
    to the corresponding provider, subject to that provider's own privacy
    policy. Optionally, provider *status pages* may be polled for incident
    status where that toggle is enabled.
-2. **Release/update checks against GitHub.** When you choose
-   "Check for Updates…" from the About tab — or if you explicitly enable
-   automatic update downloads in Settings (off by default) — the app sends a
-   plain GET request to the GitHub Releases API
-   (`https://api.github.com/repos/.../Win-CodexBar/releases`) to learn the
-   latest version. With your approval it then downloads the installer asset
-   from `github.com`. The downloaded installer is applied only after its
-   SHA-256 digest is re-verified against the digest GitHub computed for the
-   release asset. Update requests contain no identifiers, no usage data, and
-   no telemetry — they are ordinary GitHub API requests; GitHub's own privacy
-   statement applies to them.
+2. **The in-app updater in release builds.** After startup, and when you invoke
+   a manual check from About or the tray menu, the app contacts GitHub's API for
+   the `junglesub/Win-CodexBar` `personal-latest` tag. When that tag points to a
+   different commit, it reads the corresponding release metadata. If
+   auto-download is enabled, it downloads the installer asset and verifies its
+   published SHA-256 digest before making it available for application.
+3. **The optional PowerShell installer, when you run it.** The
+   `scripts/install-personal.ps1` download script contacts GitHub
+   (`https://api.github.com/repos/junglesub/Win-CodexBar/...` and the release
+   asset URLs) only when you explicitly invoke it. It sends no identifiers,
+   no usage data, and no telemetry — only an ordinary GitHub API request to
+   resolve the release tag, followed by the installer download. GitHub's own
+   privacy statement applies to these requests.
 
-There is no other update or telemetry channel, and no request is made before
-you enable a provider or trigger an update check.
+There is no telemetry channel. GitHub receives ordinary API/download request
+metadata when the in-app updater or optional installer accesses the rolling
+release; no provider credentials or usage data are included in those requests.
 
 ## Third-party data processors
 
-**None.** No analytics vendor, crash-reporting service, or other third party
-receives data from Win-CodexBar. The only external parties that ever see a
-request are (a) the AI providers you deliberately configure and (b) GitHub as
-the release host you contact for updates.
+No analytics vendor, crash-reporting service, or advertising service receives
+data from Win-CodexBar. The external parties that can see a request are (a) the
+AI providers you deliberately configure and (b) GitHub when the release-build
+updater or optional PowerShell installer accesses `personal-latest`.
 
 ## Retention
 
@@ -127,4 +131,4 @@ material changes will also be noted in release notes.
 ## Contact
 
 Questions or data concerns: open an issue at
-<https://github.com/nesszer/Win-CodexBar/issues>.
+<https://github.com/junglesub/Win-CodexBar/issues>.

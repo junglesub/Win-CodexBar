@@ -323,7 +323,7 @@ Complete porting of Swift CodexBar features to Rust Windows version:
 
 ---
 
-[Unreleased]: https://github.com/Finesssee/Win-CodexBar/compare/v1.2.10...HEAD
+[Unreleased]: https://github.com/junglesub/Win-CodexBar/compare/v1.2.10...HEAD
 [1.2.10]: https://github.com/Finesssee/Win-CodexBar/compare/v1.2.9...v1.2.10
 [1.2.9]: https://github.com/Finesssee/Win-CodexBar/compare/v1.2.8...v1.2.9
 [1.2.8]: https://github.com/Finesssee/Win-CodexBar/compare/v1.2.7...v1.2.8

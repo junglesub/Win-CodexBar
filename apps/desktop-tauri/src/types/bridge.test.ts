@@ -106,6 +106,8 @@ describe("Language type", () => {
       providerMetrics: {},
       floatBarEnabled: false,
       floatBarOpacity: 0.9,
+      floatBarBackgroundColor: "#FFFFFF",
+      floatBarBackgroundOpacity: 8,
       floatBarScale: 100,
       floatBarOrientation: "horizontal",
       floatBarStyle: "floating",

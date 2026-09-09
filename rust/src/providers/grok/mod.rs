@@ -33,7 +33,10 @@ impl GrokProvider {
             metadata: ProviderMetadata {
                 id: ProviderId::Grok,
                 display_name: "Grok",
-                session_label: "Credits",
+                // Preserve the personal fork's known-cadence fallback label.
+                // Billing snapshots still override this dynamically when a
+                // complete weekly or monthly cycle can be derived.
+                session_label: "Weekly",
                 weekly_label: "On-demand",
                 supports_opus: false,
                 supports_credits: false,
@@ -914,6 +917,12 @@ mod tests {
         );
         assert_eq!(result.usage.primary.window_minutes, None);
         assert_eq!(result.usage.primary_label, None);
+    }
+
+    #[test]
+    fn grok_metadata_uses_weekly_fallback_label() {
+        let provider = GrokProvider::new();
+        assert_eq!(provider.metadata().session_label, "Weekly");
     }
 
     #[test]

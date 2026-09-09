@@ -1,0 +1,187 @@
+name: Personal release
+
+on:
+  push:
+    branches: [personal]
+    paths-ignore:
+      - ".github/workflows/**"
+      - "**/*.md"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: personal-release
+  cancel-in-progress: false
+
+env:
+  CARGO_BUILD_TARGET: x86_64-pc-windows-msvc
+
+jobs:
+  build:
+    if: github.ref == 'refs/heads/personal'
+    runs-on: windows-2025
+    timeout-minutes: 120
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 10.18.1
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Restore release caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ${{ runner.temp }}\codexbar-release\cache\cargo-target
+            ${{ runner.temp }}\codexbar-release\cache\cargo-target-cli
+            ${{ runner.temp }}\codexbar-release\cache\pnpm-store
+            ${{ runner.temp }}\codexbar-release\cache\installer-deps
+          key: personal-release-${{ hashFiles('Cargo.lock', 'apps/desktop-tauri/pnpm-lock.yaml') }}
+          restore-keys: personal-release-
+
+      - name: Build installer and portable app
+        shell: powershell
+        run: |
+          ./scripts/windows-release-build.ps1 `
+            -Ref $env:GITHUB_SHA `
+            -RepoUrl $env:GITHUB_WORKSPACE `
+            -WorkRoot "$env:RUNNER_TEMP\codexbar-release"
+
+      - name: Store release assets
+        uses: actions/upload-artifact@v4
+        with:
+          name: personal-release-assets
+          path: ${{ runner.temp }}\codexbar-release\assets\CodexBar-*
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    needs: build
+    runs-on: windows-2025
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: personal-release-assets
+          path: release-assets
+
+      - name: Replace rolling personal release
+        shell: powershell
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          $assets = @(Get-ChildItem "$env:GITHUB_WORKSPACE\release-assets\CodexBar-*" -File |
+            Where-Object Name -Match '^(CodexBar-.+-(Setup|portable)\.exe)(\.sha256)?$' |
+            ForEach-Object FullName)
+          if ($assets.Count -ne 4) { throw "Expected four release assets, found $($assets.Count)." }
+
+          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not read the current personal branch head.' }
+          if ($personalHead -ne $env:GITHUB_SHA) {
+            Write-Host "Skipping stale build $env:GITHUB_SHA; personal is now $personalHead."
+            exit 0
+          }
+
+          $assetNames = @($assets | ForEach-Object { Split-Path -Leaf $_ })
+          $shortSha = $env:GITHUB_SHA.Substring(0, 7)
+          $title = "Personal build ($shortSha)"
+          $notes = "Automated build of the personal branch at commit $env:GITHUB_SHA."
+
+          $previousReleasesJson = gh release list --limit 100 --json tagName
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal release.' }
+          $previousReleases = $previousReleasesJson | ConvertFrom-Json
+          $hadPreviousRelease = @($previousReleases |
+            Where-Object tagName -EQ 'personal-latest').Count -gt 0
+
+          $personalHead = gh api "repos/$env:GITHUB_REPOSITORY/git/ref/heads/personal" --jq '.object.sha'
+          if ($LASTEXITCODE -ne 0) { throw 'Could not recheck the personal branch head.' }
+          if ($personalHead -ne $env:GITHUB_SHA) {
+            Write-Host "Skipping stale build $env:GITHUB_SHA; personal is now $personalHead."
+            exit 0
+          }
+
+          if ($hadPreviousRelease) {
+            $existingNames = @(gh release view personal-latest --json assets --jq '.assets[].name')
+            if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the existing personal release assets.' }
+            gh release upload personal-latest @assets --clobber
+            if ($LASTEXITCODE -ne 0) { throw 'Could not update the personal release assets.' }
+            foreach ($staleName in @($existingNames | Where-Object { $_ -notin $assetNames })) {
+              gh release delete-asset personal-latest $staleName --yes
+              if ($LASTEXITCODE -ne 0) { throw "Could not remove superseded asset $staleName." }
+            }
+          } else {
+            gh release create personal-latest @assets `
+              --target $env:GITHUB_SHA `
+              --title $title `
+              --notes $notes `
+              --prerelease `
+              --latest=false
+            if ($LASTEXITCODE -ne 0) { throw 'Could not create the personal release.' }
+          }
+
+          $publishedNames = @(gh release view personal-latest --json assets --jq '.assets[].name')
+          $assetDifference = @(Compare-Object $assetNames $publishedNames)
+          if ($LASTEXITCODE -ne 0 -or $publishedNames.Count -ne 4 -or $assetDifference.Count -ne 0) {
+            throw "Personal release contains $($publishedNames.Count) assets instead of the expected four."
+          }
+
+          gh release edit personal-latest `
+            --title $title `
+            --notes $notes `
+            --prerelease `
+            --latest=false
+          if ($LASTEXITCODE -ne 0) { throw 'Could not update the personal release metadata.' }
+
+          $previousTagRefsJson = gh api `
+            "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
+          if ($LASTEXITCODE -ne 0) { throw 'Could not inspect the previous personal tag.' }
+          $previousTagRefs = $previousTagRefsJson | ConvertFrom-Json
+          $previousTagSha = @($previousTagRefs |
+            Where-Object ref -EQ 'refs/tags/personal-latest' |
+            ForEach-Object { $_.object.sha })[0]
+          $hadPreviousTag = -not [string]::IsNullOrWhiteSpace("$previousTagSha")
+          if ($hadPreviousTag) {
+            gh api --method PATCH `
+              "repos/$env:GITHUB_REPOSITORY/git/refs/tags/personal-latest" `
+              -f "sha=$env:GITHUB_SHA" `
+              -F force=true *> $null
+          } else {
+            gh api --method POST `
+              "repos/$env:GITHUB_REPOSITORY/git/refs" `
+              -f 'ref=refs/tags/personal-latest' `
+              -f "sha=$env:GITHUB_SHA" *> $null
+          }
+          $tagMoved = $LASTEXITCODE -eq 0
+          if (-not $tagMoved) {
+            $observedTagRefsJson = gh api `
+              "repos/$env:GITHUB_REPOSITORY/git/matching-refs/tags/personal-latest"
+            if ($LASTEXITCODE -eq 0) {
+              $observedTagRefs = $observedTagRefsJson | ConvertFrom-Json
+              $observedTagSha = @($observedTagRefs |
+                Where-Object ref -EQ 'refs/tags/personal-latest' |
+                ForEach-Object { $_.object.sha })[0]
+              $tagMoved = $observedTagSha -eq $env:GITHUB_SHA
+            }
+          }
+          if (-not $tagMoved) {
+            throw 'Could not move the personal release tag.'
+          }
+
+          Write-Host "Published personal-latest at $env:GITHUB_SHA."
+          exit 0

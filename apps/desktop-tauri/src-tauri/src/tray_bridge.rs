@@ -834,6 +834,12 @@ mod tests {
     }
 
     #[test]
+    fn check_for_updates_menu_id_resolves_to_action() {
+        let action = resolve_menu_action("check_for_updates").expect("check_for_updates action");
+        assert!(matches!(action, MenuAction::CheckForUpdates));
+    }
+
+    #[test]
     fn toggle_float_bar_routes_to_toggle_action() {
         let action = resolve_menu_action("toggle_float_bar").expect("float bar action");
         assert!(matches!(action, MenuAction::ToggleFloatBar));

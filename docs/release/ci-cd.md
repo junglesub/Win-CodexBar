@@ -1,140 +1,70 @@
-# Win-CodexBar CI and release delivery
+# Personal branch release delivery
 
-## Responsibilities
+## Automated release
 
-**CircleCI** (`.circleci/config.yml`) is now the hosted PR/push validation
-path and the hosted release path. The `pr-check` workflow (added 2026-08) runs
-the format, clippy, Rust test, frontend test, and frontend build checks on
-hosted CircleCI Windows. It mirrors the GitHub workflow's trigger contract:
-pull requests and pushes to `main`/`master` run the checks (delegated to
-`scripts/local-check.ps1 -Slice ci`); every `main`/`master` push runs the
-full checks — the docs-only skip never applies to them. Docs-only PRs
-(`docs/**`, `**/*.md`, `CONTEXT.md`, `.github/CI.md`) and other branch
-pushes skip via early gates that log their reason and then call
-`circleci-agent step halt`, stopping the job before any cache or toolchain
-spend (docs-only detection fails open when the base revision cannot be
-determined). The release-tag pattern (`vX.Y.Z`) is
-ignored so it never double-runs with the release workflow. The former
-Blacksmith GitHub Actions gate (`.github/workflows/pr-check.yml`) is retired
-for this repo — the Blacksmith pool is exhausted — and the workflow is now a
-manual-dispatch-only fallback (`on: workflow_dispatch` only; no automatic
-push/PR scheduling) kept for Blacksmith diagnostics.
+`.github/workflows/personal-release.yml` runs on every push to `personal` and
+can also be started manually from that branch. The workflow runs on GitHub's
+hosted Windows 2025 image. Its build job has `contents: read`; only the
+separate publish job has `contents: write`.
 
-**Fork-PR coverage note:** CircleCI does not build pull requests from forks
-by default (unlike GitHub Actions). The GitHub App integration does not build
-fork-PR pipelines, and there is no Advanced setting that can enable them;
-external fork PRs are therefore **not covered** by the CircleCI gate. The
-manual fallback for forks is needed: an external contributor's changes must
-be pulled onto a same-repo branch (or the fork changes committed to a
-maintainer branch) so a CircleCI branch pipeline runs the checks. When those
-pipelines run, CircleCI withholds project environment variables from
-untrusted builds by default (so `CI_BUDGET_MODE` arrives unset → `normal` →
-checks run), which is the same withholding the `CI_BUDGET_MODE` note in
-`CONTEXT.md` relies on. Tradeoff: bounded OSS credit spend, but external
-contributors get no direct hosted Windows validation of their own PRs.
+The build job checks out the triggering commit without persisting credentials,
+restores Cargo, pnpm, and installer dependency caches, then calls the existing
+`scripts/windows-release-build.ps1` with the immutable `GITHUB_SHA`. The four
+outputs cross into the publish job through a one-day workflow artifact:
 
-The `release` workflow remains filtered to the canonical
-`nesszer/Win-CodexBar` project and exact protected tags `vX.Y.Z`; branch and
-pull-request pipelines cannot enter it. The CircleCI Windows release build is
-credential-free. Only its explicit approval-gated publisher gets the
-restricted `GH_TOKEN` context.
+- `CodexBar-X.Y.Z-Setup.exe`
+- `CodexBar-X.Y.Z-Setup.exe.sha256`
+- `CodexBar-X.Y.Z-portable.exe`
+- `CodexBar-X.Y.Z-portable.exe.sha256`
 
-## CircleCI release flow
+After all four assets exist, the publish job verifies that `GITHUB_SHA` is
+still the head of `personal`. The workflow artifact is the staging layer. On
+the first run the publisher creates `personal-latest`; later runs replace its
+assets in place, remove assets from older versions, and verify the exact
+four-file set. It then updates the title and notes and moves the Git tag to the
+new commit. Runs are serialized, and stale reruns skip publication.
 
-1. A maintainer creates a protected canonical tag such as `v0.48.0` on `main`.
-   CircleCI's workflow filter and `scripts/release-preflight.ps1` both reject
-   branches, PRs, non-semver tags, non-canonical remotes, tag/SHA mismatch,
-   and commits whose tag is not reachable from protected `origin/main`.
-2. The build job provisions/asserts Node 24.x via the `OpenJS.NodeJS.LTS`
-   winget package, pnpm 11.24.0, the Windows MSVC Rust target, Git, and Inno
-   Setup 6. It validates every committed project version against the tag.
-3. The build invokes `scripts/release-doctor.ps1 -SkipGitHub`, then
-   `scripts/windows-release-build.ps1 -Ref <full-SHA> -SmokeInstall` with a
-   fresh temporary `WorkRoot`. It never receives `GH_TOKEN` and never uploads.
-4. The job emits exactly these six publishable assets:
-   `CodexBar-X.Y.Z-Setup.exe`, its `.sha256` sidecar,
-   `CodexBar-X.Y.Z-portable.exe`, its `.sha256` sidecar,
-   `CodexBarCLI-vX.Y.Z-windows-x64.zip`, and its `.sha256` sidecar. It also
-   emits `release-manifest.json` (tag, commit, version, sizes, and hashes)
-   and logs,
-   then persists/stores the bundle as CircleCI workspace/artifacts.
-5. A human must approve the `release-approval` job after reviewing the
-   manifest and artifact logs.
-6. The `release-publish` job receives `GH_TOKEN` only from the restricted
-   `github-release-publisher` context. `scripts/publish-github-release.ps1`
-   creates a draft release if absent, or uses an existing draft. It compares
-   every same-name asset by SHA-256, skips exact matches, fails on mismatch,
-   and uploads only missing assets. It never clobbers and never changes a
-   draft to a final release.
-7. A maintainer publishes the draft manually in GitHub after any final release
-   notes/review. Winget follows only after the immutable installer URL and
-   digest are stable.
+The rolling prerelease is intentionally separate from canonical `vX.Y.Z`
+releases and Winget. Do not use `personal-latest` as a Winget source because
+its assets and tag are mutable.
 
-## Signing status
+The Windows publisher parses `gh` JSON with PowerShell's `ConvertFrom-Json`.
+Keep quoted string filters out of `gh --jq` arguments: Windows PowerShell can
+strip those quotes before `gh` receives them. Assign parsed JSON arrays before
+filtering them because Windows PowerShell 5.1 does not enumerate an array
+emitted directly by `ConvertFrom-Json` in this pipeline shape.
 
-The `CodexBarCLI-vX.Y.Z-windows-x64.zip` asset is currently **unsigned**. The
-SignPath workflow's upload glob (`CodexBar-*.exe`) does not include it.
-Revisit when SignPath wiring for the CLI zip lands.
+## Repository settings
 
-## Local checks
+GitHub Actions must be allowed to create releases with `GITHUB_TOKEN`. In
+**Settings → Actions → General → Workflow permissions**, select
+**Read and write permissions**. No personal access token or repository secret
+is required.
 
-Run the focused, dependency-free helper tests and prerequisite assertions:
+The workflow only publishes when its ref is `refs/heads/personal`; selecting a
+different branch for `workflow_dispatch` safely skips the job.
+
+Run the dependency-free release checks locally with:
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release-pipeline.tests.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install-release-prerequisites.ps1 -AssertOnly
 ```
 
-The build/preflight commands used by CircleCI can be exercised with a full SHA:
+## Retry behavior
+
+Rerunning the current workflow rebuilds the same commit and repairs the rolling
+prerelease idempotently. A stale rerun does not publish. A failed build leaves
+the previous release untouched because publication begins only after all assets
+are present. GitHub does not provide an atomic whole-release asset swap, so an
+upload failure can leave a partially updated asset set; rerun the workflow to
+replace and verify all four files.
+
+For a local installer build, use:
 
 ```powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release-preflight.ps1 -Tag vX.Y.Z -Sha <full-40-char-sha>
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\circleci-release-build.ps1 -Tag vX.Y.Z -Sha <full-40-char-sha>
+$commit = git rev-parse HEAD
+./scripts/windows-release-build.ps1 -Ref $commit -RepoUrl (git rev-parse --show-toplevel)
 ```
 
-The smoke test covers install, expected version validation, and uninstall of
-the generated Inno Setup installer on the real Windows runner. It does not
-cover all tray, WebView2, provider, or CUA/UI behavior.
-
-## Setup that requires administrators
-
-The repository cannot create external settings. Configure the CircleCI project
-for `nesszer/Win-CodexBar`, enable `.circleci/config.yml`, and create a
-project-restricted context named `github-release-publisher`. Store `GH_TOKEN`
-there only, using a fine-grained GitHub token scoped to this repository with
-Contents read/write for release APIs. Do not grant Workflows permission.
-Add `CI_BUDGET_MODE` as a CircleCI project environment variable (Project
-Settings → Environment Variables) so the `pr-check` budget guard can read it;
-unset/empty is treated as `normal`.
-
-Protect `main`, require the hosted CircleCI `pr-check` for branch/PR
-validation, and protect the `v*`
-tag namespace so only authorized maintainers can create canonical `vX.Y.Z` tags.
-Configure CircleCI credit/spend alerts and notifications as appropriate for
-the organization. These project, context, token, ruleset, and billing changes
-are intentionally manual.
-
-## Cost, retry, and rollback
-
-The hosted PR check now runs on CircleCI Windows: its thin-slice Windows
-credits recur on PRs and `main`/`master` pushes — every `main`/`master` push
-runs the full checks, while other branch pushes and docs-only PRs skip
-before spending — alongside the protected release tag
-path. The repository is public, so the PR check spends the Free Plan
-open-source allowance (open-source builds are not subject to the Free Plan's
-30,000-credit personal block). Fork PRs remain uncovered — the GitHub App does
-not build fork-PR pipelines and a manual same-repo branch fallback is needed
-(see the fork-PR coverage note above). Blacksmith is retired for
-this repo and no longer bills recurring PR cost. Windows executor rates
-depend on the CircleCI plan, so set an organization credit alert before
-enabling the PR check or releases.
-
-Rerunning a failed build creates a new temporary WorkRoot and remains pinned to
-the tag's full SHA. If a publish job partially uploads, rerun it after approval:
-matching assets are skipped and missing assets are added. A same-name digest
-mismatch fails without replacement. If a final release already exists, the
-publisher refuses to touch it. Rollback is a deliberate GitHub administrator
-action; replacement artifacts require a new reviewed tag/SHA, not an overwrite.
-
-There is no upload switch on `windows-release-build.ps1`; all publication goes
-through the approval-gated no-clobber publisher.
+The automated personal build does not run installer smoke tests. Use
+`-SmokeInstall` locally before promoting a commit to a canonical release.

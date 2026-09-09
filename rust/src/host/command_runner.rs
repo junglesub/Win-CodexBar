@@ -610,6 +610,7 @@ mod tests {
     fn large_capture_is_not_truncated() {
         let runner = CommandRunner::new();
         let options = CommandOptions {
+            timeout: Duration::from_secs(60),
             initial_delay: Duration::ZERO,
             extra_args: vec![
                 "-NoProfile".to_string(),

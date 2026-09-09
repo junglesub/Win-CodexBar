@@ -272,16 +272,10 @@ fn parse_claude_hour(
         return None;
     }
     match meridiem.map(str::to_ascii_lowercase).as_deref() {
-        Some("am") if (1..=12).contains(&hour) => {
-            if hour == 12 {
-                hour = 0;
-            }
-        }
-        Some("pm") if (1..=12).contains(&hour) => {
-            if hour != 12 {
-                hour += 12;
-            }
-        }
+        Some("am") if hour == 12 => hour = 0,
+        Some("am") if (1..12).contains(&hour) => {}
+        Some("pm") if hour == 12 => {}
+        Some("pm") if (1..12).contains(&hour) => hour += 12,
         Some(_) => return None,
         None if hour > 23 => return None,
         None => {}
