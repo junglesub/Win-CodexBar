@@ -21,6 +21,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     alibabaTokenPlanRegion: "cn",
     weeklyProgressWorkDays: null,
     floatBarShowResetInline: false,
+    floatBarHidePercentWhenExhausted: false,
     floatBarDarkText: false,
     floatBarClickThrough: false,
     ...overrides,
@@ -28,12 +29,12 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
 }
 
 describe("FloatBar settings", () => {
-  it("renders one cost toggle", () => {
+  it("renders the hide-percent-when-exhausted toggle", () => {
     render(
       <FloatBarSettingsSection settings={settings()} saving={false} set={vi.fn()} />,
     );
 
-    expect(screen.getAllByText("FloatBarShowCost")).toHaveLength(1);
+    expect(screen.getAllByText("FloatBarHidePercentWhenExhausted")).toHaveLength(1);
   });
 
   it("sends an uppercased color patch on change", () => {

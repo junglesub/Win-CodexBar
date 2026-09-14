@@ -29,7 +29,12 @@ order:
 - Missing windows show `—`; providers without classified windows use one
   available fallback metric.
 - Each value is colored independently: warning at 75%, critical at 90%.
-- Optional reset countdowns show the largest remaining time unit.
+- Optional reset countdowns append the largest remaining time unit
+  (`100% 4d`).
+- Optional exhausted display hides the percent and shows only the detailed
+  remaining time (`100% 4d` → `4d 12h`, `100% 3h` → `3h 12m`).
+  Toggle in Settings → Menu → Floating Bar ("Hide Percent When Exhausted",
+  `float_bar_hide_percent_when_exhausted`).
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

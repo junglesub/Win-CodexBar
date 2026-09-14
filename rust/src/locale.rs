@@ -1032,6 +1032,8 @@ locale_keys! {
     FloatBarSizeAriaLabel,
     FloatBarShowResetInline,
     FloatBarShowResetInlineHelper,
+    FloatBarHidePercentWhenExhausted,
+    FloatBarHidePercentWhenExhaustedHelper,
     FloatBarInvertColors,
     FloatBarInvertColorsHelper,
     FloatBarClickThrough,

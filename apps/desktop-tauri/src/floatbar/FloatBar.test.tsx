@@ -218,6 +218,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarProviderIds: [],
     floatBarDarkText: false,
     floatBarShowResetInline: false,
+    floatBarHidePercentWhenExhausted: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
     alibabaTokenPlanRegion: "cn",
@@ -1443,6 +1444,70 @@ describe("FloatBar", () => {
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
       ).toEqual(["20%", "41%", "—"]);
     });
+  });
+
+  it("shows only the detailed remaining time for exhausted slots when hide-percent is on", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        exhausted: true,
+        // 4d 12h in the future → detailed form, not the single-unit `4d`.
+        resetsAt: "2026-08-22T12:00:00Z",
+        primaryWindowMinutes: 300,
+        secondary: {
+          used: 100,
+          exhausted: true,
+          windowMinutes: 10_080,
+          resetsAt: "2026-08-18T03:12:00Z",
+        },
+        tertiary: {
+          used: 60,
+          windowMinutes: 43_200,
+          resetsAt: "2026-08-19T12:00:00Z",
+        },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarHidePercentWhenExhausted: true }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ floatBarHidePercentWhenExhausted: true }),
+    );
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual(["4d 12h", "3h 12m", "60%"]);
+    // Tooltip/accessibility keeps the full percentage detail.
+    const pillLabel = container.querySelector(".floatbar__pill")?.getAttribute("aria-label");
+    expect(pillLabel).toMatch(/5h: 100% used/);
+    expect(pillLabel).toMatch(/weekly: 100% used/);
+  });
+
+  it("keeps the exhausted percentage when hide-percent has no future reset", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        exhausted: true,
+        resetsAt: null,
+        primaryWindowMinutes: 300,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarHidePercentWhenExhausted: true }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ floatBarHidePercentWhenExhausted: true }),
+    );
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual(["100%", "—", "—"]);
   });
 
   it("polls refreshProvidersIfStale on the configured interval", async () => {

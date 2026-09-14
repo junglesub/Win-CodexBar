@@ -101,6 +101,7 @@ const settings: SettingsSnapshot = {
   floatBarProviderIds: [],
   floatBarDarkText: false,
   floatBarShowResetInline: false,
+  floatBarHidePercentWhenExhausted: false,
   floatBarShowCost: false,
   claudeDailyRoutinesUsageVisible: true,
   claudeAllowReadingClaudeCodeCredentials: false,

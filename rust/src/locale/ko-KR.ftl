@@ -679,3 +679,5 @@ ProviderAccentColorInvalid = 잘못된 16진수 색상입니다. #RRGGBB 형식(
 FloatBarBackgroundColor = 배경색
 FloatBarBackgroundOpacity = 배경 불투명도
 FloatBarResetBackground = 배경 기본값 복원
+FloatBarHidePercentWhenExhausted = 소진 시 퍼센트 숨기기
+FloatBarHidePercentWhenExhaustedHelper = 할당량이 소진되면 100% 대신 남은 시간만 자세히 표시합니다 (예: 4d 12h).

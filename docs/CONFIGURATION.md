@@ -92,6 +92,22 @@ Both background keys fall back to their defaults when absent from an existing
 are normalized/clamped server-side. Reset in Settings writes both defaults
 (`#FFFFFF`, `8`) in a single patch.
 
+## Floating Bar exhausted display (settings.json)
+
+When `float_bar_hide_percent_when_exhausted` is `true` (default `false`), an
+exhausted Float Bar slot (`isExhausted` with a parseable future `resetsAt`)
+shows only the detailed two-unit remaining time instead of the percentage:
+
+| Before | After |
+|--------|-------|
+| `100% 4d` | `4d 12h` |
+| `100% 3h` | `3h 12m` |
+
+5h / weekly / monthly slots share the rule. Without a usable future reset the
+percentage is kept so the slot never goes blank. The tooltip still shows the
+full `100% used` percentage and localized reset text. Independent of
+`float_bar_show_reset_inline` (the existing single-unit `100% 4d` inline mode).
+
 ## Source mode
 
 CLI `--source` values on this port (see `codexbar usage --help`): `auto`, `web`, `cli`, `oauth`.

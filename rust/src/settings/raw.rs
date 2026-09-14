@@ -164,6 +164,8 @@ pub(super) struct RawSettings {
     #[serde(default)]
     float_bar_show_reset_inline: bool,
     #[serde(default)]
+    float_bar_hide_percent_when_exhausted: bool,
+    #[serde(default)]
     float_bar_show_cost: bool,
     #[serde(default = "default_true")]
     promote_tray_icon: bool,
@@ -278,6 +280,7 @@ impl Default for RawSettings {
             float_bar_provider_ids: s.float_bar_provider_ids,
             float_bar_dark_text: s.float_bar_dark_text,
             float_bar_show_reset_inline: s.float_bar_show_reset_inline,
+            float_bar_hide_percent_when_exhausted: s.float_bar_hide_percent_when_exhausted,
             float_bar_show_cost: s.float_bar_show_cost,
             promote_tray_icon: s.promote_tray_icon,
             claude_daily_routines_usage_visible: s.claude_daily_routines_usage_visible,
@@ -585,6 +588,7 @@ impl From<RawSettings> for Settings {
             float_bar_provider_ids: raw.float_bar_provider_ids,
             float_bar_dark_text: raw.float_bar_dark_text,
             float_bar_show_reset_inline: raw.float_bar_show_reset_inline,
+            float_bar_hide_percent_when_exhausted: raw.float_bar_hide_percent_when_exhausted,
             float_bar_show_cost: raw.float_bar_show_cost,
             promote_tray_icon: raw.promote_tray_icon,
             claude_daily_routines_usage_visible: raw.claude_daily_routines_usage_visible,

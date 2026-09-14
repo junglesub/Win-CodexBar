@@ -139,6 +139,7 @@ pub struct SettingsPatch {
     pub provider_ids: Option<Vec<String>>,
     pub dark_text: Option<bool>,
     pub show_reset_inline: Option<bool>,
+    pub hide_percent_when_exhausted: Option<bool>,
     pub show_cost: Option<bool>,
 }
 
@@ -155,6 +156,7 @@ impl SettingsPatch {
             && self.provider_ids.is_none()
             && self.dark_text.is_none()
             && self.show_reset_inline.is_none()
+            && self.hide_percent_when_exhausted.is_none()
             && self.show_cost.is_none()
     }
 
@@ -195,6 +197,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.show_reset_inline {
             settings.float_bar_show_reset_inline = v;
+        }
+        if let Some(v) = self.hide_percent_when_exhausted {
+            settings.float_bar_hide_percent_when_exhausted = v;
         }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
@@ -242,6 +247,7 @@ mod tests {
             float_bar_style: "floating".into(),
             float_bar_dark_text: false,
             float_bar_show_reset_inline: false,
+            float_bar_hide_percent_when_exhausted: false,
             ..Settings::default()
         };
 
@@ -252,6 +258,7 @@ mod tests {
             style: Some("taskbar".into()),
             dark_text: Some(true),
             show_reset_inline: Some(true),
+            hide_percent_when_exhausted: Some(true),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
@@ -261,6 +268,7 @@ mod tests {
         assert_eq!(s.float_bar_style, "taskbar");
         assert!(s.float_bar_dark_text);
         assert!(s.float_bar_show_reset_inline);
+        assert!(s.float_bar_hide_percent_when_exhausted);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -321,6 +329,10 @@ mod tests {
         assert_eq!(
             s.float_bar_show_reset_inline,
             original.float_bar_show_reset_inline
+        );
+        assert_eq!(
+            s.float_bar_hide_percent_when_exhausted,
+            original.float_bar_hide_percent_when_exhausted
         );
         assert_eq!(
             s.float_bar_background_color,

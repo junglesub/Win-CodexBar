@@ -246,6 +246,12 @@ export interface SettingsSnapshot {
   /** When true, render the next primary reset inline in each provider pill. */
   /** When true, render the selected metric's next reset inline in each provider pill. */
   floatBarShowResetInline: boolean;
+  /**
+   * When true, an exhausted Float Bar slot with a future reset shows only the
+   * detailed two-unit countdown (e.g. `4d 12h`) instead of `100% 4d`.
+   * Independent of `floatBarShowResetInline`.
+   */
+  floatBarHidePercentWhenExhausted: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
@@ -338,6 +344,7 @@ export interface SettingsUpdate {
   floatBarProviderIds?: string[];
   floatBarDarkText?: boolean;
   floatBarShowResetInline?: boolean;
+  floatBarHidePercentWhenExhausted?: boolean;
   floatBarShowCost?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;

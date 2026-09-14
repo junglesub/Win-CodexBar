@@ -312,6 +312,15 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_show_reset_inline: bool,
 
+    /// When true, an exhausted Float Bar slot with a future reset shows only
+    /// the detailed two-unit countdown (e.g. `4d 12h`, `3h 12m`) instead of
+    /// `100% 4d`. Applies to 5h/weekly/monthly slots and the cadence-less
+    /// fallback. Requires `is_exhausted` + a parseable future `resetsAt`;
+    /// otherwise the percentage is kept. Independent of
+    /// [`Self::float_bar_show_reset_inline`].
+    #[serde(default)]
+    pub float_bar_hide_percent_when_exhausted: bool,
+
     /// When true, show local cost summaries in the floating bar.
     #[serde(default)]
     pub float_bar_show_cost: bool,
@@ -595,6 +604,7 @@ impl Default for Settings {
             float_bar_provider_ids: Vec::new(),
             float_bar_dark_text: false,
             float_bar_show_reset_inline: false,
+            float_bar_hide_percent_when_exhausted: false,
             float_bar_show_cost: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,

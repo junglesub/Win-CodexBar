@@ -214,6 +214,17 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarHidePercentWhenExhausted")}
+          description={t("FloatBarHidePercentWhenExhaustedHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarHidePercentWhenExhausted}
+            disabled={saving || !settings.floatBarEnabled}
+            onChange={(v) => set({ floatBarHidePercentWhenExhausted: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarInvertColors")}
           description={t("FloatBarInvertColorsHelper")}
           leading
