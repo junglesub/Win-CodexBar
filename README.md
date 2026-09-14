@@ -38,6 +38,9 @@ order:
 - Optional clock style shows that reset time as `M/D HH:MM` instead of a
   countdown — `HH:MM` only when the reset falls on the same day
   ("Show Reset as Clock Time", `float_bar_exhausted_clock_time`).
+- Optional weekday style replaces the date with `Mon`, `Tue`, … while the
+  reset falls within the coming week; beyond that the date is kept
+  ("Show Weekday Instead of Date", `float_bar_exhausted_weekday_time`).
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

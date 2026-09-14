@@ -1036,6 +1036,8 @@ locale_keys! {
     FloatBarHidePercentWhenExhaustedHelper,
     FloatBarExhaustedClockTime,
     FloatBarExhaustedClockTimeHelper,
+    FloatBarExhaustedWeekdayTime,
+    FloatBarExhaustedWeekdayTimeHelper,
     FloatBarInvertColors,
     FloatBarInvertColorsHelper,
     FloatBarClickThrough,

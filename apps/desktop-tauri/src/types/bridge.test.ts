@@ -117,6 +117,7 @@ describe("Language type", () => {
       floatBarShowResetInline: false,
       floatBarHidePercentWhenExhausted: false,
       floatBarExhaustedClockTime: false,
+      floatBarExhaustedWeekdayTime: false,
       floatBarShowCost: false,
       claudeDailyRoutinesUsageVisible: true,
       claudeAllowReadingClaudeCodeCredentials: false,

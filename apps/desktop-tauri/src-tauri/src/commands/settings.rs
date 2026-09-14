@@ -72,6 +72,7 @@ pub struct SettingsUpdate {
     pub float_bar_show_reset_inline: Option<bool>,
     pub float_bar_hide_percent_when_exhausted: Option<bool>,
     pub float_bar_exhausted_clock_time: Option<bool>,
+    pub float_bar_exhausted_weekday_time: Option<bool>,
     pub float_bar_show_cost: Option<bool>,
     pub promote_tray_icon: Option<bool>,
     pub claude_daily_routines_usage_visible: Option<bool>,
@@ -385,6 +386,7 @@ impl SettingsUpdate {
             show_reset_inline: self.float_bar_show_reset_inline,
             hide_percent_when_exhausted: self.float_bar_hide_percent_when_exhausted,
             exhausted_clock_time: self.float_bar_exhausted_clock_time,
+            exhausted_weekday_time: self.float_bar_exhausted_weekday_time,
             show_cost: self.float_bar_show_cost,
         }
     }

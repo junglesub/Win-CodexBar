@@ -241,6 +241,22 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarExhaustedWeekdayTime")}
+          description={t("FloatBarExhaustedWeekdayTimeHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarExhaustedWeekdayTime}
+            disabled={
+              saving ||
+              !settings.floatBarEnabled ||
+              !settings.floatBarExhaustedClockTime
+            }
+            ariaLabel={t("FloatBarExhaustedWeekdayTime")}
+            onChange={(v) => set({ floatBarExhaustedWeekdayTime: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarInvertColors")}
           description={t("FloatBarInvertColorsHelper")}
           leading

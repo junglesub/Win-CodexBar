@@ -168,6 +168,8 @@ pub(super) struct RawSettings {
     #[serde(default)]
     float_bar_exhausted_clock_time: bool,
     #[serde(default)]
+    float_bar_exhausted_weekday_time: bool,
+    #[serde(default)]
     float_bar_show_cost: bool,
     #[serde(default = "default_true")]
     promote_tray_icon: bool,
@@ -284,6 +286,7 @@ impl Default for RawSettings {
             float_bar_show_reset_inline: s.float_bar_show_reset_inline,
             float_bar_hide_percent_when_exhausted: s.float_bar_hide_percent_when_exhausted,
             float_bar_exhausted_clock_time: s.float_bar_exhausted_clock_time,
+            float_bar_exhausted_weekday_time: s.float_bar_exhausted_weekday_time,
             float_bar_show_cost: s.float_bar_show_cost,
             promote_tray_icon: s.promote_tray_icon,
             claude_daily_routines_usage_visible: s.claude_daily_routines_usage_visible,
@@ -593,6 +596,7 @@ impl From<RawSettings> for Settings {
             float_bar_show_reset_inline: raw.float_bar_show_reset_inline,
             float_bar_hide_percent_when_exhausted: raw.float_bar_hide_percent_when_exhausted,
             float_bar_exhausted_clock_time: raw.float_bar_exhausted_clock_time,
+            float_bar_exhausted_weekday_time: raw.float_bar_exhausted_weekday_time,
             float_bar_show_cost: raw.float_bar_show_cost,
             promote_tray_icon: raw.promote_tray_icon,
             claude_daily_routines_usage_visible: raw.claude_daily_routines_usage_visible,

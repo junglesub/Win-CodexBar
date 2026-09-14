@@ -328,6 +328,14 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_exhausted_clock_time: bool,
 
+    /// When true, the exhausted clock-style time replaces the `M/D` date with
+    /// a weekday abbreviation (`Mon 21:00`) while the reset falls within the
+    /// coming week (tomorrow..+6 days, one occurrence per weekday). Beyond
+    /// that — including the same weekday next week — the `M/D` date is kept.
+    /// No effect unless [`Self::float_bar_exhausted_clock_time`] is also true.
+    #[serde(default)]
+    pub float_bar_exhausted_weekday_time: bool,
+
     /// When true, show local cost summaries in the floating bar.
     #[serde(default)]
     pub float_bar_show_cost: bool,
@@ -613,6 +621,7 @@ impl Default for Settings {
             float_bar_show_reset_inline: false,
             float_bar_hide_percent_when_exhausted: false,
             float_bar_exhausted_clock_time: false,
+            float_bar_exhausted_weekday_time: false,
             float_bar_show_cost: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,

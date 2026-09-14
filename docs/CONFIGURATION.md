@@ -119,6 +119,20 @@ hidden time renders as a local absolute clock instead of the countdown:
 Times are zero-padded 24-hour local clock values. The toggle is disabled in
 Settings until `float_bar_hide_percent_when_exhausted` is on.
 
+When `float_bar_exhausted_weekday_time` is also `true` (default `false`), a
+reset that falls within the coming week (tomorrow..=+6 local calendar days)
+renders its weekday abbreviation instead of the date:
+
+| Reset date | Display |
+|------------|---------|
+| today          | `HH:MM` (unchanged) |
+| within 7 days  | `Mon 21:00`, `Tue 21:00`, … |
+| +7 days or more | `M/D HH:MM` (unchanged) |
+
+The window is capped so each weekday appears at most once — a reset exactly
+one week out (same weekday) or later keeps the `M/D` date. This option has no
+effect unless `float_bar_exhausted_clock_time` is on.
+
 ## Source mode
 
 CLI `--source` values on this port (see `codexbar usage --help`): `auto`, `web`, `cli`, `oauth`.

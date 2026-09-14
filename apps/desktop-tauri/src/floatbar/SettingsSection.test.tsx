@@ -23,6 +23,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarShowResetInline: false,
     floatBarHidePercentWhenExhausted: false,
     floatBarExhaustedClockTime: false,
+    floatBarExhaustedWeekdayTime: false,
     floatBarDarkText: false,
     floatBarClickThrough: false,
     ...overrides,
@@ -44,6 +45,36 @@ describe("FloatBar settings", () => {
     );
 
     expect(screen.getByLabelText("FloatBarExhaustedClockTime")).toBeDisabled();
+  });
+
+  it("disables the weekday toggle until clock style is on", () => {
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarHidePercentWhenExhausted: true })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarExhaustedWeekdayTime")).toBeDisabled();
+  });
+
+  it("persists the weekday toggle once clock style is on", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection
+        settings={settings({
+          floatBarHidePercentWhenExhausted: true,
+          floatBarExhaustedClockTime: true,
+        })}
+        saving={false}
+        set={set}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarExhaustedWeekdayTime")).toBeEnabled();
+    fireEvent.click(screen.getByLabelText("FloatBarExhaustedWeekdayTime"));
+    expect(set).toHaveBeenCalledWith({ floatBarExhaustedWeekdayTime: true });
   });
 
   it("persists the clock-style toggle once hide-percent is on", () => {

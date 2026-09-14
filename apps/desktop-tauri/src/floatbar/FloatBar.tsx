@@ -229,12 +229,21 @@ function compactDetailedResetTime(resetsAt: string): string | null {
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
+const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function startOfLocalDayMillis(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
 /**
  * Absolute local clock rendering for the exhausted hide-percent mode.
  * Same calendar day renders `HH:MM` (zero-padded 24-hour); any other day
- * renders `M/D HH:MM`. Returns null for missing/invalid/expired timestamps.
+ * renders `M/D HH:MM`. When `useWeekday` is set and the reset falls within
+ * the coming week (1..=6 local calendar days ahead — never the same weekday
+ * twice), the date is replaced by its weekday abbreviation (`Mon HH:MM`).
+ * Returns null for missing/invalid/expired timestamps.
  */
-function clockResetTime(resetsAt: string): string | null {
+function clockResetTime(resetsAt: string, useWeekday: boolean): string | null {
   const target = Date.parse(resetsAt);
   if (Number.isNaN(target)) return null;
   if (target <= Date.now()) return null;
@@ -247,7 +256,14 @@ function clockResetTime(resetsAt: string): string | null {
   const hh = String(date.getHours()).padStart(2, "0");
   const mm = String(date.getMinutes()).padStart(2, "0");
   const clock = `${hh}:${mm}`;
-  return sameDay ? clock : `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
+  if (sameDay) return clock;
+  const dayDiff = Math.round(
+    (startOfLocalDayMillis(date) - startOfLocalDayMillis(now)) / 86_400_000,
+  );
+  if (useWeekday && dayDiff >= 1 && dayDiff <= 6) {
+    return `${WEEKDAYS_SHORT[date.getDay()]} ${clock}`;
+  }
+  return `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
 }
 
 type FloatBarCostSummary = {
@@ -350,6 +366,7 @@ function UsageMetric({
   showResetInline,
   hidePercentWhenExhausted,
   exhaustedClockTime,
+  exhaustedWeekdayTime,
   highUsage,
   critUsage,
   label,
@@ -359,6 +376,7 @@ function UsageMetric({
   showResetInline: boolean;
   hidePercentWhenExhausted: boolean;
   exhaustedClockTime: boolean;
+  exhaustedWeekdayTime: boolean;
   highUsage: number;
   critUsage: number;
   label?: string;
@@ -371,7 +389,9 @@ function UsageMetric({
   const detailedReset =
     hasFutureReset && rateWindow?.resetsAt ? compactDetailedResetTime(rateWindow.resetsAt) : null;
   const clockReset =
-    hasFutureReset && rateWindow?.resetsAt ? clockResetTime(rateWindow.resetsAt) : null;
+    hasFutureReset && rateWindow?.resetsAt
+      ? clockResetTime(rateWindow.resetsAt, exhaustedWeekdayTime)
+      : null;
   // Hide-percent mode: exhausted slots with a live reset show only the
   // remaining time — a relative two-unit countdown (`4d 12h`) or, when the
   // clock-style option is on, a local absolute time (`9/18 17:30`, `17:30`
@@ -429,6 +449,7 @@ function ProviderPill({
   showResetInline,
   hidePercentWhenExhausted,
   exhaustedClockTime,
+  exhaustedWeekdayTime,
   resetRelative,
   usedSuffix,
   preference,
@@ -442,6 +463,7 @@ function ProviderPill({
   showResetInline: boolean;
   hidePercentWhenExhausted: boolean;
   exhaustedClockTime: boolean;
+  exhaustedWeekdayTime: boolean;
   resetRelative: boolean;
   usedSuffix: string;
   preference: MetricPreference | undefined;
@@ -527,6 +549,7 @@ function ProviderPill({
             showResetInline={showResetInline}
             hidePercentWhenExhausted={hidePercentWhenExhausted}
             exhaustedClockTime={exhaustedClockTime}
+            exhaustedWeekdayTime={exhaustedWeekdayTime}
             highUsage={highUsage}
             critUsage={critUsage}
             label={fallbackLabel}
@@ -541,6 +564,7 @@ function ProviderPill({
                 showResetInline={showResetInline}
                 hidePercentWhenExhausted={hidePercentWhenExhausted}
                 exhaustedClockTime={exhaustedClockTime}
+                exhaustedWeekdayTime={exhaustedWeekdayTime}
                 highUsage={highUsage}
                 critUsage={critUsage}
               />
@@ -631,6 +655,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const showResetInline = settings.floatBarShowResetInline;
   const hidePercentWhenExhausted = settings.floatBarHidePercentWhenExhausted;
   const exhaustedClockTime = settings.floatBarExhaustedClockTime;
+  const exhaustedWeekdayTime = settings.floatBarExhaustedWeekdayTime;
   const showCost = settings.floatBarShowCost;
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
@@ -747,6 +772,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     showResetInline,
     hidePercentWhenExhausted,
     exhaustedClockTime,
+    exhaustedWeekdayTime,
     settings.resetTimeRelative,
   ]);
 
@@ -812,6 +838,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               showResetInline={showResetInline}
               hidePercentWhenExhausted={hidePercentWhenExhausted}
               exhaustedClockTime={exhaustedClockTime}
+              exhaustedWeekdayTime={exhaustedWeekdayTime}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
               preference={settings.providerMetrics[p.providerId]}

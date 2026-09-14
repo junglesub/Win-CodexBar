@@ -141,6 +141,7 @@ pub struct SettingsPatch {
     pub show_reset_inline: Option<bool>,
     pub hide_percent_when_exhausted: Option<bool>,
     pub exhausted_clock_time: Option<bool>,
+    pub exhausted_weekday_time: Option<bool>,
     pub show_cost: Option<bool>,
 }
 
@@ -159,6 +160,7 @@ impl SettingsPatch {
             && self.show_reset_inline.is_none()
             && self.hide_percent_when_exhausted.is_none()
             && self.exhausted_clock_time.is_none()
+            && self.exhausted_weekday_time.is_none()
             && self.show_cost.is_none()
     }
 
@@ -205,6 +207,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.exhausted_clock_time {
             settings.float_bar_exhausted_clock_time = v;
+        }
+        if let Some(v) = self.exhausted_weekday_time {
+            settings.float_bar_exhausted_weekday_time = v;
         }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
@@ -254,6 +259,7 @@ mod tests {
             float_bar_show_reset_inline: false,
             float_bar_hide_percent_when_exhausted: false,
             float_bar_exhausted_clock_time: false,
+            float_bar_exhausted_weekday_time: false,
             ..Settings::default()
         };
 
@@ -266,6 +272,7 @@ mod tests {
             show_reset_inline: Some(true),
             hide_percent_when_exhausted: Some(true),
             exhausted_clock_time: Some(true),
+            exhausted_weekday_time: Some(true),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
@@ -277,6 +284,7 @@ mod tests {
         assert!(s.float_bar_show_reset_inline);
         assert!(s.float_bar_hide_percent_when_exhausted);
         assert!(s.float_bar_exhausted_clock_time);
+        assert!(s.float_bar_exhausted_weekday_time);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -345,6 +353,10 @@ mod tests {
         assert_eq!(
             s.float_bar_exhausted_clock_time,
             original.float_bar_exhausted_clock_time
+        );
+        assert_eq!(
+            s.float_bar_exhausted_weekday_time,
+            original.float_bar_exhausted_weekday_time
         );
         assert_eq!(
             s.float_bar_background_color,

@@ -258,6 +258,13 @@ export interface SettingsSnapshot {
    * Requires `floatBarHidePercentWhenExhausted`.
    */
   floatBarExhaustedClockTime: boolean;
+  /**
+   * When true, the exhausted clock-style time replaces the `M/D` date with a
+   * weekday abbreviation (`Mon 21:00`) while the reset falls within the
+   * coming week; beyond that the `M/D` date is kept. Requires
+   * `floatBarExhaustedClockTime`.
+   */
+  floatBarExhaustedWeekdayTime: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
@@ -352,6 +359,7 @@ export interface SettingsUpdate {
   floatBarShowResetInline?: boolean;
   floatBarHidePercentWhenExhausted?: boolean;
   floatBarExhaustedClockTime?: boolean;
+  floatBarExhaustedWeekdayTime?: boolean;
   floatBarShowCost?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;

@@ -220,6 +220,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarShowResetInline: false,
     floatBarHidePercentWhenExhausted: false,
     floatBarExhaustedClockTime: false,
+    floatBarExhaustedWeekdayTime: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
     alibabaTokenPlanRegion: "cn",
@@ -1552,6 +1553,75 @@ describe("FloatBar", () => {
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
     ).toEqual([clock("2026-08-22T12:00:00Z"), clock("2026-08-18T03:12:00Z"), "—"]);
+  });
+
+  it("uses weekday labels for resets within the coming week", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-18T00:00:00Z");
+    vi.setSystemTime(now);
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        exhausted: true,
+        // +4 days (Sat) and +6 days (Mon) fall inside tomorrow..+6.
+        resetsAt: "2026-08-22T12:00:00Z",
+        primaryWindowMinutes: 300,
+        secondary: {
+          used: 100,
+          exhausted: true,
+          windowMinutes: 10_080,
+          resetsAt: "2026-08-24T12:00:00Z",
+        },
+        tertiary: {
+          used: 100,
+          exhausted: true,
+          windowMinutes: 43_200,
+          // +7 days is the *same* weekday next week → keep the M/D date.
+          resetsAt: "2026-08-25T12:00:00Z",
+        },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({
+        floatBarHidePercentWhenExhausted: true,
+        floatBarExhaustedClockTime: true,
+        floatBarExhaustedWeekdayTime: true,
+      }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({
+        floatBarHidePercentWhenExhausted: true,
+        floatBarExhaustedClockTime: true,
+        floatBarExhaustedWeekdayTime: true,
+      }),
+    );
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    // Mirror the formatter (weekday within 1..=6 local calendar days).
+    const format = (iso: string, useWeekday: boolean): string => {
+      const d = new Date(iso);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const clock = `${hh}:${mm}`;
+      const startOfDay = (x: Date) =>
+        new Date(x.getFullYear(), x.getMonth(), x.getDate()).getTime();
+      const dayDiff = Math.round((startOfDay(d) - startOfDay(now)) / 86_400_000);
+      const sameDay = dayDiff === 0;
+      if (sameDay) return clock;
+      if (useWeekday && dayDiff >= 1 && dayDiff <= 6) {
+        return `${["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"][d.getDay()]} ${clock}`;
+      }
+      return `${d.getMonth() + 1}/${d.getDate()} ${clock}`;
+    };
+
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual([
+      format("2026-08-22T12:00:00Z", true),
+      format("2026-08-24T12:00:00Z", true),
+      // +7 days is beyond the coming week → weekday=off keeps the M/D date.
+      format("2026-08-25T12:00:00Z", true),
+    ]);
   });
 
   it("prefers the countdown when clock mode is off", async () => {
