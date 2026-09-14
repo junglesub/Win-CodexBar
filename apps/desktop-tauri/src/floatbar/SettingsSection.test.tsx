@@ -22,6 +22,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     weeklyProgressWorkDays: null,
     floatBarShowResetInline: false,
     floatBarHidePercentWhenExhausted: false,
+    floatBarExhaustedClockTime: false,
     floatBarDarkText: false,
     floatBarClickThrough: false,
     ...overrides,
@@ -35,6 +36,29 @@ describe("FloatBar settings", () => {
     );
 
     expect(screen.getAllByText("FloatBarHidePercentWhenExhausted")).toHaveLength(1);
+  });
+
+  it("disables the clock-style toggle while hide-percent is off", () => {
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText("FloatBarExhaustedClockTime")).toBeDisabled();
+  });
+
+  it("persists the clock-style toggle once hide-percent is on", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarHidePercentWhenExhausted: true })}
+        saving={false}
+        set={set}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarExhaustedClockTime")).toBeEnabled();
+    fireEvent.click(screen.getByLabelText("FloatBarExhaustedClockTime"));
+    expect(set).toHaveBeenCalledWith({ floatBarExhaustedClockTime: true });
   });
 
   it("sends an uppercased color patch on change", () => {

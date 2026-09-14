@@ -219,6 +219,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarShowResetInline: false,
     floatBarHidePercentWhenExhausted: false,
+    floatBarExhaustedClockTime: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
     alibabaTokenPlanRegion: "cn",
@@ -1508,6 +1509,73 @@ describe("FloatBar", () => {
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
     ).toEqual(["100%", "—", "—"]);
+  });
+
+  it("renders the exhausted reset as a local clock when clock mode is on", async () => {
+    vi.useFakeTimers();
+    const now = new Date("2026-08-18T00:00:00Z");
+    vi.setSystemTime(now);
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        exhausted: true,
+        resetsAt: "2026-08-22T12:00:00Z",
+        primaryWindowMinutes: 300,
+        secondary: {
+          used: 100,
+          exhausted: true,
+          windowMinutes: 10_080,
+          resetsAt: "2026-08-18T03:12:00Z",
+        },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarHidePercentWhenExhausted: true, floatBarExhaustedClockTime: true }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ floatBarHidePercentWhenExhausted: true, floatBarExhaustedClockTime: true }),
+    );
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    // Mirror the clock formatter so expectations stay timezone-independent.
+    const clock = (iso: string): string => {
+      const d = new Date(iso);
+      const hh = String(d.getHours()).padStart(2, "0");
+      const mm = String(d.getMinutes()).padStart(2, "0");
+      const sameDay =
+        d.getFullYear() === now.getFullYear() &&
+        d.getMonth() === now.getMonth() &&
+        d.getDate() === now.getDate();
+      return sameDay ? `${hh}:${mm}` : `${d.getMonth() + 1}/${d.getDate()} ${hh}:${mm}`;
+    };
+
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual([clock("2026-08-22T12:00:00Z"), clock("2026-08-18T03:12:00Z"), "—"]);
+  });
+
+  it("prefers the countdown when clock mode is off", async () => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 100, {
+        exhausted: true,
+        resetsAt: "2026-08-22T12:00:00Z",
+        primaryWindowMinutes: 300,
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ floatBarHidePercentWhenExhausted: true }),
+    );
+
+    const { container } = renderFloatBar(
+      bootstrap({ floatBarHidePercentWhenExhausted: true }),
+    );
+    await act(async () => vi.runOnlyPendingTimersAsync());
+
+    expect(
+      Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+    ).toEqual(["4d 12h", "—", "—"]);
   });
 
   it("polls refreshProvidersIfStale on the configured interval", async () => {

@@ -140,6 +140,7 @@ pub struct SettingsPatch {
     pub dark_text: Option<bool>,
     pub show_reset_inline: Option<bool>,
     pub hide_percent_when_exhausted: Option<bool>,
+    pub exhausted_clock_time: Option<bool>,
     pub show_cost: Option<bool>,
 }
 
@@ -157,6 +158,7 @@ impl SettingsPatch {
             && self.dark_text.is_none()
             && self.show_reset_inline.is_none()
             && self.hide_percent_when_exhausted.is_none()
+            && self.exhausted_clock_time.is_none()
             && self.show_cost.is_none()
     }
 
@@ -200,6 +202,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.hide_percent_when_exhausted {
             settings.float_bar_hide_percent_when_exhausted = v;
+        }
+        if let Some(v) = self.exhausted_clock_time {
+            settings.float_bar_exhausted_clock_time = v;
         }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
@@ -248,6 +253,7 @@ mod tests {
             float_bar_dark_text: false,
             float_bar_show_reset_inline: false,
             float_bar_hide_percent_when_exhausted: false,
+            float_bar_exhausted_clock_time: false,
             ..Settings::default()
         };
 
@@ -259,6 +265,7 @@ mod tests {
             dark_text: Some(true),
             show_reset_inline: Some(true),
             hide_percent_when_exhausted: Some(true),
+            exhausted_clock_time: Some(true),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
@@ -269,6 +276,7 @@ mod tests {
         assert!(s.float_bar_dark_text);
         assert!(s.float_bar_show_reset_inline);
         assert!(s.float_bar_hide_percent_when_exhausted);
+        assert!(s.float_bar_exhausted_clock_time);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -333,6 +341,10 @@ mod tests {
         assert_eq!(
             s.float_bar_hide_percent_when_exhausted,
             original.float_bar_hide_percent_when_exhausted
+        );
+        assert_eq!(
+            s.float_bar_exhausted_clock_time,
+            original.float_bar_exhausted_clock_time
         );
         assert_eq!(
             s.float_bar_background_color,

@@ -225,6 +225,22 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarExhaustedClockTime")}
+          description={t("FloatBarExhaustedClockTimeHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarExhaustedClockTime}
+            disabled={
+              saving ||
+              !settings.floatBarEnabled ||
+              !settings.floatBarHidePercentWhenExhausted
+            }
+            ariaLabel={t("FloatBarExhaustedClockTime")}
+            onChange={(v) => set({ floatBarExhaustedClockTime: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarInvertColors")}
           description={t("FloatBarInvertColorsHelper")}
           leading

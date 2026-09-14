@@ -1034,6 +1034,8 @@ locale_keys! {
     FloatBarShowResetInlineHelper,
     FloatBarHidePercentWhenExhausted,
     FloatBarHidePercentWhenExhaustedHelper,
+    FloatBarExhaustedClockTime,
+    FloatBarExhaustedClockTimeHelper,
     FloatBarInvertColors,
     FloatBarInvertColorsHelper,
     FloatBarClickThrough,

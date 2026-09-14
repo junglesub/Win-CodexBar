@@ -31,10 +31,13 @@ order:
 - Each value is colored independently: warning at 75%, critical at 90%.
 - Optional reset countdowns append the largest remaining time unit
   (`100% 4d`).
-- Optional exhausted display hides the percent and shows only the detailed
-  remaining time (`100% 4d` → `4d 12h`, `100% 3h` → `3h 12m`).
-  Toggle in Settings → Menu → Floating Bar ("Hide Percent When Exhausted",
+- Optional exhausted display hides the percent and shows only the remaining
+  time (`100% 4d` → `4d 12h`, `100% 3h` → `3h 12m`). Toggle in Settings →
+  Menu → Floating Bar ("Hide Percent When Exhausted",
   `float_bar_hide_percent_when_exhausted`).
+- Optional clock style shows that reset time as `M/D HH:MM` instead of a
+  countdown — `HH:MM` only when the reset falls on the same day
+  ("Show Reset as Clock Time", `float_bar_exhausted_clock_time`).
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

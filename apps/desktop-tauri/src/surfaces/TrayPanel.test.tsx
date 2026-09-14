@@ -165,6 +165,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarShowResetInline: false,
     floatBarHidePercentWhenExhausted: false,
+    floatBarExhaustedClockTime: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
     claudeAllowReadingClaudeCodeCredentials: false,

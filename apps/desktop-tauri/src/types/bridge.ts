@@ -252,6 +252,12 @@ export interface SettingsSnapshot {
    * Independent of `floatBarShowResetInline`.
    */
   floatBarHidePercentWhenExhausted: boolean;
+  /**
+   * When true, the exhausted hide-percent time renders as a local absolute
+   * clock (`M/D HH:MM`, same-day `HH:MM`) instead of a relative countdown.
+   * Requires `floatBarHidePercentWhenExhausted`.
+   */
+  floatBarExhaustedClockTime: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
@@ -345,6 +351,7 @@ export interface SettingsUpdate {
   floatBarDarkText?: boolean;
   floatBarShowResetInline?: boolean;
   floatBarHidePercentWhenExhausted?: boolean;
+  floatBarExhaustedClockTime?: boolean;
   floatBarShowCost?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;

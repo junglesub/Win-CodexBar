@@ -229,6 +229,27 @@ function compactDetailedResetTime(resetsAt: string): string | null {
   return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
 }
 
+/**
+ * Absolute local clock rendering for the exhausted hide-percent mode.
+ * Same calendar day renders `HH:MM` (zero-padded 24-hour); any other day
+ * renders `M/D HH:MM`. Returns null for missing/invalid/expired timestamps.
+ */
+function clockResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  if (target <= Date.now()) return null;
+  const date = new Date(target);
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const clock = `${hh}:${mm}`;
+  return sameDay ? clock : `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
+}
+
 type FloatBarCostSummary = {
   key: string;
   providerId: string;
@@ -328,6 +349,7 @@ function UsageMetric({
   providerError,
   showResetInline,
   hidePercentWhenExhausted,
+  exhaustedClockTime,
   highUsage,
   critUsage,
   label,
@@ -336,6 +358,7 @@ function UsageMetric({
   providerError: boolean;
   showResetInline: boolean;
   hidePercentWhenExhausted: boolean;
+  exhaustedClockTime: boolean;
   highUsage: number;
   critUsage: number;
   label?: string;
@@ -347,19 +370,24 @@ function UsageMetric({
     hasFutureReset && rateWindow?.resetsAt ? compactResetTime(rateWindow.resetsAt) : null;
   const detailedReset =
     hasFutureReset && rateWindow?.resetsAt ? compactDetailedResetTime(rateWindow.resetsAt) : null;
+  const clockReset =
+    hasFutureReset && rateWindow?.resetsAt ? clockResetTime(rateWindow.resetsAt) : null;
   // Hide-percent mode: exhausted slots with a live reset show only the
-  // detailed two-unit countdown (e.g. `4d 12h`). Without a usable reset the
-  // percentage is kept so the slot never goes blank.
+  // remaining time — a relative two-unit countdown (`4d 12h`) or, when the
+  // clock-style option is on, a local absolute time (`9/18 17:30`, `17:30`
+  // on the same day). Without a usable reset the percentage is kept so the
+  // slot never goes blank.
   const hidePercent =
     hidePercentWhenExhausted &&
     Boolean(rateWindow?.isExhausted) &&
     !providerError &&
     detailedReset != null;
+  const hiddenTime = exhaustedClockTime ? (clockReset ?? detailedReset) : detailedReset;
   const visible =
     used == null || providerError
       ? "—"
       : hidePercent
-        ? (detailedReset ?? `${Math.round(used)}%`)
+        ? (hiddenTime ?? `${Math.round(used)}%`)
         : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
   const tone =
@@ -400,6 +428,7 @@ function ProviderPill({
   scale,
   showResetInline,
   hidePercentWhenExhausted,
+  exhaustedClockTime,
   resetRelative,
   usedSuffix,
   preference,
@@ -412,6 +441,7 @@ function ProviderPill({
   scale: number;
   showResetInline: boolean;
   hidePercentWhenExhausted: boolean;
+  exhaustedClockTime: boolean;
   resetRelative: boolean;
   usedSuffix: string;
   preference: MetricPreference | undefined;
@@ -496,6 +526,7 @@ function ProviderPill({
             providerError={hasError}
             showResetInline={showResetInline}
             hidePercentWhenExhausted={hidePercentWhenExhausted}
+            exhaustedClockTime={exhaustedClockTime}
             highUsage={highUsage}
             critUsage={critUsage}
             label={fallbackLabel}
@@ -509,6 +540,7 @@ function ProviderPill({
                 providerError={hasError}
                 showResetInline={showResetInline}
                 hidePercentWhenExhausted={hidePercentWhenExhausted}
+                exhaustedClockTime={exhaustedClockTime}
                 highUsage={highUsage}
                 critUsage={critUsage}
               />
@@ -598,6 +630,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const scale = Math.max(0.75, Math.min(2, settings.floatBarScale / 100));
   const showResetInline = settings.floatBarShowResetInline;
   const hidePercentWhenExhausted = settings.floatBarHidePercentWhenExhausted;
+  const exhaustedClockTime = settings.floatBarExhaustedClockTime;
   const showCost = settings.floatBarShowCost;
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
@@ -713,6 +746,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     scale,
     showResetInline,
     hidePercentWhenExhausted,
+    exhaustedClockTime,
     settings.resetTimeRelative,
   ]);
 
@@ -777,6 +811,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               scale={scale}
               showResetInline={showResetInline}
               hidePercentWhenExhausted={hidePercentWhenExhausted}
+              exhaustedClockTime={exhaustedClockTime}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={t("PanelUsedSuffix")}
               preference={settings.providerMetrics[p.providerId]}

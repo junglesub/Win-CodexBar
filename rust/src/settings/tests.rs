@@ -215,6 +215,7 @@ fn float_bar_defaults_are_safe() {
     assert!(!settings.float_bar_dark_text);
     assert!(!settings.float_bar_show_reset_inline);
     assert!(!settings.float_bar_hide_percent_when_exhausted);
+    assert!(!settings.float_bar_exhausted_clock_time);
     assert!(!settings.float_bar_show_cost);
 }
 
@@ -332,6 +333,7 @@ fn float_bar_settings_round_trip_through_raw() {
         float_bar_dark_text: true,
         float_bar_show_reset_inline: true,
         float_bar_hide_percent_when_exhausted: true,
+        float_bar_exhausted_clock_time: true,
         float_bar_show_cost: true,
         ..Settings::default()
     };
@@ -348,6 +350,7 @@ fn float_bar_settings_round_trip_through_raw() {
     assert!(back.float_bar_dark_text);
     assert!(back.float_bar_show_reset_inline);
     assert!(back.float_bar_hide_percent_when_exhausted);
+    assert!(back.float_bar_exhausted_clock_time);
     assert!(back.float_bar_show_cost);
 }
 

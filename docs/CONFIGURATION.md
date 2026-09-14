@@ -108,6 +108,17 @@ percentage is kept so the slot never goes blank. The tooltip still shows the
 full `100% used` percentage and localized reset text. Independent of
 `float_bar_show_reset_inline` (the existing single-unit `100% 4d` inline mode).
 
+When `float_bar_exhausted_clock_time` is also `true` (default `false`), the
+hidden time renders as a local absolute clock instead of the countdown:
+
+| Local day of reset | Display |
+|--------------------|---------|
+| same calendar day  | `HH:MM` (e.g. `17:30`) |
+| any other day      | `M/D HH:MM` (e.g. `9/22 21:00`) |
+
+Times are zero-padded 24-hour local clock values. The toggle is disabled in
+Settings until `float_bar_hide_percent_when_exhausted` is on.
+
 ## Source mode
 
 CLI `--source` values on this port (see `codexbar usage --help`): `auto`, `web`, `cli`, `oauth`.

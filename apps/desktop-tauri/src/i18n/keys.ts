@@ -754,6 +754,8 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarShowResetInlineHelper",
   "FloatBarHidePercentWhenExhausted",
   "FloatBarHidePercentWhenExhaustedHelper",
+  "FloatBarExhaustedClockTime",
+  "FloatBarExhaustedClockTimeHelper",
   "FloatBarInvertColors",
   "FloatBarInvertColorsHelper",
   "FloatBarClickThrough",
