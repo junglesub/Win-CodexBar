@@ -237,6 +237,12 @@ body.floatbar-window #root {
   opacity: 0.75;
   flex-shrink: 0;
 }
+/* Inline reset countdown beside the battery cell. The battery metric row is a
+ * flex container, so a bare text node there loses its leading space and keeps
+ * only the 2px item gap — give the countdown its own explicit scaled gap. */
+.floatbar__battery-reset {
+  margin-left: calc(1px * var(--floatbar-scale, 1));
+}
 /* Compact antigravity-not-running overlay: one short localized action next to
  * the provider icon instead of usage dashes, keeping the pill compact. */
 .floatbar__agy-overlay {

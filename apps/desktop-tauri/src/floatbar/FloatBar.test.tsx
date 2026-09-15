@@ -1780,6 +1780,37 @@ describe("FloatBar", () => {
       });
       expect(container.querySelector(".floatbar__battery")).toBeNull();
     });
+
+    it("gives the inline reset its own spaced element beside the battery", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        tauriMocks.getCachedProviders.mockResolvedValue([
+          snapshot("claude", "Claude", 25, {
+            resetsAt: "2026-08-22T12:00:00Z",
+            primaryWindowMinutes: 300,
+          }),
+        ]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({ floatBarBatteryStyle: true, floatBarShowResetInline: true }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({ floatBarBatteryStyle: true, floatBarShowResetInline: true }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        // The battery metric row is a flex container: a bare text node would
+        // lose its leading space there, so the countdown keeps its own element
+        // (`.floatbar__battery-reset`) for the explicit scaled gap.
+        const reset = container.querySelector(".floatbar__battery-reset");
+        expect(reset).not.toBeNull();
+        expect(reset?.textContent).toBe("4d");
+        expect(container.querySelector(".floatbar__battery")).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
   });
 
   describe("floatBarShowRemaining", () => {

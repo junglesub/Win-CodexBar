@@ -468,7 +468,11 @@ function UsageMetric({
             </span>
             <span className="floatbar__battery-nub" aria-hidden="true" data-tauri-drag-region />
           </span>
-          {showResetInline && compactReset ? ` ${compactReset}` : null}
+          {showResetInline && compactReset ? (
+            <span className="floatbar__battery-reset" data-tauri-drag-region>
+              {compactReset}
+            </span>
+          ) : null}
         </>
       ) : (
         visible
