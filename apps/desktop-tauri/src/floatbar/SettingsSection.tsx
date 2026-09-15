@@ -10,6 +10,19 @@ import type {
 
 const DEFAULT_BACKGROUND_COLOR = "#FFFFFF";
 const DEFAULT_BACKGROUND_OPACITY = 8;
+const NO_BATTERY_SLOTS_SENTINEL = "none";
+
+const BATTERY_SLOT_OPTIONS = [
+  { value: "5h", labelKey: "PanelFiveHours" },
+  { value: "weekly", labelKey: "ProviderWeeklyLabel" },
+  { value: "monthly", labelKey: "FloatBarBatterySlotMonthly" },
+  { value: "fallback", labelKey: "FloatBarBatterySlotFallback" },
+] as const;
+type BatterySlot = (typeof BATTERY_SLOT_OPTIONS)[number]["value"];
+
+function isBatterySlot(value: string): value is BatterySlot {
+  return BATTERY_SLOT_OPTIONS.some((option) => option.value === value);
+}
 
 interface Props {
   settings: SettingsSnapshot;
@@ -61,6 +74,26 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
     backgroundOpacity.commit(backgroundOpacity.draft, (value) =>
       set({ floatBarBackgroundOpacity: value }),
     );
+  };
+  const storedBatterySlots = settings.floatBarBatterySlots ?? [];
+  const selectedBatterySlots = new Set(storedBatterySlots.filter(isBatterySlot));
+  const allBatterySlots = storedBatterySlots.length === 0;
+  const batterySlotsDisabled =
+    saving || !settings.floatBarEnabled || !settings.floatBarBatteryStyle;
+  const toggleBatterySlot = (slot: BatterySlot, checked: boolean) => {
+    const next = new Set(
+      allBatterySlots ? BATTERY_SLOT_OPTIONS.map((option) => option.value) : selectedBatterySlots,
+    );
+    if (checked) next.add(slot);
+    else next.delete(slot);
+    const values = BATTERY_SLOT_OPTIONS
+      .map((option) => option.value)
+      .filter((value) => next.has(value));
+    // Empty means "all" for backwards compatibility, so retain an unknown
+    // marker when the user intentionally clears every checkbox.
+    set({
+      floatBarBatterySlots: values.length > 0 ? values : [NO_BATTERY_SLOTS_SENTINEL],
+    });
   };
 
   return (
@@ -235,6 +268,29 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
             ariaLabel={t("FloatBarBatteryStyleLabel")}
             onChange={(v) => set({ floatBarBatteryStyle: v })}
           />
+        </Field>
+        <Field
+          label={t("FloatBarBatterySlotsLabel")}
+          description={t("FloatBarBatterySlotsHelper")}
+        >
+          <div
+            className="floatbar__battery-slots"
+            role="group"
+            aria-label={t("FloatBarBatterySlotsLabel")}
+          >
+            {BATTERY_SLOT_OPTIONS.map((option) => (
+              <label className="floatbar__battery-slot" key={option.value}>
+                <input
+                  type="checkbox"
+                  checked={allBatterySlots || selectedBatterySlots.has(option.value)}
+                  disabled={batterySlotsDisabled}
+                  aria-label={t(option.labelKey)}
+                  onChange={(event) => toggleBatterySlot(option.value, event.target.checked)}
+                />
+                <span>{t(option.labelKey)}</span>
+              </label>
+            ))}
+          </div>
         </Field>
         <Field
           label={t("FloatBarShowRemainingLabel")}

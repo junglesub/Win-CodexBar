@@ -134,6 +134,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     menuBarShowsPercent: false,
     showAsUsed: true,
     floatBarBatteryStyle: false,
+    floatBarBatterySlots: [],
     floatBarShowRemaining: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,

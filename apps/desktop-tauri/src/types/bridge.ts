@@ -268,10 +268,12 @@ export interface SettingsSnapshot {
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
   floatBarBatteryStyle: boolean;
+  /** Empty array = battery cells for every Float Bar slot. */
+  floatBarBatterySlots: string[];
   /**
-   * When true, Float Bar slots render remaining quota instead of used quota, so
-   * a full battery/pill reads as "full remaining" rather than "fully consumed".
-   * Composes with `floatBarBatteryStyle`: the battery fill then tracks remaining.
+   * When true, Float Bar percentage text and its accessible detail render
+   * remaining quota instead of used quota. Battery cells always track remaining
+   * quota regardless of this setting.
    */
   floatBarShowRemaining: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
@@ -369,6 +371,8 @@ export interface SettingsUpdate {
   floatBarExhaustedWeekdayTime?: boolean;
   floatBarShowCost?: boolean;
   floatBarBatteryStyle?: boolean;
+  /** Empty array = battery cells for every Float Bar slot. */
+  floatBarBatterySlots?: string[];
   /** When true, render Float Bar usage as remaining quota instead of used quota. */
   floatBarShowRemaining?: boolean;
   promoteTrayIcon?: boolean;

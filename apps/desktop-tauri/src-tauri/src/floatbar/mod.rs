@@ -123,7 +123,7 @@ pub fn apply_state(app: &tauri::AppHandle, settings: &Settings) {
     }
 }
 
-/// All five settings fields the float bar owns, in a single optional
+/// Float Bar settings fields in a single optional
 /// patch. Used by `update_settings` so the bulk of float-bar plumbing
 /// stays in this module rather than spread across the settings handler.
 #[derive(Debug, Default)]
@@ -144,6 +144,7 @@ pub struct SettingsPatch {
     pub exhausted_weekday_time: Option<bool>,
     pub show_cost: Option<bool>,
     pub battery_style: Option<bool>,
+    pub battery_slots: Option<Vec<String>>,
     pub show_remaining: Option<bool>,
 }
 
@@ -165,6 +166,7 @@ impl SettingsPatch {
             && self.exhausted_weekday_time.is_none()
             && self.show_cost.is_none()
             && self.battery_style.is_none()
+            && self.battery_slots.is_none()
             && self.show_remaining.is_none()
     }
 
@@ -220,6 +222,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.battery_style {
             settings.float_bar_battery_style = v;
+        }
+        if let Some(v) = &self.battery_slots {
+            settings.float_bar_battery_slots = v.clone();
         }
         if let Some(v) = self.show_remaining {
             settings.float_bar_show_remaining = v;
@@ -354,6 +359,21 @@ mod tests {
         patch.apply(&mut s);
         assert!(s.float_bar_show_remaining);
         // The neighbouring display flag is untouched by the patch.
+        assert!(!s.float_bar_battery_style);
+    }
+
+    #[test]
+    fn battery_slots_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            battery_slots: Some(vec!["weekly".into(), "fallback".into()]),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(s.float_bar_battery_slots.is_empty());
+        patch.apply(&mut s);
+        assert_eq!(s.float_bar_battery_slots, ["weekly", "fallback"]);
         assert!(!s.float_bar_battery_style);
     }
 

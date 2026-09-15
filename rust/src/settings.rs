@@ -344,10 +344,14 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_battery_style: bool,
 
-    /// When true, Float Bar slots render remaining quota instead of used quota,
-    /// so a full battery/pill means "full remaining" rather than "fully
-    /// consumed". Composes with [`Self::float_bar_battery_style`]: the battery
-    /// fill then tracks remaining quota.
+    /// Float Bar slots that use battery cells. An empty list keeps the battery
+    /// style enabled for every fixed cadence and the cadence-less fallback.
+    #[serde(default)]
+    pub float_bar_battery_slots: Vec<String>,
+
+    /// When true, Float Bar percentage text and its accessible detail render
+    /// remaining quota instead of used quota. Battery cells always track
+    /// remaining quota regardless of this setting.
     #[serde(default)]
     pub float_bar_show_remaining: bool,
 
@@ -635,6 +639,7 @@ impl Default for Settings {
             float_bar_exhausted_weekday_time: false,
             float_bar_show_cost: false,
             float_bar_battery_style: false,
+            float_bar_battery_slots: Vec::new(),
             float_bar_show_remaining: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,

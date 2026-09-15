@@ -1,5 +1,21 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
+import { readFileSync } from "node:fs";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+// jsdom runs with `css: false`, so the battery fill's background comes from
+// the stylesheet, not inline styles. Assert the CSS rule directly (same
+// pattern as CodexAccountsSection.test.tsx).
+if (!import.meta.dirname) {
+  throw new Error("import.meta.dirname unavailable to vitest runner");
+}
+const floatBarCss = readFileSync(`${import.meta.dirname}/FloatBar.css`, "utf8");
+
+function cssRuleBlock(source: string, selector: string): string {
+  const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = source.match(new RegExp(`${escaped}\\s*\\{([^}]*)\\}`));
+  expect(match).not.toBeNull();
+  return match![1];
+}
 
 const tauriMocks = vi.hoisted(() => ({
   getCachedProviders: vi.fn(),
@@ -188,6 +204,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     menuBarShowsPercent: false,
     showAsUsed: true,
     floatBarBatteryStyle: false,
+    floatBarBatterySlots: [],
     floatBarShowRemaining: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,
@@ -1715,14 +1732,14 @@ describe("FloatBar", () => {
       await waitFor(() => {
         const meter = screen.getByRole("meter");
         expect(meter).toBeInTheDocument();
-        expect(meter).toHaveAttribute("aria-valuenow", "25");
+        expect(meter).toHaveAttribute("aria-valuenow", "75");
       });
 
       expect(screen.queryByText("25%")).not.toBeInTheDocument();
 
       const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
       expect(fill).not.toBeNull();
-      expect(fill?.style.width).toBe("25%");
+      expect(fill?.style.width).toBe("75%");
 
       const nub = container.querySelector(".floatbar__battery-nub");
       expect(nub).not.toBeNull();
@@ -1810,6 +1827,197 @@ describe("FloatBar", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("keeps a Grok-like dark brand battery fill visible", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("grok", "Grok", 25),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ enabledProviders: ["grok"], floatBarBatteryStyle: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ enabledProviders: ["grok"], floatBarBatteryStyle: true }),
+      );
+
+      await waitFor(() => expect(screen.getByRole("meter")).toBeInTheDocument());
+      const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
+      const cell = container.querySelector<HTMLElement>(".floatbar__battery-cell");
+      expect(fill).not.toBeNull();
+      expect(cell).not.toBeNull();
+      expect(cssRuleBlock(floatBarCss, ".floatbar__battery-fill")).toContain(
+        "background: currentColor",
+      );
+    });
+
+    it("renders every cadence as a battery when the slot list is empty", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25, {
+          secondary: { used: 40 },
+          tertiary: { used: 60, windowMinutes: 40_320 },
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true, floatBarBatterySlots: [] }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: true, floatBarBatterySlots: [] }),
+      );
+
+      await waitFor(() =>
+        expect(container.querySelectorAll(".floatbar__battery")).toHaveLength(3),
+      );
+      expect(
+        Array.from(
+          container.querySelectorAll<HTMLElement>(".floatbar__battery-fill"),
+          (fill) => fill.style.width,
+        ),
+      ).toEqual(["75%", "60%", "40%"]);
+    });
+
+    it.each([
+      [85, "floatbar__metric--warn"],
+      [95, "floatbar__metric--crit"],
+    ] as const)(
+      "uses remaining-based %s tone thresholds with show remaining OFF",
+      async (used, toneClass) => {
+        tauriMocks.getCachedProviders.mockResolvedValue([
+          snapshot("codex", "Codex", used),
+        ]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({
+            floatBarBatteryStyle: true,
+            floatBarShowRemaining: false,
+          }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({
+            floatBarBatteryStyle: true,
+            floatBarShowRemaining: false,
+          }),
+        );
+
+        await waitFor(() =>
+          expect(container.querySelector(`.${toneClass}`)).not.toBeNull(),
+        );
+      },
+    );
+
+    it("falls back to percentage text when no stored slot is recognized", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25, {
+          secondary: { used: 40 },
+          tertiary: { used: 60, windowMinutes: 40_320 },
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true, floatBarBatterySlots: ["unknown"] }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["unknown"],
+        }),
+      );
+
+      await waitFor(() => {
+        expect(container.querySelector(".floatbar__battery")).toBeNull();
+        expect(
+          Array.from(container.querySelectorAll(".floatbar__metric"), (metric) =>
+            metric.textContent,
+          ),
+        ).toEqual(["25%", "40%", "60%"]);
+      });
+    });
+
+    it("renders only the selected cadence as a battery", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25, {
+          secondary: { used: 40 },
+          tertiary: { used: 60, windowMinutes: 40_320 },
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true, floatBarBatterySlots: ["weekly"] }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["weekly"],
+        }),
+      );
+
+      await waitFor(() =>
+        expect(container.querySelectorAll(".floatbar__battery")).toHaveLength(1),
+      );
+      expect(container.querySelector<HTMLElement>(".floatbar__battery-fill")?.style.width).toBe(
+        "60%",
+      );
+      expect(Array.from(container.querySelectorAll(".floatbar__metric"), (metric) => metric.textContent)).toEqual([
+        "25%",
+        "",
+        "60%",
+      ]);
+    });
+
+    it("ignores unknown entries while retaining recognized battery slots", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25, {
+          secondary: { used: 40 },
+          tertiary: { used: 60, windowMinutes: 40_320 },
+        }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["weekly", "future-slot"],
+        }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["weekly", "future-slot"],
+        }),
+      );
+
+      await waitFor(() =>
+        expect(container.querySelectorAll(".floatbar__battery")).toHaveLength(1),
+      );
+      expect(container.querySelector<HTMLElement>(".floatbar__battery-fill")?.style.width).toBe(
+        "60%",
+      );
+    });
+
+    it("uses the fallback slot selection for cadence-less providers", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        cadenceless("antigravity", "Antigravity"),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({
+          enabledProviders: ["antigravity"],
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["fallback"],
+        }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({
+          enabledProviders: ["antigravity"],
+          floatBarBatteryStyle: true,
+          floatBarBatterySlots: ["fallback"],
+        }),
+      );
+
+      await waitFor(() =>
+        expect(container.querySelectorAll(".floatbar__battery")).toHaveLength(1),
+      );
+      expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "45");
     });
   });
 
@@ -1916,7 +2124,7 @@ describe("FloatBar", () => {
       expect(screen.queryByText("25%")).not.toBeInTheDocument();
     });
 
-    it("keeps the battery fill on used quota when show remaining is OFF", async () => {
+    it("keeps the battery fill on remaining quota when show remaining is OFF", async () => {
       tauriMocks.getCachedProviders.mockResolvedValue([snapshot("codex", "Codex", 25)]);
       tauriMocks.getSettingsSnapshot.mockResolvedValue(
         settings({ floatBarBatteryStyle: true, floatBarShowRemaining: false }),
@@ -1927,13 +2135,13 @@ describe("FloatBar", () => {
       );
 
       await waitFor(() => {
-        expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "25");
+        expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "75");
       });
 
       const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
-      expect(fill?.style.width).toBe("25%");
-      // OFF keeps the bare percentage meter label.
-      expect(screen.getByRole("meter").getAttribute("aria-label")).toBe("25%");
+      expect(fill?.style.width).toBe("75%");
+      // Battery accessibility always describes remaining quota.
+      expect(screen.getByRole("meter").getAttribute("aria-label")).toBe("75% remaining");
     });
 
     it("keeps the exhausted hide-percent countdown when show remaining is ON", async () => {

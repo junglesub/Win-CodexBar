@@ -19,6 +19,7 @@ fn test_settings_default() {
     assert_eq!(settings.critical_usage_threshold, 90.0);
     assert!(!settings.show_reset_when_exhausted);
     assert!(!settings.float_bar_battery_style);
+    assert!(settings.float_bar_battery_slots.is_empty());
     assert!(!settings.float_bar_show_remaining);
     assert!(!settings.predictive_pace_warning_enabled);
     assert!(!settings.float_bar_show_cost);
@@ -61,6 +62,28 @@ fn test_float_bar_show_remaining_serde_default_and_round_trip() {
     let serialized = serde_json::to_string(&enabled).expect("serialize");
     let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
     assert!(round_tripped.float_bar_show_remaining);
+}
+
+#[test]
+fn test_float_bar_battery_slots_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_battery_slots should deserialize to an empty list");
+    assert!(defaulted.float_bar_battery_slots.is_empty());
+
+    let selected: Settings =
+        serde_json::from_str(r#"{ "float_bar_battery_slots": ["5h", "fallback", "unknown"] }"#)
+            .expect("explicit float_bar_battery_slots parses");
+    assert_eq!(
+        selected.float_bar_battery_slots,
+        ["5h", "fallback", "unknown"]
+    );
+
+    let serialized = serde_json::to_string(&selected).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert_eq!(
+        round_tripped.float_bar_battery_slots,
+        ["5h", "fallback", "unknown"]
+    );
 }
 
 #[test]

@@ -27,6 +27,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarDarkText: false,
     floatBarClickThrough: false,
     floatBarBatteryStyle: false,
+    floatBarBatterySlots: [],
     floatBarShowRemaining: false,
     ...overrides,
   } as SettingsSnapshot;
@@ -239,5 +240,61 @@ describe("FloatBar settings", () => {
     );
 
     expect(screen.getByLabelText("FloatBarShowRemainingLabel")).toBeDisabled();
+  });
+
+  it("shows all battery slots selected for the default empty list", () => {
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText("PanelFiveHours")).toBeChecked();
+    expect(screen.getByLabelText("ProviderWeeklyLabel")).toBeChecked();
+    expect(screen.getByLabelText("FloatBarBatterySlotMonthly")).toBeChecked();
+    expect(screen.getByLabelText("FloatBarBatterySlotFallback")).toBeChecked();
+  });
+
+  it("persists the remaining battery slots after one slot is unchecked", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={set} />,
+    );
+
+    fireEvent.click(screen.getByLabelText("PanelFiveHours"));
+
+    expect(set).toHaveBeenCalledWith({
+      floatBarBatterySlots: ["weekly", "monthly", "fallback"],
+    });
+  });
+
+  it("ignores unknown stored battery slots when rendering selection state", () => {
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarBatterySlots: ["weekly", "unknown"] })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("PanelFiveHours")).not.toBeChecked();
+    expect(screen.getByLabelText("ProviderWeeklyLabel")).toBeChecked();
+    expect(screen.getByLabelText("FloatBarBatterySlotMonthly")).not.toBeChecked();
+    expect(screen.getByLabelText("FloatBarBatterySlotFallback")).not.toBeChecked();
+  });
+
+  it("disables battery slot selection when battery style is off or the bar is off", () => {
+    const { rerender } = render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={vi.fn()} />,
+    );
+
+    expect(screen.getByLabelText("ProviderWeeklyLabel")).toBeDisabled();
+
+    rerender(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarBatteryStyle: true, floatBarEnabled: false })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+    expect(screen.getByLabelText("ProviderWeeklyLabel")).toBeDisabled();
   });
 });

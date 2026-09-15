@@ -57,6 +57,7 @@ const settings: SettingsSnapshot = {
   menuBarShowsPercent: true,
   showAsUsed: false,
   floatBarBatteryStyle: false,
+  floatBarBatterySlots: [],
   floatBarShowRemaining: false,
   showAllTokenAccountsInMenu: true,
   enableAnimations: true,

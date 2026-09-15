@@ -76,6 +76,39 @@ fn float_bar_show_remaining_locale_values() {
 }
 
 #[test]
+fn float_bar_battery_slots_locale_values() {
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarBatterySlotsLabel),
+        "Battery slots"
+    );
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarBatterySlotsHelper),
+        "Choose which Float Bar slots use battery cells; multiple slots can be selected. The default uses all slots."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarBatterySlotsLabel),
+            "Battery slots",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarBatterySlotsHelper),
+            "Choose which Float Bar slots use battery cells; multiple slots can be selected. The default uses all slots.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
 fn test_locale_key_chinese() {
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabGeneral), "通用");
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabCookies), "Cookie");

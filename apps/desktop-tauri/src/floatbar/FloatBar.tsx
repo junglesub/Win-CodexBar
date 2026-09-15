@@ -40,9 +40,21 @@ import "./FloatBar.css";
  * duration is absent, because labels are not a reliable source of truth.
  */
 type UsageCadence = "5h" | "weekly" | "monthly";
+type FloatBarBatterySlot = UsageCadence | "fallback";
 type UsageSlots = Record<UsageCadence, RateWindowSnapshot | null>;
 
 const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
+
+function isBatterySlotEnabled(
+  selectedSlots: readonly string[] | undefined,
+  slot: FloatBarBatterySlot,
+): boolean {
+  const selected = selectedSlots ?? [];
+  // An empty persisted list is the backwards-compatible "all slots" default.
+  // A non-empty list with no recognized values therefore selects none, while
+  // unknown values alongside known ones are harmlessly ignored.
+  return selected.length === 0 || selected.includes(slot);
+}
 
 function cadenceFromMinutes(minutes: number): UsageCadence | null {
   if (minutes === 300) return "5h";
@@ -356,9 +368,9 @@ function CostPill({
  * Renders only the compact visible value. The pill itself carries the full
  * cadence/used/reset detail on its title and accessible name, because pill
  * children intentionally have `pointer-events: none`. Each metric colors
- * itself from its own consumed percentage: red at/above the critical
- * threshold (or on provider error / exhaustion), amber at/above the
- * high-usage threshold, otherwise neutral.
+ * itself from its own used or remaining percentage; battery metrics always
+ * use remaining quota. Red marks the critical threshold (or provider error /
+ * exhaustion), amber marks the high-usage threshold, otherwise neutral.
  */
 function UsageMetric({
   window: rateWindow,
@@ -370,9 +382,9 @@ function UsageMetric({
   highUsage,
   critUsage,
   label,
-  batteryStyle = false,
+  batteryEnabled = false,
   showRemaining = false,
-  suffix,
+  remainingSuffix,
 }: {
   window: RateWindowSnapshot | null;
   providerError: boolean;
@@ -383,16 +395,14 @@ function UsageMetric({
   highUsage: number;
   critUsage: number;
   label?: string;
-  batteryStyle?: boolean;
+  batteryEnabled?: boolean;
   showRemaining?: boolean;
-  /** Suffix appended to the battery meter's accessible name when remaining. */
-  suffix?: string;
+  /** Suffix appended to the battery meter's accessible name. */
+  remainingSuffix?: string;
 }) {
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
-  // "Show remaining" flips the displayed value to unconsumed quota, so a full
-  // battery/pill reads as "full remaining" instead of "fully consumed".
   const remaining = used === null ? null : Math.max(0, Math.min(100, 100 - used));
-  const value = showRemaining ? remaining : used;
+  const displayValue = showRemaining ? remaining : used;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
   const hasFutureReset = Number.isFinite(target) && target > Date.now();
   const compactReset =
@@ -414,23 +424,27 @@ function UsageMetric({
     !providerError &&
     detailedReset != null;
   const hiddenTime = exhaustedClockTime ? (clockReset ?? detailedReset) : detailedReset;
-  const isBattery = batteryStyle && value != null && !providerError && !hidePercent;
+  const batteryValue = remaining;
+  const isBattery = batteryEnabled && batteryValue != null && !providerError && !hidePercent;
   const visible =
-    value == null || providerError
+    displayValue == null || providerError
       ? "—"
       : hidePercent
-        ? (hiddenTime ?? `${Math.round(value)}%`)
-        : `${Math.round(value)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
+        ? (hiddenTime ?? `${Math.round(displayValue)}%`)
+        : `${Math.round(displayValue)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
-  // Tone thresholds mirror the displayed value: used quota turns warn/crit as
-  // it climbs, remaining quota as it drops. Errored and exhausted slots stay
-  // critical in either mode.
+  // Battery tones always describe remaining quota. Percentage text keeps the
+  // existing used/remaining semantics controlled by showRemaining.
+  const toneValue = isBattery ? batteryValue : displayValue;
+  const toneUsesRemaining = isBattery || showRemaining;
   const tone =
     providerError ||
     rateWindow?.isExhausted ||
-    (value != null && (showRemaining ? value <= 100 - critUsage : value >= critUsage))
+    (toneValue != null &&
+      (toneUsesRemaining ? toneValue <= 100 - critUsage : toneValue >= critUsage))
       ? "crit"
-      : value != null && (showRemaining ? value <= 100 - highUsage : value >= highUsage)
+      : toneValue != null &&
+          (toneUsesRemaining ? toneValue <= 100 - highUsage : toneValue >= highUsage)
         ? "warn"
         : "ok";
 
@@ -449,20 +463,16 @@ function UsageMetric({
           <span
             className="floatbar__battery"
             role="meter"
-            aria-valuenow={Math.round(value)}
+            aria-valuenow={Math.round(batteryValue!)}
             aria-valuemin={0}
             aria-valuemax={100}
-            aria-label={
-              showRemaining && suffix
-                ? `${Math.round(value)}% ${suffix}`
-                : `${Math.round(value)}%`
-            }
+            aria-label={`${Math.round(batteryValue!)}%${remainingSuffix ? ` ${remainingSuffix}` : ""}`}
             data-tauri-drag-region
           >
             <span className="floatbar__battery-cell" data-tauri-drag-region>
               <span
                 className="floatbar__battery-fill"
-                style={{ width: `${value}%` }}
+                style={{ width: `${batteryValue!}%` }}
                 data-tauri-drag-region
               />
             </span>
@@ -486,8 +496,8 @@ function UsageMetric({
  *
  * Renders fixed 5-hour / weekly / monthly usage slots (or the cadence-less
  * fallback metric). The pill, icon, and container stay visually neutral;
- * each usage metric colors itself from its own consumed (or, with "show
- * remaining" on, remaining) percentage. The
+ * each usage metric colors itself from its own used/remaining percentage,
+ * while battery metrics always use remaining quota. The
  * full per-slot detail (cadence, used percentage, localized reset) lives on
  * the pill `title` and `aria-label` so it stays hoverable/accessible.
  */
@@ -502,7 +512,9 @@ function ProviderPill({
   exhaustedWeekdayTime,
   resetRelative,
   usedSuffix,
+  remainingSuffix,
   showRemaining,
+  batterySlots,
   preference,
   now,
   t,
@@ -518,8 +530,11 @@ function ProviderPill({
   exhaustedWeekdayTime: boolean;
   resetRelative: boolean;
   usedSuffix: string;
+  remainingSuffix: string;
   /** When true, every percentage this pill reports is remaining quota. */
   showRemaining: boolean;
+  /** Selected battery slots; empty means all slots. */
+  batterySlots?: readonly string[];
   preference: MetricPreference | undefined;
   now: number;
   t: (key: LocaleKey) => string;
@@ -530,6 +545,8 @@ function ProviderPill({
     ? null
     : fallbackFor(provider, preference);
   const hasError = Boolean(provider.error);
+  const batteryEnabledFor = (slot: FloatBarBatterySlot) =>
+    batteryStyle && isBatterySlotEnabled(batterySlots, slot);
   // "Show remaining" flips every percentage this pill reports — the metric
   // values and the cadence/fallback detail lines — to remaining quota.
   const shownPercent = (percent: number) => {
@@ -614,9 +631,9 @@ function ProviderPill({
             highUsage={highUsage}
             critUsage={critUsage}
             label={fallbackLabel}
-            batteryStyle={batteryStyle}
+            batteryEnabled={batteryEnabledFor("fallback")}
             showRemaining={showRemaining}
-            suffix={usedSuffix}
+            remainingSuffix={remainingSuffix}
           />
         ) : (
           USAGE_CADENCES.map((cadence, index) => (
@@ -631,9 +648,9 @@ function ProviderPill({
                 exhaustedWeekdayTime={exhaustedWeekdayTime}
                 highUsage={highUsage}
                 critUsage={critUsage}
-                batteryStyle={batteryStyle}
+                batteryEnabled={batteryEnabledFor(cadence)}
                 showRemaining={showRemaining}
-                suffix={usedSuffix}
+                remainingSuffix={remainingSuffix}
               />
             </Fragment>
           ))
@@ -728,6 +745,8 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   // in each pill's hover/accessible detail (used ↔ remaining).
   const showRemaining = settings.floatBarShowRemaining;
   const usedSuffix = t(showRemaining ? "FloatBarRemainingSuffix" : "PanelUsedSuffix");
+  const remainingSuffix = t("FloatBarRemainingSuffix");
+  const batterySlots = settings.floatBarBatterySlots ?? [];
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
     let list = providers.filter((p) => enabled.has(p.providerId));
@@ -844,6 +863,8 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     hidePercentWhenExhausted,
     exhaustedClockTime,
     exhaustedWeekdayTime,
+    settings.floatBarBatteryStyle,
+    batterySlots,
     settings.resetTimeRelative,
     showRemaining,
   ]);
@@ -913,7 +934,9 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               exhaustedWeekdayTime={exhaustedWeekdayTime}
               resetRelative={settings.resetTimeRelative}
               usedSuffix={usedSuffix}
+              remainingSuffix={remainingSuffix}
               showRemaining={showRemaining}
+              batterySlots={batterySlots}
               preference={settings.providerMetrics[p.providerId]}
               now={now}
               t={t}

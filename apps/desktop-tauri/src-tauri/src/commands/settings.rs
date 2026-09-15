@@ -75,6 +75,7 @@ pub struct SettingsUpdate {
     pub float_bar_exhausted_weekday_time: Option<bool>,
     pub float_bar_show_cost: Option<bool>,
     pub float_bar_battery_style: Option<bool>,
+    pub float_bar_battery_slots: Option<Vec<String>>,
     pub float_bar_show_remaining: Option<bool>,
     pub promote_tray_icon: Option<bool>,
     pub claude_daily_routines_usage_visible: Option<bool>,
@@ -109,6 +110,7 @@ impl SettingsUpdate {
             || self.show_reset_when_exhausted.is_some()
             || self.provider_metrics.is_some()
             || self.float_bar_battery_style.is_some()
+            || self.float_bar_battery_slots.is_some()
             || self.float_bar_show_remaining.is_some()
     }
 
@@ -393,6 +395,7 @@ impl SettingsUpdate {
             exhausted_weekday_time: self.float_bar_exhausted_weekday_time,
             show_cost: self.float_bar_show_cost,
             battery_style: self.float_bar_battery_style,
+            battery_slots: self.float_bar_battery_slots.clone(),
             show_remaining: self.float_bar_show_remaining,
         }
     }
@@ -620,6 +623,13 @@ mod tests {
         assert!(
             SettingsUpdate {
                 float_bar_show_remaining: Some(true),
+                ..Default::default()
+            }
+            .notifies_float_bar()
+        );
+        assert!(
+            SettingsUpdate {
+                float_bar_battery_slots: Some(vec!["weekly".into()]),
                 ..Default::default()
             }
             .notifies_float_bar()
