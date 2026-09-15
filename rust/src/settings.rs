@@ -340,6 +340,17 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_show_cost: bool,
 
+    /// Display usage as battery cells instead of percentage numbers in the floating bar
+    #[serde(default)]
+    pub float_bar_battery_style: bool,
+
+    /// When true, Float Bar slots render remaining quota instead of used quota,
+    /// so a full battery/pill means "full remaining" rather than "fully
+    /// consumed". Composes with [`Self::float_bar_battery_style`]: the battery
+    /// fill then tracks remaining quota.
+    #[serde(default)]
+    pub float_bar_show_remaining: bool,
+
     /// Promote the tray icon out of the Windows hidden-icons overflow area.
     /// Only has effect on Windows 11 (build ≥ 22000); silently ignored elsewhere.
     /// Defaults on so upgrades keep the icon pinned to the taskbar notification area.
@@ -623,6 +634,8 @@ impl Default for Settings {
             float_bar_exhausted_clock_time: false,
             float_bar_exhausted_weekday_time: false,
             float_bar_show_cost: false,
+            float_bar_battery_style: false,
+            float_bar_show_remaining: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,
             claude_allow_reading_claude_code_credentials: false,

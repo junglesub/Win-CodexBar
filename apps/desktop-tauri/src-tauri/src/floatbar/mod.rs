@@ -143,6 +143,8 @@ pub struct SettingsPatch {
     pub exhausted_clock_time: Option<bool>,
     pub exhausted_weekday_time: Option<bool>,
     pub show_cost: Option<bool>,
+    pub battery_style: Option<bool>,
+    pub show_remaining: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -162,6 +164,8 @@ impl SettingsPatch {
             && self.exhausted_clock_time.is_none()
             && self.exhausted_weekday_time.is_none()
             && self.show_cost.is_none()
+            && self.battery_style.is_none()
+            && self.show_remaining.is_none()
     }
 
     /// Apply this patch to a mutable `Settings`. Values are clamped and
@@ -213,6 +217,12 @@ impl SettingsPatch {
         }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
+        }
+        if let Some(v) = self.battery_style {
+            settings.float_bar_battery_style = v;
+        }
+        if let Some(v) = self.show_remaining {
+            settings.float_bar_show_remaining = v;
         }
     }
 }
@@ -329,6 +339,22 @@ mod tests {
         // Unrelated fields are untouched.
         assert_eq!(s.float_bar_enabled, original_enabled);
         assert_eq!(s.float_bar_style, original_style);
+    }
+
+    #[test]
+    fn show_remaining_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            show_remaining: Some(true),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(!s.float_bar_show_remaining);
+        patch.apply(&mut s);
+        assert!(s.float_bar_show_remaining);
+        // The neighbouring display flag is untouched by the patch.
+        assert!(!s.float_bar_battery_style);
     }
 
     #[test]

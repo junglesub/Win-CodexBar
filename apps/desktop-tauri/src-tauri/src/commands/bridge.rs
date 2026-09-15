@@ -738,6 +738,8 @@ pub struct SettingsSnapshot {
     float_bar_exhausted_clock_time: bool,
     float_bar_exhausted_weekday_time: bool,
     float_bar_show_cost: bool,
+    float_bar_battery_style: bool,
+    float_bar_show_remaining: bool,
     promote_tray_icon: bool,
     claude_daily_routines_usage_visible: bool,
     claude_allow_reading_claude_code_credentials: bool,
@@ -856,6 +858,8 @@ impl From<Settings> for SettingsSnapshot {
             float_bar_exhausted_clock_time: settings.float_bar_exhausted_clock_time,
             float_bar_exhausted_weekday_time: settings.float_bar_exhausted_weekday_time,
             float_bar_show_cost: settings.float_bar_show_cost,
+            float_bar_battery_style: settings.float_bar_battery_style,
+            float_bar_show_remaining: settings.float_bar_show_remaining,
             promote_tray_icon: settings.promote_tray_icon,
             claude_daily_routines_usage_visible: settings.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: settings

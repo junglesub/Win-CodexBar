@@ -26,6 +26,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarExhaustedWeekdayTime: false,
     floatBarDarkText: false,
     floatBarClickThrough: false,
+    floatBarBatteryStyle: false,
+    floatBarShowRemaining: false,
     ...overrides,
   } as SettingsSnapshot;
 }
@@ -173,5 +175,69 @@ describe("FloatBar settings", () => {
     );
 
     expect(screen.getByText("FloatBarResetBackground")).toBeDisabled();
+  });
+
+  it("renders and toggles the battery-style setting", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={set} />,
+    );
+
+    const toggle = screen.getByLabelText("FloatBarBatteryStyleLabel");
+    expect(toggle).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(set).toHaveBeenCalledWith({ floatBarBatteryStyle: true });
+  });
+
+  it("disables the battery-style toggle when float bar is off", () => {
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarEnabled: false })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarBatteryStyleLabel")).toBeDisabled();
+  });
+
+  it("renders and toggles the show-remaining setting", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={set} />,
+    );
+
+    const toggle = screen.getByLabelText("FloatBarShowRemainingLabel");
+    expect(toggle).toBeEnabled();
+    expect(toggle).not.toBeChecked();
+
+    fireEvent.click(toggle);
+    expect(set).toHaveBeenCalledWith({ floatBarShowRemaining: true });
+  });
+
+  it("reflects an enabled show-remaining setting as checked", () => {
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarShowRemaining: true })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarShowRemainingLabel")).toBeChecked();
+  });
+
+  it("disables the show-remaining toggle when float bar is off", () => {
+    render(
+      <FloatBarSettingsSection
+        settings={settings({ floatBarEnabled: false })}
+        saving={false}
+        set={vi.fn()}
+      />,
+    );
+
+    expect(screen.getByLabelText("FloatBarShowRemainingLabel")).toBeDisabled();
   });
 });

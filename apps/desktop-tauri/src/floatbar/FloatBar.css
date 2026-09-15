@@ -183,6 +183,60 @@ body.floatbar-window #root {
   font-weight: 600;
   opacity: 0.66;
 }
+
+/* Compact battery cell representation in Float Bar */
+.floatbar__metric--battery {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: calc(2px * var(--floatbar-scale, 1));
+}
+
+.floatbar__battery {
+  display: inline-flex;
+  align-items: center;
+  gap: 1px;
+  vertical-align: middle;
+  line-height: 1;
+}
+
+.floatbar__battery-cell {
+  display: inline-flex;
+  align-items: center;
+  width: calc(18px * var(--floatbar-scale, 1));
+  height: calc(8px * var(--floatbar-scale, 1));
+  padding: 1px;
+  border: 1px solid currentColor;
+  border-radius: calc(2px * var(--floatbar-scale, 1));
+  box-sizing: border-box;
+  background: rgba(255, 255, 255, 0.08);
+  opacity: 0.9;
+}
+
+.floatbar--light-bg .floatbar__battery-cell {
+  background: rgba(0, 0, 0, 0.05);
+}
+
+.floatbar__battery-fill {
+  height: 100%;
+  border-radius: 0.5px;
+  background: var(--brand, currentColor);
+  transition: width 0.2s ease;
+}
+
+.floatbar__metric--warn .floatbar__battery-fill,
+.floatbar__metric--crit .floatbar__battery-fill {
+  background: currentColor;
+}
+
+.floatbar__battery-nub {
+  width: calc(1.5px * var(--floatbar-scale, 1));
+  height: calc(4px * var(--floatbar-scale, 1));
+  border-radius: 0 calc(1px * var(--floatbar-scale, 1)) calc(1px * var(--floatbar-scale, 1)) 0;
+  background: currentColor;
+  opacity: 0.75;
+  flex-shrink: 0;
+}
 /* Compact antigravity-not-running overlay: one short localized action next to
  * the provider icon instead of usage dashes, keeping the pill compact. */
 .floatbar__agy-overlay {

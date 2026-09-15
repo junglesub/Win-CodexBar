@@ -225,6 +225,30 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarBatteryStyleLabel")}
+          description={t("FloatBarBatteryStyleHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarBatteryStyle}
+            disabled={saving || !settings.floatBarEnabled}
+            ariaLabel={t("FloatBarBatteryStyleLabel")}
+            onChange={(v) => set({ floatBarBatteryStyle: v })}
+          />
+        </Field>
+        <Field
+          label={t("FloatBarShowRemainingLabel")}
+          description={t("FloatBarShowRemainingHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarShowRemaining}
+            disabled={saving || !settings.floatBarEnabled}
+            ariaLabel={t("FloatBarShowRemainingLabel")}
+            onChange={(v) => set({ floatBarShowRemaining: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarExhaustedClockTime")}
           description={t("FloatBarExhaustedClockTimeHelper")}
           leading

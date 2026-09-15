@@ -40,6 +40,42 @@ fn float_bar_agy_run_needed_locale_values() {
 }
 
 #[test]
+fn float_bar_show_remaining_locale_values() {
+    // The Float Bar "show remaining" option ships in every supported locale. A
+    // missing catalog entry falls back to en-US, so a non-English match means
+    // the key is absent from that locale file.
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarShowRemainingLabel),
+        "Show remaining"
+    );
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarShowRemainingHelper),
+        "Show Float Bar usage as remaining quota instead of used quota."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarShowRemainingLabel),
+            "Show remaining",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarShowRemainingHelper),
+            "Show Float Bar usage as remaining quota instead of used quota.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
 fn test_locale_key_chinese() {
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabGeneral), "通用");
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabCookies), "Cookie");

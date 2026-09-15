@@ -146,6 +146,8 @@ function settings(): SettingsSnapshot {
     menuBarShowsHighestUsage: false,
     menuBarShowsPercent: false,
     showAsUsed: true,
+    floatBarBatteryStyle: false,
+    floatBarShowRemaining: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,
     resetTimeRelative: true,

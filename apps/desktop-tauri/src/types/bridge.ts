@@ -267,6 +267,13 @@ export interface SettingsSnapshot {
   floatBarExhaustedWeekdayTime: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
+  floatBarBatteryStyle: boolean;
+  /**
+   * When true, Float Bar slots render remaining quota instead of used quota, so
+   * a full battery/pill reads as "full remaining" rather than "fully consumed".
+   * Composes with `floatBarBatteryStyle`: the battery fill then tracks remaining.
+   */
+  floatBarShowRemaining: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
@@ -361,6 +368,9 @@ export interface SettingsUpdate {
   floatBarExhaustedClockTime?: boolean;
   floatBarExhaustedWeekdayTime?: boolean;
   floatBarShowCost?: boolean;
+  floatBarBatteryStyle?: boolean;
+  /** When true, render Float Bar usage as remaining quota instead of used quota. */
+  floatBarShowRemaining?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;

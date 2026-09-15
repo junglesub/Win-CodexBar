@@ -41,6 +41,13 @@ order:
 - Optional weekday style replaces the date with `Mon`, `Tue`, … while the
   reset falls within the coming week; beyond that the date is kept
   ("Show Weekday Instead of Date", `float_bar_exhausted_weekday_time`).
+- Optional battery style renders each Float Bar usage slot as a battery cell
+  (outline + fill + nub) instead of a percentage number. Toggle in Settings →
+  Menu → Floating Bar ("Battery style", `float_bar_battery_style`). Exact
+  percentages stay available on hover, and exhausted or error slots keep their
+  existing display. A companion "Show remaining" toggle
+  (`float_bar_show_remaining`) flips slots from used quota to remaining quota,
+  so a full battery means full remaining.
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

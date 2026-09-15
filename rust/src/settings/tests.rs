@@ -18,6 +18,8 @@ fn test_settings_default() {
     assert_eq!(settings.high_usage_threshold, 70.0);
     assert_eq!(settings.critical_usage_threshold, 90.0);
     assert!(!settings.show_reset_when_exhausted);
+    assert!(!settings.float_bar_battery_style);
+    assert!(!settings.float_bar_show_remaining);
     assert!(!settings.predictive_pace_warning_enabled);
     assert!(!settings.float_bar_show_cost);
     assert!(settings.promote_tray_icon);
@@ -29,6 +31,36 @@ fn test_settings_default() {
     );
     assert_eq!(settings.float_bar_background_color, "#FFFFFF");
     assert_eq!(settings.float_bar_background_opacity, 8);
+}
+
+#[test]
+fn test_float_bar_battery_style_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_battery_style should deserialize to false");
+    assert!(!defaulted.float_bar_battery_style);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_battery_style": true }"#)
+        .expect("explicit float_bar_battery_style true parses");
+    assert!(enabled.float_bar_battery_style);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_battery_style);
+}
+
+#[test]
+fn test_float_bar_show_remaining_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_show_remaining should deserialize to false");
+    assert!(!defaulted.float_bar_show_remaining);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_show_remaining": true }"#)
+        .expect("explicit float_bar_show_remaining true parses");
+    assert!(enabled.float_bar_show_remaining);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_show_remaining);
 }
 
 #[test]

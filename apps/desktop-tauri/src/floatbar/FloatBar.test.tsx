@@ -187,6 +187,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     menuBarShowsHighestUsage: false,
     menuBarShowsPercent: false,
     showAsUsed: true,
+    floatBarBatteryStyle: false,
+    floatBarShowRemaining: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,
     resetTimeRelative: true,
@@ -1677,5 +1679,284 @@ describe("FloatBar", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  describe("floatBarBatteryStyle", () => {
+    it("renders percentage numbers when battery style is OFF", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: false }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: false }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("25%")).toBeInTheDocument();
+      });
+      expect(container.querySelector(".floatbar__battery")).toBeNull();
+    });
+
+    it("renders battery cell when battery style is ON", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 25),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: true }),
+      );
+
+      await waitFor(() => {
+        const meter = screen.getByRole("meter");
+        expect(meter).toBeInTheDocument();
+        expect(meter).toHaveAttribute("aria-valuenow", "25");
+      });
+
+      expect(screen.queryByText("25%")).not.toBeInTheDocument();
+
+      const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
+      expect(fill).not.toBeNull();
+      expect(fill?.style.width).toBe("25%");
+
+      const nub = container.querySelector(".floatbar__battery-nub");
+      expect(nub).not.toBeNull();
+    });
+
+    it("renders remaining countdown instead of battery when exhausted with reset and hidePercentWhenExhausted", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        tauriMocks.getCachedProviders.mockResolvedValue([
+          snapshot("claude", "Claude", 100, {
+            exhausted: true,
+            resetsAt: "2026-08-22T12:00:00Z",
+            primaryWindowMinutes: 300,
+          }),
+        ]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({
+            floatBarBatteryStyle: true,
+            floatBarHidePercentWhenExhausted: true,
+          }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({
+            floatBarBatteryStyle: true,
+            floatBarHidePercentWhenExhausted: true,
+          }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        expect(
+          Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+        ).toEqual(["4d 12h", "—", "—"]);
+        expect(container.querySelector(".floatbar__battery")).toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("renders '—' when provider has error even with battery style ON", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 0, { error: "Network disconnected" }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: true }),
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".floatbar__metric")[0].textContent).toBe("—");
+      });
+      expect(container.querySelector(".floatbar__battery")).toBeNull();
+    });
+  });
+
+  describe("floatBarShowRemaining", () => {
+    it("keeps consumed percentages when show remaining is OFF", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("codex", "Codex", 25)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: false }),
+      );
+
+      const { container } = renderFloatBar(bootstrap({ floatBarShowRemaining: false }));
+
+      await waitFor(() => {
+        expect(screen.getByText("25%")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("75%")).not.toBeInTheDocument();
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toContain(
+        "25% used",
+      );
+    });
+
+    it("renders remaining percentages when show remaining is ON", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("codex", "Codex", 25)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: true }),
+      );
+
+      const { container } = renderFloatBar(bootstrap({ floatBarShowRemaining: true }));
+
+      await waitFor(() => {
+        expect(screen.getByText("75%")).toBeInTheDocument();
+      });
+      expect(screen.queryByText("25%")).not.toBeInTheDocument();
+      expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toContain(
+        "75% remaining",
+      );
+    });
+
+    it("keeps a healthy remaining slot out of warn and crit", async () => {
+      // 25% used → 75% remaining, well above the 30% warn cutoff.
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("claude", "Claude", 25)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: true }),
+      );
+
+      const { container } = renderFloatBar(bootstrap({ floatBarShowRemaining: true }));
+
+      await waitFor(() => {
+        expect(screen.getByText("75%")).toBeInTheDocument();
+      });
+      expect(container.querySelector(".floatbar__metric--warn")).toBeNull();
+      expect(container.querySelector(".floatbar__metric--crit")).toBeNull();
+    });
+
+    it("tones low remaining as warn (mirrored high threshold)", async () => {
+      // highUsageThreshold = 70 → remaining cutoff 30%. 85% used → 15% left → warn.
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("claude", "Claude", 85)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: true }),
+      );
+
+      const { container } = renderFloatBar(bootstrap({ floatBarShowRemaining: true }));
+
+      await waitFor(() => {
+        expect(screen.getByText("15%")).toBeInTheDocument();
+      });
+      expect(container.querySelector(".floatbar__metric--warn")).not.toBeNull();
+      expect(container.querySelector(".floatbar__metric--crit")).toBeNull();
+    });
+
+    it("tones low remaining as crit (mirrored critical threshold)", async () => {
+      // criticalUsageThreshold = 90 → remaining cutoff 10%. 95% used → 5% left → crit.
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("claude", "Claude", 95)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: true }),
+      );
+
+      const { container } = renderFloatBar(bootstrap({ floatBarShowRemaining: true }));
+
+      await waitFor(() => {
+        expect(screen.getByText("5%")).toBeInTheDocument();
+      });
+      expect(container.querySelector(".floatbar__metric--crit")).not.toBeNull();
+    });
+
+    it("fills the battery with remaining quota when both options are ON", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("codex", "Codex", 25)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true, floatBarShowRemaining: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: true, floatBarShowRemaining: true }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "75");
+      });
+
+      const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
+      expect(fill).not.toBeNull();
+      expect(fill?.style.width).toBe("75%");
+      expect(screen.getByRole("meter").getAttribute("aria-label")).toBe("75% remaining");
+      expect(screen.queryByText("25%")).not.toBeInTheDocument();
+    });
+
+    it("keeps the battery fill on used quota when show remaining is OFF", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([snapshot("codex", "Codex", 25)]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarBatteryStyle: true, floatBarShowRemaining: false }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarBatteryStyle: true, floatBarShowRemaining: false }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByRole("meter")).toHaveAttribute("aria-valuenow", "25");
+      });
+
+      const fill = container.querySelector<HTMLElement>(".floatbar__battery-fill");
+      expect(fill?.style.width).toBe("25%");
+      // OFF keeps the bare percentage meter label.
+      expect(screen.getByRole("meter").getAttribute("aria-label")).toBe("25%");
+    });
+
+    it("keeps the exhausted hide-percent countdown when show remaining is ON", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        tauriMocks.getCachedProviders.mockResolvedValue([
+          snapshot("claude", "Claude", 100, {
+            exhausted: true,
+            resetsAt: "2026-08-22T12:00:00Z",
+            primaryWindowMinutes: 300,
+          }),
+        ]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({
+            floatBarShowRemaining: true,
+            floatBarHidePercentWhenExhausted: true,
+          }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({
+            floatBarShowRemaining: true,
+            floatBarHidePercentWhenExhausted: true,
+          }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        // Exhausted slots keep the time-only path: remaining is 0%, but the
+        // reset countdown still replaces the percentage.
+        expect(
+          Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
+        ).toEqual(["4d 12h", "—", "—"]);
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("keeps the '—' fallback on provider error when show remaining is ON", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([
+        snapshot("codex", "Codex", 0, { error: "Network disconnected" }),
+      ]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarShowRemaining: true, floatBarBatteryStyle: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarShowRemaining: true, floatBarBatteryStyle: true }),
+      );
+
+      await waitFor(() => {
+        expect(container.querySelectorAll(".floatbar__metric")[0].textContent).toBe("—");
+      });
+      expect(container.querySelector(".floatbar__battery")).toBeNull();
+    });
   });
 });

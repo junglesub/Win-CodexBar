@@ -74,6 +74,8 @@ pub struct SettingsUpdate {
     pub float_bar_exhausted_clock_time: Option<bool>,
     pub float_bar_exhausted_weekday_time: Option<bool>,
     pub float_bar_show_cost: Option<bool>,
+    pub float_bar_battery_style: Option<bool>,
+    pub float_bar_show_remaining: Option<bool>,
     pub promote_tray_icon: Option<bool>,
     pub claude_daily_routines_usage_visible: Option<bool>,
     pub alibaba_token_plan_region: Option<String>,
@@ -106,6 +108,8 @@ impl SettingsUpdate {
             || self.reset_time_relative.is_some()
             || self.show_reset_when_exhausted.is_some()
             || self.provider_metrics.is_some()
+            || self.float_bar_battery_style.is_some()
+            || self.float_bar_show_remaining.is_some()
     }
 
     fn rebuilds_tray_menu(&self) -> bool {
@@ -388,6 +392,8 @@ impl SettingsUpdate {
             exhausted_clock_time: self.float_bar_exhausted_clock_time,
             exhausted_weekday_time: self.float_bar_exhausted_weekday_time,
             show_cost: self.float_bar_show_cost,
+            battery_style: self.float_bar_battery_style,
+            show_remaining: self.float_bar_show_remaining,
         }
     }
 
@@ -600,6 +606,20 @@ mod tests {
                         .into_iter()
                         .collect(),
                 ),
+                ..Default::default()
+            }
+            .notifies_float_bar()
+        );
+        assert!(
+            SettingsUpdate {
+                float_bar_battery_style: Some(true),
+                ..Default::default()
+            }
+            .notifies_float_bar()
+        );
+        assert!(
+            SettingsUpdate {
+                float_bar_show_remaining: Some(true),
                 ..Default::default()
             }
             .notifies_float_bar()

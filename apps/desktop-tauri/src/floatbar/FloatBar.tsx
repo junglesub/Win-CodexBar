@@ -370,6 +370,9 @@ function UsageMetric({
   highUsage,
   critUsage,
   label,
+  batteryStyle = false,
+  showRemaining = false,
+  suffix,
 }: {
   window: RateWindowSnapshot | null;
   providerError: boolean;
@@ -380,8 +383,16 @@ function UsageMetric({
   highUsage: number;
   critUsage: number;
   label?: string;
+  batteryStyle?: boolean;
+  showRemaining?: boolean;
+  /** Suffix appended to the battery meter's accessible name when remaining. */
+  suffix?: string;
 }) {
   const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
+  // "Show remaining" flips the displayed value to unconsumed quota, so a full
+  // battery/pill reads as "full remaining" instead of "fully consumed".
+  const remaining = used === null ? null : Math.max(0, Math.min(100, 100 - used));
+  const value = showRemaining ? remaining : used;
   const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
   const hasFutureReset = Number.isFinite(target) && target > Date.now();
   const compactReset =
@@ -403,17 +414,23 @@ function UsageMetric({
     !providerError &&
     detailedReset != null;
   const hiddenTime = exhaustedClockTime ? (clockReset ?? detailedReset) : detailedReset;
+  const isBattery = batteryStyle && value != null && !providerError && !hidePercent;
   const visible =
-    used == null || providerError
+    value == null || providerError
       ? "—"
       : hidePercent
-        ? (hiddenTime ?? `${Math.round(used)}%`)
-        : `${Math.round(used)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
+        ? (hiddenTime ?? `${Math.round(value)}%`)
+        : `${Math.round(value)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
 
+  // Tone thresholds mirror the displayed value: used quota turns warn/crit as
+  // it climbs, remaining quota as it drops. Errored and exhausted slots stay
+  // critical in either mode.
   const tone =
-    providerError || rateWindow?.isExhausted || (used != null && used >= critUsage)
+    providerError ||
+    rateWindow?.isExhausted ||
+    (value != null && (showRemaining ? value <= 100 - critUsage : value >= critUsage))
       ? "crit"
-      : used != null && used >= highUsage
+      : value != null && (showRemaining ? value <= 100 - highUsage : value >= highUsage)
         ? "warn"
         : "ok";
 
@@ -421,13 +438,41 @@ function UsageMetric({
     <span
       className={
         tone === "ok"
-          ? "floatbar__metric"
-          : `floatbar__metric floatbar__metric--${tone}`
+          ? `floatbar__metric${isBattery ? " floatbar__metric--battery" : ""}`
+          : `floatbar__metric floatbar__metric--${tone}${isBattery ? " floatbar__metric--battery" : ""}`
       }
       data-tauri-drag-region
     >
       {label ? <span className="floatbar__metric-label">{label} </span> : null}
-      {visible}
+      {isBattery ? (
+        <>
+          <span
+            className="floatbar__battery"
+            role="meter"
+            aria-valuenow={Math.round(value)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={
+              showRemaining && suffix
+                ? `${Math.round(value)}% ${suffix}`
+                : `${Math.round(value)}%`
+            }
+            data-tauri-drag-region
+          >
+            <span className="floatbar__battery-cell" data-tauri-drag-region>
+              <span
+                className="floatbar__battery-fill"
+                style={{ width: `${value}%` }}
+                data-tauri-drag-region
+              />
+            </span>
+            <span className="floatbar__battery-nub" aria-hidden="true" data-tauri-drag-region />
+          </span>
+          {showResetInline && compactReset ? ` ${compactReset}` : null}
+        </>
+      ) : (
+        visible
+      )}
     </span>
   );
 }
@@ -437,7 +482,8 @@ function UsageMetric({
  *
  * Renders fixed 5-hour / weekly / monthly usage slots (or the cadence-less
  * fallback metric). The pill, icon, and container stay visually neutral;
- * each usage metric colors itself from its own consumed percentage. The
+ * each usage metric colors itself from its own consumed (or, with "show
+ * remaining" on, remaining) percentage. The
  * full per-slot detail (cadence, used percentage, localized reset) lives on
  * the pill `title` and `aria-label` so it stays hoverable/accessible.
  */
@@ -452,9 +498,11 @@ function ProviderPill({
   exhaustedWeekdayTime,
   resetRelative,
   usedSuffix,
+  showRemaining,
   preference,
   now,
   t,
+  batteryStyle = false,
 }: {
   provider: ProviderUsageSnapshot;
   highUsage: number;
@@ -466,15 +514,24 @@ function ProviderPill({
   exhaustedWeekdayTime: boolean;
   resetRelative: boolean;
   usedSuffix: string;
+  /** When true, every percentage this pill reports is remaining quota. */
+  showRemaining: boolean;
   preference: MetricPreference | undefined;
   now: number;
   t: (key: LocaleKey) => string;
+  batteryStyle?: boolean;
 }) {
   const slots = selectFloatBarUsageSlots(provider);
   const fallback = Object.values(slots).some((window) => window !== null)
     ? null
     : fallbackFor(provider, preference);
   const hasError = Boolean(provider.error);
+  // "Show remaining" flips every percentage this pill reports — the metric
+  // values and the cadence/fallback detail lines — to remaining quota.
+  const shownPercent = (percent: number) => {
+    const clamped = Math.max(0, Math.min(100, percent));
+    return Math.round(showRemaining ? 100 - clamped : clamped);
+  };
   const agyOverlay = isAntigravityNotRunningError(provider)
     ? t("FloatBarAgyRunNeeded")
     : null;
@@ -494,7 +551,7 @@ function ProviderPill({
   const slotDetails = USAGE_CADENCES.map((cadence, index) => {
     const window = slots[cadence];
     if (!window) return `${cadence}: —`;
-    const used = Math.round(Math.max(0, Math.min(100, window.usedPercent)));
+    const used = shownPercent(window.usedPercent);
     const reset = resetTexts[index];
     return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
   });
@@ -504,7 +561,7 @@ function ProviderPill({
   if (provider.error) {
     pillDetail = `${provider.displayName}: ${provider.error}`;
   } else if (fallback) {
-    const used = Math.round(Math.max(0, Math.min(100, fallback.window.usedPercent)));
+    const used = shownPercent(fallback.window.usedPercent);
     pillDetail = `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
   } else {
     pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
@@ -553,6 +610,9 @@ function ProviderPill({
             highUsage={highUsage}
             critUsage={critUsage}
             label={fallbackLabel}
+            batteryStyle={batteryStyle}
+            showRemaining={showRemaining}
+            suffix={usedSuffix}
           />
         ) : (
           USAGE_CADENCES.map((cadence, index) => (
@@ -567,6 +627,9 @@ function ProviderPill({
                 exhaustedWeekdayTime={exhaustedWeekdayTime}
                 highUsage={highUsage}
                 critUsage={critUsage}
+                batteryStyle={batteryStyle}
+                showRemaining={showRemaining}
+                suffix={usedSuffix}
               />
             </Fragment>
           ))
@@ -657,6 +720,10 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const exhaustedClockTime = settings.floatBarExhaustedClockTime;
   const exhaustedWeekdayTime = settings.floatBarExhaustedWeekdayTime;
   const showCost = settings.floatBarShowCost;
+  // "Show remaining" flips both the rendered percentage and the word beside it
+  // in each pill's hover/accessible detail (used ↔ remaining).
+  const showRemaining = settings.floatBarShowRemaining;
+  const usedSuffix = t(showRemaining ? "FloatBarRemainingSuffix" : "PanelUsedSuffix");
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
     let list = providers.filter((p) => enabled.has(p.providerId));
@@ -774,6 +841,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     exhaustedClockTime,
     exhaustedWeekdayTime,
     settings.resetTimeRelative,
+    showRemaining,
   ]);
 
   useEffect(() => {
@@ -840,10 +908,12 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               exhaustedClockTime={exhaustedClockTime}
               exhaustedWeekdayTime={exhaustedWeekdayTime}
               resetRelative={settings.resetTimeRelative}
-              usedSuffix={t("PanelUsedSuffix")}
+              usedSuffix={usedSuffix}
+              showRemaining={showRemaining}
               preference={settings.providerMetrics[p.providerId]}
               now={now}
               t={t}
+              batteryStyle={settings.floatBarBatteryStyle}
             />
           ))}
           {visibleCosts.map((summary) => (
