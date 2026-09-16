@@ -92,6 +92,7 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarBatteryStyle: false,
     floatBarBatterySlots: [],
     floatBarShowRemaining: false,
+    floatBarFollowProviderOrder: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,
     resetTimeRelative: true,

@@ -305,6 +305,18 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarFollowProviderOrderLabel")}
+          description={t("FloatBarFollowProviderOrderHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarFollowProviderOrder}
+            disabled={saving || !settings.floatBarEnabled}
+            ariaLabel={t("FloatBarFollowProviderOrderLabel")}
+            onChange={(v) => set({ floatBarFollowProviderOrder: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarExhaustedClockTime")}
           description={t("FloatBarExhaustedClockTimeHelper")}
           leading

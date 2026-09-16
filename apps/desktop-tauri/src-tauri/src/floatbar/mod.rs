@@ -146,6 +146,7 @@ pub struct SettingsPatch {
     pub battery_style: Option<bool>,
     pub battery_slots: Option<Vec<String>>,
     pub show_remaining: Option<bool>,
+    pub follow_provider_order: Option<bool>,
 }
 
 impl SettingsPatch {
@@ -168,6 +169,7 @@ impl SettingsPatch {
             && self.battery_style.is_none()
             && self.battery_slots.is_none()
             && self.show_remaining.is_none()
+            && self.follow_provider_order.is_none()
     }
 
     /// Apply this patch to a mutable `Settings`. Values are clamped and
@@ -228,6 +230,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.show_remaining {
             settings.float_bar_show_remaining = v;
+        }
+        if let Some(v) = self.follow_provider_order {
+            settings.float_bar_follow_provider_order = v;
         }
     }
 }
@@ -375,6 +380,22 @@ mod tests {
         patch.apply(&mut s);
         assert_eq!(s.float_bar_battery_slots, ["weekly", "fallback"]);
         assert!(!s.float_bar_battery_style);
+    }
+
+    #[test]
+    fn follow_provider_order_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            follow_provider_order: Some(true),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(!s.float_bar_follow_provider_order);
+        patch.apply(&mut s);
+        assert!(s.float_bar_follow_provider_order);
+        // The neighbouring display flag is untouched by the patch.
+        assert!(!s.float_bar_show_remaining);
     }
 
     #[test]

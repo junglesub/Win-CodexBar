@@ -355,6 +355,14 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_show_remaining: bool,
 
+    /// When true, the floating bar orders provider pills with the user's
+    /// custom drag-reorder sequence ([`Self::provider_order`]) instead of
+    /// usage-descending. An empty custom order keeps usage order. Because the
+    /// custom sequence itself has no reset UI, turning this off is the way
+    /// back to usage-descending.
+    #[serde(default)]
+    pub float_bar_follow_provider_order: bool,
+
     /// Promote the tray icon out of the Windows hidden-icons overflow area.
     /// Only has effect on Windows 11 (build ≥ 22000); silently ignored elsewhere.
     /// Defaults on so upgrades keep the icon pinned to the taskbar notification area.
@@ -641,6 +649,7 @@ impl Default for Settings {
             float_bar_battery_style: false,
             float_bar_battery_slots: Vec::new(),
             float_bar_show_remaining: false,
+            float_bar_follow_provider_order: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,
             claude_allow_reading_claude_code_credentials: false,

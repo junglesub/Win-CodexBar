@@ -2198,4 +2198,66 @@ describe("FloatBar", () => {
       expect(container.querySelector(".floatbar__battery")).toBeNull();
     });
   });
+
+  describe("floatBarFollowProviderOrder", () => {
+    async function renderWithProviders(
+      settingsOverrides: Partial<SettingsSnapshot>,
+      providers = [
+        snapshot("claude", "Claude", 20),
+        snapshot("codex", "Codex", 75),
+        snapshot("gemini", "Gemini", 50),
+      ],
+    ) {
+      // The default fixture only enables claude/codex; include gemini so the
+      // enabled filter does not hide the third pill under test.
+      const overrides = {
+        enabledProviders: ["claude", "codex", "gemini"],
+        ...settingsOverrides,
+      };
+      tauriMocks.getCachedProviders.mockResolvedValue(providers);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(settings(overrides));
+      const { container } = renderFloatBar(bootstrap(overrides));
+      await waitFor(() => {
+        expect(container.querySelectorAll(".floatbar__pill").length).toBe(providers.length);
+      });
+      return container;
+    }
+
+    function pillOrder(container: HTMLElement): string[] {
+      return Array.from(container.querySelectorAll(".floatbar__pill")).map((el) =>
+        (el.getAttribute("title") ?? "").split(":")[0],
+      );
+    }
+
+    it("keeps usage-descending order when the option is OFF", async () => {
+      const container = await renderWithProviders({ floatBarFollowProviderOrder: false });
+      expect(pillOrder(container)).toEqual(["Codex", "Gemini", "Claude"]);
+    });
+
+    it("keeps usage-descending order when ON but the custom order is empty", async () => {
+      const container = await renderWithProviders({
+        floatBarFollowProviderOrder: true,
+        providerOrder: [],
+      });
+      expect(pillOrder(container)).toEqual(["Codex", "Gemini", "Claude"]);
+    });
+
+    it("follows the custom drag-reorder sequence when ON with a custom order", async () => {
+      const container = await renderWithProviders({
+        floatBarFollowProviderOrder: true,
+        providerOrder: ["gemini", "claude", "codex"],
+      });
+      expect(pillOrder(container)).toEqual(["Gemini", "Claude", "Codex"]);
+    });
+
+    it("does not crash with unknown ids in the custom order", async () => {
+      const container = await renderWithProviders({
+        floatBarFollowProviderOrder: true,
+        providerOrder: ["unknown-provider", "claude", "codex"],
+      });
+      // Unknown ids are skipped by the ordering helper; known providers keep
+      // their relative custom sequence (Claude before Codex).
+      expect(pillOrder(container)).toEqual(["Claude", "Codex", "Gemini"]);
+    });
+  });
 });

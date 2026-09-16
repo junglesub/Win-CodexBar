@@ -276,6 +276,13 @@ export interface SettingsSnapshot {
    * quota regardless of this setting.
    */
   floatBarShowRemaining: boolean;
+  /**
+   * When true, the Float Bar orders providers with the custom drag-reorder
+   * sequence (`providerOrder`) instead of usage-descending. An empty custom
+   * order keeps usage order; turning this off is the way back to usage order
+   * because the custom sequence itself has no reset UI.
+   */
+  floatBarFollowProviderOrder: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
@@ -375,6 +382,11 @@ export interface SettingsUpdate {
   floatBarBatterySlots?: string[];
   /** When true, render Float Bar usage as remaining quota instead of used quota. */
   floatBarShowRemaining?: boolean;
+  /**
+   * When true, order Float Bar providers with the custom drag-reorder sequence
+   * instead of usage-descending. Empty custom order keeps usage order.
+   */
+  floatBarFollowProviderOrder?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;

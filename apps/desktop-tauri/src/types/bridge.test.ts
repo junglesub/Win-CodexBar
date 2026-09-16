@@ -87,6 +87,7 @@ describe("Language type", () => {
       floatBarBatteryStyle: false,
       floatBarBatterySlots: [],
       floatBarShowRemaining: false,
+      floatBarFollowProviderOrder: false,
       showAllTokenAccountsInMenu: true,
       enableAnimations: true,
       resetTimeRelative: true,

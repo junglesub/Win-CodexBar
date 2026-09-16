@@ -77,6 +77,7 @@ pub struct SettingsUpdate {
     pub float_bar_battery_style: Option<bool>,
     pub float_bar_battery_slots: Option<Vec<String>>,
     pub float_bar_show_remaining: Option<bool>,
+    pub float_bar_follow_provider_order: Option<bool>,
     pub promote_tray_icon: Option<bool>,
     pub claude_daily_routines_usage_visible: Option<bool>,
     pub alibaba_token_plan_region: Option<String>,
@@ -112,6 +113,7 @@ impl SettingsUpdate {
             || self.float_bar_battery_style.is_some()
             || self.float_bar_battery_slots.is_some()
             || self.float_bar_show_remaining.is_some()
+            || self.float_bar_follow_provider_order.is_some()
     }
 
     fn rebuilds_tray_menu(&self) -> bool {
@@ -397,6 +399,7 @@ impl SettingsUpdate {
             battery_style: self.float_bar_battery_style,
             battery_slots: self.float_bar_battery_slots.clone(),
             show_remaining: self.float_bar_show_remaining,
+            follow_provider_order: self.float_bar_follow_provider_order,
         }
     }
 
@@ -630,6 +633,13 @@ mod tests {
         assert!(
             SettingsUpdate {
                 float_bar_battery_slots: Some(vec!["weekly".into()]),
+                ..Default::default()
+            }
+            .notifies_float_bar()
+        );
+        assert!(
+            SettingsUpdate {
+                float_bar_follow_provider_order: Some(true),
                 ..Default::default()
             }
             .notifies_float_bar()

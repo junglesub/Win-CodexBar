@@ -50,6 +50,11 @@ order:
   display. Battery cells always show remaining quota, while the companion
   "Show remaining" toggle (`float_bar_show_remaining`) only flips percentage
   text and its accessible detail.
+- Optional custom order shows Float Bar providers in your drag-reorder sequence
+  from the overview instead of by usage ("Use custom provider order",
+  `float_bar_follow_provider_order`). An empty custom sequence keeps usage
+  order, and turning the toggle off is the way back to usage order because the
+  custom sequence itself has no reset UI.
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

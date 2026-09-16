@@ -1042,6 +1042,8 @@ locale_keys! {
     FloatBarBatterySlotFallback,
     FloatBarShowRemainingLabel,
     FloatBarShowRemainingHelper,
+    FloatBarFollowProviderOrderLabel,
+    FloatBarFollowProviderOrderHelper,
     FloatBarExhaustedClockTime,
     FloatBarExhaustedClockTimeHelper,
     FloatBarExhaustedWeekdayTime,

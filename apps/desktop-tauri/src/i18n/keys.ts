@@ -762,6 +762,8 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarBatterySlotFallback",
   "FloatBarShowRemainingLabel",
   "FloatBarShowRemainingHelper",
+  "FloatBarFollowProviderOrderLabel",
+  "FloatBarFollowProviderOrderHelper",
   "FloatBarExhaustedClockTime",
   "FloatBarExhaustedClockTimeHelper",
   "FloatBarExhaustedWeekdayTime",

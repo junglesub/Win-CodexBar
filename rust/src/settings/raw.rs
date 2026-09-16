@@ -177,6 +177,8 @@ pub(super) struct RawSettings {
     float_bar_battery_slots: Vec<String>,
     #[serde(default)]
     float_bar_show_remaining: bool,
+    #[serde(default)]
+    float_bar_follow_provider_order: bool,
     #[serde(default = "default_true")]
     promote_tray_icon: bool,
     #[serde(default = "default_true")]
@@ -297,6 +299,7 @@ impl Default for RawSettings {
             float_bar_battery_style: s.float_bar_battery_style,
             float_bar_battery_slots: s.float_bar_battery_slots,
             float_bar_show_remaining: s.float_bar_show_remaining,
+            float_bar_follow_provider_order: s.float_bar_follow_provider_order,
             promote_tray_icon: s.promote_tray_icon,
             claude_daily_routines_usage_visible: s.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: s
@@ -610,6 +613,7 @@ impl From<RawSettings> for Settings {
             float_bar_battery_style: raw.float_bar_battery_style,
             float_bar_battery_slots: raw.float_bar_battery_slots,
             float_bar_show_remaining: raw.float_bar_show_remaining,
+            float_bar_follow_provider_order: raw.float_bar_follow_provider_order,
             promote_tray_icon: raw.promote_tray_icon,
             claude_daily_routines_usage_visible: raw.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: raw

@@ -76,6 +76,48 @@ fn float_bar_show_remaining_locale_values() {
 }
 
 #[test]
+fn float_bar_follow_provider_order_locale_values() {
+    // The Float Bar "follow provider order" option ships in every supported
+    // locale. A missing catalog entry falls back to en-US, so a non-English
+    // match means the key is absent from that locale file.
+    assert_eq!(
+        get_text(
+            Language::English,
+            LocaleKey::FloatBarFollowProviderOrderLabel
+        ),
+        "Use custom provider order"
+    );
+    assert_eq!(
+        get_text(
+            Language::English,
+            LocaleKey::FloatBarFollowProviderOrderHelper
+        ),
+        "Show Float Bar providers in your custom drag-reorder sequence instead of by usage. Turn off to return to usage order."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarFollowProviderOrderLabel),
+            "Use custom provider order",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarFollowProviderOrderHelper),
+            "Show Float Bar providers in your custom drag-reorder sequence instead of by usage. Turn off to return to usage order.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
 fn float_bar_battery_slots_locale_values() {
     assert_eq!(
         get_text(Language::English, LocaleKey::FloatBarBatterySlotsLabel),

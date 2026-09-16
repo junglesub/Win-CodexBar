@@ -19,6 +19,7 @@ import {
   refreshProvidersIfStale,
 } from "../lib/tauri";
 import { formatRelativeUpdated } from "../lib/relativeTime";
+import { orderProviderSnapshots } from "../lib/providerOrder";
 import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
@@ -44,6 +45,14 @@ type FloatBarBatterySlot = UsageCadence | "fallback";
 type UsageSlots = Record<UsageCadence, RateWindowSnapshot | null>;
 
 const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
+
+/**
+ * Stable fallback for an absent custom provider order. Shared module constant
+ * so the `visible` memo dependencies keep referential identity across renders
+ * (a fresh `[] ?? []` allocation per render would retrigger downstream
+ * memo/effect chains on every paint).
+ */
+const EMPTY_PROVIDER_ORDER: readonly string[] = [];
 
 function isBatterySlotEnabled(
   selectedSlots: readonly string[] | undefined,
@@ -747,6 +756,8 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const usedSuffix = t(showRemaining ? "FloatBarRemainingSuffix" : "PanelUsedSuffix");
   const remainingSuffix = t("FloatBarRemainingSuffix");
   const batterySlots = settings.floatBarBatterySlots ?? [];
+  const followProviderOrder = settings.floatBarFollowProviderOrder;
+  const providerOrder = settings.providerOrder ?? EMPTY_PROVIDER_ORDER;
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
     let list = providers.filter((p) => enabled.has(p.providerId));
@@ -754,12 +765,31 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
       const wanted = new Set(filterIds);
       list = list.filter((p) => wanted.has(p.providerId));
     }
+    // Custom drag-reorder sequence wins only when the option is on AND the
+    // user actually has a persisted order; an empty order keeps the existing
+    // usage-descending sort (which is also the default when the option is off).
+    if (followProviderOrder && providerOrder.length > 0) {
+      return orderProviderSnapshots(
+        list,
+        state.providers,
+        settings.enabledProviders,
+        [...providerOrder],
+      );
+    }
     return [...list].sort(
       (a, b) =>
         maxFloatBarUsedPercent(b, settings.providerMetrics[b.providerId]) -
         maxFloatBarUsedPercent(a, settings.providerMetrics[a.providerId]),
     );
-  }, [providers, settings.enabledProviders, filterIds, settings.providerMetrics]);
+  }, [
+    providers,
+    settings.enabledProviders,
+    settings.providerMetrics,
+    state.providers,
+    filterIds,
+    followProviderOrder,
+    providerOrder,
+  ]);
 
   const visibleCostTargets = useMemo<FloatBarCostTarget[]>(
     () =>
