@@ -5,6 +5,7 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 ## Goal
 
 - Preserve the product values, behavior, and intentional deletions of `personal` by default.
+- If conflicts (concept or merge collisions) arise, prioritize ignoring or dropping conflicting upstream changes (`personal` takes precedence).
 - Add every non-overlapping change from `main`.
 - If both branches changed the same feature or policy differently, do not decide silently. Ask the developer.
 - Preserve normal merge ancestry. Do not squash or rebase.
@@ -29,11 +30,12 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 - Preserve behavior changed only by `personal`.
 - Accept features and fixes changed only by `main`.
 - When changes in the same file are independent, retain both.
+- **Conflict priority (충돌 시 무시 우선):** When upstream changes collide or conflict with `personal` features, policies, or intentional behavior, prioritize ignoring, skipping, or dropping the conflicting upstream changes over forcing a merge or overwriting `personal`. The default is to preserve `personal` as-is and ignore the conflicting upstream delta.
 - Compare the result with both parents. During the merge, `HEAD` is the `main`
   parent and `MERGE_HEAD` is the `personal` parent; use result-vs-parent diffs
   to distinguish newly accepted upstream work from the large staged
   `personal` delta.
-- When both branches implement the same feature differently, ask the developer and include:
+- When both branches implement the same feature differently and cannot be safely ignored, ask the developer and include:
   - the file and relevant symbol;
   - the `personal` behavior;
   - the `main` behavior;

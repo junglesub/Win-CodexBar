@@ -94,7 +94,8 @@ READMEs remain intentional in this sync range as well.
 
 1. When upstream/`main` changes a file or concept listed under **Collision risk**, read the matching commits here before merging.
 2. Treat **concept** collisions as more important than line conflicts. A clean merge can still invert Float Bar semantics, Antigravity quota mapping, or updater behavior.
-3. Theme tags:
+3. **Conflict priority (충돌 시 무시 우선):** When upstream changes collide or conflict with `personal` features, policies, or intentional behavior, prioritize ignoring, skipping, or dropping the conflicting upstream changes over forcing a merge or overwriting `personal`. The default is to preserve `personal` as-is and ignore the conflicting upstream delta.
+4. Theme tags:
 
    - `float-bar-usage` — overlay quota display model
    - `antigravity` — Gemini quota fetch / CLI detection

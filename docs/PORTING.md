@@ -58,7 +58,7 @@ For each bullet / merged PR in the release, assign exactly one class:
 | Class | Meaning |
 |-------|---------|
 | **PORT** | Has a local counterpart (provider, settings path, CLI, UI surface, fixture). |
-| **SKIP** | macOS-exclusive or no Windows analog. Common skips: Keychain, iCloud/CloudKit, AppKit/SwiftUI menu chrome, `libproc`, `0600` POSIX file modes (our `secure_file` + DPAPI already covers owner-only intent). |
+| **SKIP** | macOS-exclusive, no Windows analog, or conflicts with `personal` features. When conflicts or collisions occur, prioritize ignoring/skipping (`personal` takes precedence). Common skips: Keychain, iCloud/CloudKit, AppKit/SwiftUI menu chrome, `libproc`, `0600` POSIX file modes (our `secure_file` + DPAPI already covers owner-only intent). |
 | **DECIDE-by-audit** | Unclear. Needs evidence before coding (see below). |
 
 **DECIDE-by-audit evidence** (collect before touching code):
@@ -69,7 +69,7 @@ For each bullet / merged PR in the release, assign exactly one class:
 - UI surface impact (tray / settings tab / float bar / none)
 - Proposed class: PORT, SKIP, or **DEFER-with-evidence**
 
-When the upstream reference is ambiguous, prefer **DEFER-with-evidence** over a
+When the upstream reference is ambiguous or causes conflict, prefer **DEFER-with-evidence** or **SKIP** (무시 우선) over a
 guess-port. Example from the 0.47.0 pass: Claude cold-boot items
 (`#2493` / `#2494`) were deferred — not portable as written, not silently
 half-implemented.
