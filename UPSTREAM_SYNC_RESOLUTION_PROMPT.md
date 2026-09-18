@@ -5,6 +5,7 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 ## Goal
 
 - Preserve the product values, behavior, and intentional deletions of `personal` by default.
+- If conflicts (concept or merge collisions) arise, prioritize ignoring or dropping conflicting upstream changes (`personal` takes precedence).
 - Add every non-overlapping change from `main`.
 - If both branches changed the same feature or policy differently, do not decide silently. Ask the developer.
 - Preserve normal merge ancestry. Do not squash or rebase.
@@ -29,11 +30,12 @@ Resolve the open upstream sync PR for `junglesub/Win-CodexBar`.
 - Preserve behavior changed only by `personal`.
 - Accept features and fixes changed only by `main`.
 - When changes in the same file are independent, retain both.
+- **Conflict priority (충돌 시 무시 우선):** When upstream changes collide or conflict with `personal` features, policies, or intentional behavior, prioritize ignoring, skipping, or dropping the conflicting upstream changes over forcing a merge or overwriting `personal`. The default is to preserve `personal` as-is and ignore the conflicting upstream delta.
 - Compare the result with both parents. During the merge, `HEAD` is the `main`
   parent and `MERGE_HEAD` is the `personal` parent; use result-vs-parent diffs
   to distinguish newly accepted upstream work from the large staged
   `personal` delta.
-- When both branches implement the same feature differently, ask the developer and include:
+- When both branches implement the same feature differently and cannot be safely ignored, ask the developer and include:
   - the file and relevant symbol;
   - the `personal` behavior;
   - the `main` behavior;
@@ -52,10 +54,13 @@ Treat deletions on `personal` as deliberate product decisions, not as missing up
 
 ## Personal Policies That Must Be Preserved
 
-- Frontend toolchain: Node.js 20 and `pnpm@10.18.1`. Keep upstream dependency and lockfile updates when they remain compatible with this toolchain.
+- Frontend toolchain: follow the `main` pins. After the 2026-09-18 sync that is Node.js 24.18.0 and `pnpm@11.25.0` (from `apps/desktop-tauri/package.json`); pnpm 11 requires Node `>=22.13`, so the previous Node 20 gate is no longer viable. Keep upstream dependency and lockfile updates.
+- Release scripts: if `personal` did not modify a script, drop the personal-side line noise and take `main` (or the merged upstream result). Keep personal modifications only where `personal` actually changed behavior. Current sync decision (2026-09-18): `scripts/install-release-prerequisites.ps1` and `scripts/release-pipeline.tests.ps1` take upstream; `package.json` takes upstream `0.56.8` / `pnpm@11.25.0`; `docs/release/ci-cd.md` keeps personal.
+- Antigravity provider internals: follow `main` (`rust/src/providers/antigravity/mod.rs` + `quota_summary.rs` + `tests.rs`). The personal summary-first parser was dropped on 2026-09-18 because `main` also surfaces the Gemini 5h/weekly buckets. Float Bar slot rules stay personal and are unchanged by this.
+- Grok provider internals: follow `main` (`rust/src/providers/grok/{billing,mod,tests}.rs`). The personal `Weekly` metadata fallback label was dropped on 2026-09-18; `main` derives cadence from the full billing cycle and keeps `Credits` as the metadata fallback.
 - Float Bar: three used-percentage slots, per-metric colors, countdowns, and `modelSpecific` as fallback only.
 - Float Bar settings: `provider_metrics` notifications and independent background color and opacity.
-- Antigravity: summary-first Gemini five-hour and weekly mapping with the legacy fallback.
+- Antigravity: `main`'s quota-summary mapping (Gemini 5h + weekly buckets with the legacy `GetUserStatus` fallback).
 - Updater: keep the active fork-specific update channel. Release builds embed
   their source commit SHA and compare it with the
   `junglesub/Win-CodexBar` `personal-latest` tag. Preserve startup and manual
@@ -64,8 +69,8 @@ Treat deletions on `personal` as deliberate product decisions, not as missing up
 - Keep `junglesub` as the current repository identity and `nesszer` as the upstream sync source.
 - Keep `personal-release.yml`, `upstream-sync.yml`, and `install-personal.ps1`.
 - Keep `.github/workflows/pr-check.yml` as the automatic GitHub-hosted
-  `windows-2025` gate for PRs targeting `personal`, using Node.js 20 and
-  `pnpm@10.18.1`, unless the developer explicitly chooses another CI policy.
+  `windows-2025` gate for PRs targeting `personal`, using Node.js 24.18.0 and
+  the pnpm version pinned by `apps/desktop-tauri/package.json`, unless the developer explicitly chooses another CI policy.
 - Do not replace personal release delivery with the upstream CircleCI publisher.
 - Keep `scripts/gh-safe.sh` bound to `junglesub/Win-CodexBar` for normal
   mutations. `nesszer/Win-CodexBar` is a read-only sync source, not the

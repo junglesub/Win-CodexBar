@@ -12,6 +12,7 @@ const tauriMocks = vi.hoisted(() => ({
   getCodexAccountsState: vi.fn(),
   codexAccountAdd: vi.fn(),
   codexAccountFetch: vi.fn(),
+  codexAccountReauthenticate: vi.fn(),
   codexAccountRemove: vi.fn(),
   codexAccountSwitch: vi.fn(),
   codexAccountRestartDesktop: vi.fn(),
@@ -76,6 +77,7 @@ describe("CodexAccountsSection", () => {
     expect(screen.getByText("user-2@example.com")).toBeDefined();
     expect(screen.getByText("CodexAccountsSourceManaged")).toBeDefined();
     expect(screen.getByText("CodexAccountsSourceAmbient")).toBeDefined();
+    expect(screen.getAllByText("CodexAccountsReauthenticateButton")).toHaveLength(1);
   });
 
   it("shows the usage pill and blocked state from a snapshot", async () => {
@@ -91,6 +93,37 @@ describe("CodexAccountsSection", () => {
     await waitFor(() => {
       expect(screen.getByText("free · 38%")).toBeDefined();
     });
+  });
+
+  it("offers ambient reauthentication and reloads the account state", async () => {
+    const ambient = account("ambient", { source: "ambient" });
+    tauriMocks.getCodexAccountsState
+      .mockResolvedValueOnce({ accounts: [ambient], snapshots: {} } as CodexAccountsStateBridge)
+      .mockResolvedValueOnce({ accounts: [ambient], snapshots: { ambient: snapshot(12) } } as CodexAccountsStateBridge);
+    tauriMocks.codexAccountReauthenticate.mockResolvedValue(ambient);
+
+    render(<CodexAccountsSection t={t} />);
+    await screen.findByText("CodexAccountsReauthenticateButton");
+
+    await act(async () => {
+      screen.getByText("CodexAccountsReauthenticateButton").click();
+    });
+
+    expect(tauriMocks.codexAccountReauthenticate).toHaveBeenCalledTimes(1);
+    await waitFor(() => {
+      expect(screen.getByText("free · 12%")).toBeDefined();
+    });
+  });
+
+  it("does not offer a desktop session restart for a no-op switch", async () => {
+    tauriMocks.getCodexAccountsState.mockResolvedValue({ accounts: [account("1")], snapshots: {} });
+    tauriMocks.codexAccountSwitch.mockResolvedValue({ switchId: "noop", desktopSessionRestorePath: null } as CodexSwitchResult);
+    render(<CodexAccountsSection t={t} />);
+    await screen.findByText("CodexAccountsSwitchButton");
+    await act(async () => { screen.getByText("CodexAccountsSwitchButton").click(); });
+    expect(screen.getByText("CodexSwitchSuccess")).toBeDefined();
+    expect(screen.queryByText("CodexAccountsRestartDesktop")).toBeNull();
+    expect(tauriMocks.codexAccountRestartDesktop).not.toHaveBeenCalled();
   });
 
   it("adds an account and reloads", async () => {
@@ -115,12 +148,12 @@ describe("CodexAccountsSection", () => {
     expect(tauriMocks.codexAccountAdd).toHaveBeenCalledTimes(1);
   });
 
-  it("switches an account and offers a desktop restart when a session can be restored", async () => {
+  it.each([true, false])("offers a desktop restart even for a first switch (saved session: %s)", async (restoreExists) => {
     tauriMocks.getCodexAccountsState.mockResolvedValue(
       { accounts: [account("1")], snapshots: {} } as CodexAccountsStateBridge,
     );
     tauriMocks.codexAccountSwitch.mockResolvedValue(
-      { desktopSessionRestoreExists: true, desktopSessionRestorePath: "C:/s", desktopSessionBackupPath: null } as CodexSwitchResult,
+      { switchId: "latest-switch", desktopSessionRestoreExists: restoreExists, desktopSessionRestorePath: "C:/s", desktopSessionBackupPath: null } as CodexSwitchResult,
     );
     render(<CodexAccountsSection t={t} />);
     await waitFor(() => {
@@ -139,6 +172,8 @@ describe("CodexAccountsSection", () => {
       screen.getByText("CodexAccountsRestartDesktop").click();
     });
     expect(tauriMocks.codexAccountRestartDesktop).toHaveBeenCalledTimes(1);
+    expect(tauriMocks.codexAccountRestartDesktop).toHaveBeenCalledWith("latest-switch");
+    expect(screen.queryByText("CodexAccountsRestartDesktop")).toBeNull();
   });
 });
 

@@ -1,31 +1,65 @@
-﻿//! Antigravity provider implementation
+//! Antigravity provider implementation
 //!
 //! Fetches usage data from Antigravity's local language server probe
 //! Uses Windows process detection to find CSRF token
-//!
-//! Quota preference: the internal `RetrieveUserQuotaSummary` endpoint is
-//! preferred (Antigravity 2.x app and `agy` CLI expose Gemini shared-pool
-//! five-hour + weekly buckets there), falling back to the legacy
-//! `GetUserStatus` / `clientModelConfigs` model-level parse unchanged when the
-//! summary is unavailable or unusable.
 
+mod local_proto;
 pub mod local_sessions;
+mod local_sqlite;
+mod local_step_resolver;
+mod quota_summary;
 
 use async_trait::async_trait;
+#[cfg(windows)]
+use futures::{StreamExt, stream};
 use regex_lite::Regex;
 use serde::Deserialize;
 #[cfg(windows)]
+use std::ffi::OsString;
+#[cfg(windows)]
 use std::os::windows::process::CommandExt;
+use std::path::PathBuf;
 use std::process::Command;
 use std::sync::{LazyLock, OnceLock};
+use std::time::Duration;
+#[cfg(windows)]
+use std::time::Instant;
+
+#[cfg(windows)]
+use crate::managed_process::{ManagedProcess, ManagedProcessConfig, ManagedProcessError};
 
 use crate::core::{
     FetchContext, NamedRateWindow, Provider, ProviderError, ProviderFetchResult, ProviderId,
     ProviderMetadata, RateWindow, SourceMode, UsageSnapshot,
 };
 
-const NOT_RUNNING_MESSAGE: &str =
-    "Antigravity language server not running. Start Google Antigravity and sign in, then retry.";
+const AGY_NOT_FOUND_MESSAGE: &str =
+    "Antigravity is not running and the signed-in agy CLI was not found.";
+#[cfg(windows)]
+const AGY_ATTEMPT_TIMEOUT: Duration = Duration::from_secs(25);
+#[cfg(windows)]
+const AGY_CLEANUP_RESERVE: Duration = Duration::from_secs(2);
+#[cfg(windows)]
+const AGY_PROBE_TIMEOUT: Duration = Duration::from_millis(750);
+#[cfg(windows)]
+const AGY_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
+const GET_USER_STATUS_PATH: &str = "/exa.language_server_pb.LanguageServerService/GetUserStatus";
+const QUOTA_SUMMARY_PATH: &str =
+    "/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary";
+
+/// Serialize task-owned `agy` launches so concurrent app surfaces never start
+/// multiple interactive CLI servers at the same time.
+#[cfg(windows)]
+static MANAGED_AGY_FETCH: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+
+/// The managed-process owner stays provider-neutral; the provider only maps its
+/// error surface into [`ProviderError`].
+#[cfg(windows)]
+impl From<ManagedProcessError> for ProviderError {
+    fn from(error: ManagedProcessError) -> Self {
+        ProviderError::Other(error.to_string())
+    }
+}
 
 /// Antigravity provider
 pub struct AntigravityProvider {
@@ -57,18 +91,14 @@ enum ProcessSource {
 /// language server as the IDE but under a different process name and without a
 /// `--csrf_token` flag. Match either the bare `agy` executable or the
 /// `antigravity-cli` package name; a leading path separator prevents unrelated
-/// names (e.g. `notantigravity-cli`) from matching. The name must end at a
-/// boundary: whitespace, a closing `"` (a Windows command line where the
-/// executable path is double-quoted), or end of string. The `antigravity-cli`
-/// names also accept a path separator as the boundary; the bare `agy` name
-/// must not, so a directory segment like `C:\agy\other.exe` does not match.
+/// names (e.g. `notantigravity-cli`) from matching.
 fn is_agy_cli_command(command_line: &str) -> bool {
     static CLI_PATH_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(^|[\\/])(antigravity-cli|antigravity_cli)(\.exe)?([\s/\\"]|$)"#)
+        Regex::new(r#"(^|[\\/])(antigravity-cli|antigravity_cli)(?:"|[\s/\\]|$)"#)
             .expect("valid antigravity-cli pattern")
     });
     static AGY_RE: LazyLock<Regex> = LazyLock::new(|| {
-        Regex::new(r#"(^|[\\/])agy(\.exe)?([\s"]|$)"#).expect("valid agy pattern")
+        Regex::new(r#"(^|[\\/])agy(\.exe)?(?:"|\s|$)"#).expect("valid agy pattern")
     });
     let lower = command_line.to_ascii_lowercase();
     CLI_PATH_RE.is_match(&lower) || AGY_RE.is_match(&lower)
@@ -93,13 +123,16 @@ impl AntigravityProvider {
     }
 
     /// Detect running Antigravity language server and extract connection info
-    fn detect_process_info() -> Result<ProcessInfo, ProviderError> {
+    fn detect_process_info() -> Result<Option<ProcessInfo>, ProviderError> {
         // Use PowerShell to get process command lines
         #[cfg(windows)]
         const CREATE_NO_WINDOW: u32 = 0x08000000;
 
         let mut cmd = Command::new("powershell.exe");
         cmd.args([
+                "-NoLogo",
+                "-NoProfile",
+                "-NonInteractive",
                 "-ExecutionPolicy", "Bypass",
                 "-Command",
                 // Match the desktop IDE/app language server (language_server.exe /
@@ -121,8 +154,7 @@ impl AntigravityProvider {
         }
 
         let stdout = String::from_utf8_lossy(&output.stdout);
-        Self::parse_process_info(&stdout)
-            .ok_or_else(|| ProviderError::NotInstalled(NOT_RUNNING_MESSAGE.to_string()))
+        Ok(Self::parse_process_info(&stdout))
     }
 
     fn parse_process_info(stdout: &str) -> Option<ProcessInfo> {
@@ -223,8 +255,10 @@ impl AntigravityProvider {
         // equivalent of `lsof`), then the heuristic window above the extension port, then a
         // few known ports as a last resort.
         let mut candidates: Vec<u16> = Vec::new();
-        if let Some(pid) = pid {
-            candidates.extend(Self::listening_ports_for_pid(pid));
+        if let Some(pid) = pid
+            && let Ok(ports) = Self::listening_ports_for_pid(pid)
+        {
+            candidates.extend(ports);
         }
         if let Some(ep) = extension_port.filter(|&p| p > 0) {
             candidates.extend((0..20u16).map(|offset| ep.saturating_add(offset)));
@@ -270,60 +304,63 @@ impl AntigravityProvider {
         }
     }
 
-    /// Enumerate the TCP ports a given PID is listening on (Windows `lsof` equivalent).
-    /// On Windows this uses `Get-NetTCPConnection`; it returns an empty list on any failure
-    /// so the caller deterministically falls back to the heuristic candidate ports.
+    /// Enumerate IPv4 TCP listener ports for a PID through the Windows IP Helper API.
+    /// This avoids starting PowerShell inside the managed readiness poll.
+    ///
+    /// The owner lives in the provider-neutral
+    /// [`crate::managed_process::listening_ports_for_pid`]; this binding only
+    /// maps its error into the provider surface.
     #[cfg(windows)]
-    fn listening_ports_for_pid(pid: u32) -> Vec<u16> {
-        const CREATE_NO_WINDOW: u32 = 0x08000000;
-
-        let mut cmd = Command::new("powershell.exe");
-        cmd.args([
-            "-ExecutionPolicy",
-            "Bypass",
-            "-Command",
-            &format!(
-                "Get-NetTCPConnection -OwningProcess {pid} -State Listen \
-                 -ErrorAction SilentlyContinue | Select-Object -ExpandProperty LocalPort"
-            ),
-        ]);
-        cmd.creation_flags(CREATE_NO_WINDOW);
-
-        let Ok(output) = cmd.output() else {
-            return Vec::new();
-        };
-        if !output.status.success() {
-            return Vec::new();
-        }
-
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let mut ports: Vec<u16> = stdout
-            .lines()
-            .filter_map(|l| l.trim().parse::<u16>().ok())
-            .collect();
-        ports.sort_unstable();
-        ports.dedup();
-        ports
+    fn listening_ports_for_pid(pid: u32) -> Result<Vec<u16>, ProviderError> {
+        crate::managed_process::listening_ports_for_pid(pid).map_err(ProviderError::from)
     }
 
     /// Non-Windows platforms have no `Get-NetTCPConnection`; return an empty list by design so
     /// the caller falls back to the heuristic candidate ports.
     #[cfg(not(windows))]
-    fn listening_ports_for_pid(_pid: u32) -> Vec<u16> {
-        Vec::new()
+    fn listening_ports_for_pid(_pid: u32) -> Result<Vec<u16>, ProviderError> {
+        Ok(Vec::new())
     }
 
-    /// Fetch usage from the local Antigravity language server.
+    /// Fetch user status from Antigravity API.
     ///
-    /// Prefers the Antigravity 2.x `RetrieveUserQuotaSummary` payload and falls
-    /// back to the legacy `GetUserStatus` model-level parse unchanged.
-    async fn fetch_usage_snapshot(&self) -> Result<UsageSnapshot, ProviderError> {
-        let process_info = Self::detect_process_info()?;
-        let api_port = Self::find_api_port(process_info.extension_port, process_info.pid).await?;
+    /// v0.56.0: prefer the quota-summary endpoint so the 5-hour and weekly
+    /// lanes can be resolved independently across model families. The legacy
+    /// model-quota payload remains the compatibility fallback.
+    fn with_cadence_labels(mut usage: UsageSnapshot) -> UsageSnapshot {
+        if usage
+            .secondary
+            .as_ref()
+            .is_some_and(|window| window.window_minutes == Some(7 * 24 * 60))
+        {
+            usage.secondary_label = Some("Weekly".to_string());
+        }
+        usage
+    }
 
-        // SECURITY: TLS verification disabled for local language server (see find_api_port)
-        // The language server is a local loopback endpoint. Do not route it
-        // through the app-wide outbound proxy.
+    async fn fetch_user_status(&self) -> Result<Option<UsageSnapshot>, ProviderError> {
+        let process_info = tokio::task::spawn_blocking(Self::detect_process_info)
+            .await
+            .map_err(|error| {
+                ProviderError::Other(format!(
+                    "Failed to join the Antigravity process detector: {error}"
+                ))
+            })??;
+        let Some(process_info) = process_info else {
+            return Ok(None);
+        };
+        let api_port = Self::find_api_port(process_info.extension_port, process_info.pid).await?;
+        self.fetch_user_status_at_port(&process_info, api_port)
+            .await
+            .map(Some)
+    }
+
+    async fn fetch_user_status_at_port(
+        &self,
+        process_info: &ProcessInfo,
+        api_port: u16,
+    ) -> Result<UsageSnapshot, ProviderError> {
+        // SECURITY: TLS verification disabled only for this loopback language server.
         let client = crate::core::credentialed_http_client_builder()
             .no_proxy()
             .timeout(std::time::Duration::from_secs(8))
@@ -332,18 +369,55 @@ impl AntigravityProvider {
             .build()
             .map_err(|e| ProviderError::Other(e.to_string()))?;
 
-        // The `agy` CLI serves the quota endpoints without a CSRF token; the
-        // desktop IDE/app server requires one. Only attach the CSRF header when
-        // the matched process is the desktop server (and a token was found).
-        let requires_csrf = process_info.source == ProcessSource::Ide;
-        let csrf_token = if requires_csrf {
-            process_info
-                .extension_server_csrf_token
-                .as_deref()
-                .unwrap_or(&process_info.csrf_token)
-        } else {
-            ""
-        };
+        let quota_body = serde_json::json!({ "forceRefresh": true });
+        match Self::fetch_local_payload(
+            &client,
+            process_info,
+            api_port,
+            QUOTA_SUMMARY_PATH,
+            &quota_body,
+            std::time::Duration::from_secs(4),
+        )
+        .await
+        {
+            Ok(bytes) => match quota_summary::parse_usage_snapshot(&bytes) {
+                Ok(mut snapshot) => {
+                    // Identity is best-effort enrichment and must not displace a
+                    // successful quota-summary result.
+                    let identity_body = serde_json::json!({
+                        "metadata": {
+                            "ideName": "antigravity",
+                            "extensionName": "antigravity",
+                            "ideVersion": "unknown",
+                            "locale": "en"
+                        }
+                    });
+                    if let Ok(identity_bytes) = Self::fetch_local_payload(
+                        &client,
+                        process_info,
+                        api_port,
+                        GET_USER_STATUS_PATH,
+                        &identity_body,
+                        std::time::Duration::from_secs(1),
+                    )
+                    .await
+                        && let Ok(identity) =
+                            serde_json::from_slice::<UserStatusResponse>(&identity_bytes)
+                    {
+                        Self::apply_user_identity(&mut snapshot, &identity);
+                    }
+                    return Ok(snapshot);
+                }
+                Err(error) => tracing::debug!(
+                    %error,
+                    "Antigravity quota summary unusable; falling back to model quotas"
+                ),
+            },
+            Err(error) => tracing::debug!(
+                %error,
+                "Antigravity quota summary unavailable; falling back to model quotas"
+            ),
+        }
 
         let body = serde_json::json!({
             "metadata": {
@@ -353,263 +427,349 @@ impl AntigravityProvider {
                 "locale": "en"
             }
         });
-
-        // Preferred: Antigravity 2.x quota summary (Gemini shared-pool 5h +
-        // weekly buckets). Any transport error, non-success status (including
-        // the known IDE 404), parse failure, missing Gemini group, or unusable
-        // Gemini bucket falls back to the legacy GetUserStatus parse unchanged.
-        if let Ok(summary) = self
-            .fetch_quota_summary(
-                &client,
-                &process_info,
-                requires_csrf,
-                csrf_token,
-                api_port,
-                &body,
-            )
-            .await
-        {
-            return Ok(summary);
-        }
-
-        self.fetch_user_status(
+        let bytes = Self::fetch_local_payload(
             &client,
-            &process_info,
-            requires_csrf,
-            csrf_token,
+            process_info,
             api_port,
+            GET_USER_STATUS_PATH,
             &body,
+            std::time::Duration::from_secs(8),
         )
-        .await
+        .await?;
+        let response: UserStatusResponse = serde_json::from_slice(&bytes)
+            .map_err(|e| ProviderError::Parse(format!("Failed to parse response: {e}")))?;
+        self.parse_user_status(response)
     }
 
-    /// POST `RetrieveUserQuotaSummary` and map the Gemini five-hour/weekly
-    /// buckets into a usage snapshot. Returns an error (and logs only a safe
-    /// reason) whenever the summary is unavailable or has no usable Gemini
-    /// bucket, so the caller falls back to the legacy `GetUserStatus` path.
-    async fn fetch_quota_summary(
-        &self,
-        client: &reqwest::Client,
-        process_info: &ProcessInfo,
-        requires_csrf: bool,
-        csrf_token: &str,
-        api_port: u16,
-        body: &serde_json::Value,
-    ) -> Result<UsageSnapshot, ProviderError> {
-        let url = format!(
-            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/RetrieveUserQuotaSummary",
-            api_port
-        );
-
-        let mut request = client
-            .post(&url)
-            .header("Content-Type", "application/json")
-            .header("Connect-Protocol-Version", "1")
-            .json(body);
-        if requires_csrf {
-            request = request.header("X-Codeium-Csrf-Token", csrf_token);
-        }
-        let resp = match request.send().await {
-            Ok(resp) => resp,
-            Err(e) => {
-                tracing::debug!("Antigravity quota summary request failed: {}", e);
-                return Err(ProviderError::Other(format!(
-                    "Quota summary request failed: {}",
-                    e
-                )));
-            }
-        };
-
-        if !resp.status().is_success() {
-            // Retry with the language-server CSRF token if the extension-server
-            // token failed, mirroring the legacy GetUserStatus token order.
-            if requires_csrf && process_info.extension_server_csrf_token.is_some() {
-                let retry_resp = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("Connect-Protocol-Version", "1")
-                    .header("X-Codeium-Csrf-Token", &process_info.csrf_token)
-                    .json(body)
-                    .send()
-                    .await;
-
-                if let Ok(retry) = retry_resp
-                    && retry.status().is_success()
-                {
-                    let text = retry.text().await.unwrap_or_default();
-                    match self.parse_quota_summary(&text) {
-                        Ok(snapshot) => return Ok(snapshot),
-                        Err(e) => {
-                            tracing::debug!(
-                                "Antigravity quota summary retry parse failed; falling back: {}",
-                                e
-                            );
-                        }
-                    }
-                }
-            }
-
-            let status = resp.status();
-            tracing::debug!(
-                "Antigravity quota summary unavailable (HTTP {}); falling back to GetUserStatus",
-                status
-            );
-            return Err(ProviderError::Other(format!(
-                "Quota summary API error HTTP {}",
-                status
-            )));
-        }
-
-        let text = resp.text().await.unwrap_or_default();
-        match self.parse_quota_summary(&text) {
-            Ok(snapshot) => Ok(snapshot),
-            Err(e) => {
-                tracing::debug!(
-                    "Antigravity quota summary parse failed; falling back to GetUserStatus: {}",
-                    e
-                );
-                Err(e)
-            }
-        }
-    }
-
-    /// Parse a `RetrieveUserQuotaSummary` response into a usage snapshot.
-    ///
-    /// Maps the **Gemini Models** group's five-hour bucket to primary (300
-    /// minutes) and its weekly bucket to secondary (10 080 minutes). Monthly
-    /// stays absent and `model_specific` is never populated from a successful
-    /// summary. Returns an error when the summary has no usable Gemini bucket,
-    /// so callers fall back to the legacy `GetUserStatus` parse.
-    fn parse_quota_summary(&self, text: &str) -> Result<UsageSnapshot, ProviderError> {
-        let response: QuotaSummaryResponse = serde_json::from_str(text)
-            .map_err(|e| ProviderError::Parse(format!("Failed to parse quota summary: {}", e)))?;
-
-        let groups: &[QuotaSummaryGroup] = response
-            .response
-            .as_ref()
-            .and_then(|p| p.groups.as_deref())
-            .or_else(|| response.summary.as_ref().and_then(|p| p.groups.as_deref()))
-            .or_else(|| response.root_groups())
-            .unwrap_or_default();
-
-        let gemini_buckets = groups
-            .iter()
-            .filter(|group| is_gemini_group(group))
-            .flat_map(|group| group.buckets.iter())
-            .collect::<Vec<_>>();
-
-        // Five-hour and weekly buckets by explicit `window` first, then by
-        // normalized bucketId/displayName. Never depend on array position. For
-        // multiple buckets of the same cadence, the most constrained one (lowest
-        // remaining fraction) represents the group, mirroring upstream.
-        let five_hour = gemini_buckets
-            .iter()
-            .copied()
-            .filter(|bucket| bucket.usable_fraction().is_some())
-            .filter(|bucket| is_bucket_cadence(bucket, BucketCadence::FiveHour))
-            .min_by(|a, b| bucket_fraction_cmp(a, b))
-            .map(rate_window_from_bucket);
-        let weekly = gemini_buckets
-            .iter()
-            .copied()
-            .filter(|bucket| bucket.usable_fraction().is_some())
-            .filter(|bucket| is_bucket_cadence(bucket, BucketCadence::Weekly))
-            .min_by(|a, b| bucket_fraction_cmp(a, b))
-            .map(rate_window_from_bucket);
-
-        // Five-hour is primary; weekly is secondary. A partial summary with
-        // only a usable weekly bucket still surfaces it (as primary, which the
-        // UI classifies by windowMinutes), without duplicating it.
-        let primary = five_hour
-            .as_ref()
-            .or(weekly.as_ref())
-            .cloned()
-            .ok_or_else(|| {
-                ProviderError::Parse("Quota summary has no usable Gemini bucket".to_string())
+    /// Start a short-lived, headless `agy` session when neither the Antigravity
+    /// desktop app nor a user-owned CLI session is running. The deadline includes
+    /// launch serialization, the after-lock recheck, startup, probing and cleanup.
+    #[cfg(windows)]
+    async fn fetch_with_managed_agy(&self) -> Result<ManagedAgyOutcome, ProviderError> {
+        let deadline = Instant::now() + AGY_ATTEMPT_TIMEOUT;
+        let lock_budget = deadline.saturating_duration_since(Instant::now());
+        let _launch_guard = tokio::time::timeout(lock_budget, MANAGED_AGY_FETCH.lock())
+            .await
+            .map_err(|_| {
+                ProviderError::Other(
+                    "Timed out waiting for another managed agy refresh to finish".to_string(),
+                )
             })?;
 
-        let mut snapshot = UsageSnapshot::new(primary);
-        if five_hour.is_some()
-            && let Some(weekly) = weekly
-        {
-            snapshot = snapshot.with_secondary(weekly);
+        // A desktop app or user-owned CLI may have appeared while this request
+        // waited for the launch lock. Reuse it and never include it in our job.
+        let recheck_budget = deadline.saturating_duration_since(Instant::now());
+        if recheck_budget.is_zero() {
+            return Err(Self::managed_agy_timeout());
         }
-        Ok(snapshot)
+        match tokio::time::timeout(recheck_budget, self.fetch_user_status()).await {
+            Ok(Ok(Some(usage))) => return Ok(ManagedAgyOutcome::Reused(usage)),
+            Ok(Ok(None)) => {}
+            Ok(Err(error)) => return Err(error),
+            Err(_) => return Err(Self::managed_agy_timeout()),
+        }
+
+        let Some(binary) = Self::locate_agy_binary() else {
+            return Ok(ManagedAgyOutcome::Missing);
+        };
+        let probe_client = crate::core::credentialed_http_client_builder()
+            .no_proxy()
+            .timeout(AGY_PROBE_TIMEOUT)
+            .danger_accept_invalid_certs(true)
+            .redirect(reqwest::redirect::Policy::none())
+            .build()
+            .map_err(|error| ProviderError::Other(error.to_string()))?;
+        let config = ManagedProcessConfig {
+            program: binary,
+            args: Vec::new(),
+            env: vec![
+                (OsString::from("TERM"), OsString::from("xterm-256color")),
+                (OsString::from("COLORTERM"), OsString::from("truecolor")),
+            ],
+            cwd: dirs::home_dir().filter(|path| path.is_dir()),
+            pty_rows: 30,
+            pty_cols: 120,
+            label: "agy".to_string(),
+        };
+        let mut managed = ManagedProcess::spawn(&config)?;
+        let pid = managed.pid();
+        let process_info = ProcessInfo {
+            csrf_token: String::new(),
+            extension_server_csrf_token: None,
+            extension_port: None,
+            pid: Some(pid),
+            source: ProcessSource::Cli,
+        };
+
+        let result = async {
+            let work_deadline = deadline.checked_sub(AGY_CLEANUP_RESERVE).unwrap_or(deadline);
+            let mut last_error = None;
+            loop {
+                if let Some(status) = managed.try_wait()? {
+                    return Err(ProviderError::NotInstalled(format!(
+                        "agy exited before its local quota service was ready ({status}). Open Antigravity or run agy and sign in, then retry."
+                    )));
+                }
+
+                match Self::listening_ports_for_pid(pid) {
+                    Ok(ports) => {
+                        if let Some(port) = Self::first_ready_api_port(&probe_client, ports).await {
+                            let remaining = work_deadline
+                                .saturating_duration_since(Instant::now());
+                            if remaining.is_zero() {
+                                break;
+                            }
+                            match tokio::time::timeout(
+                                remaining,
+                                self.fetch_user_status_at_port(&process_info, port),
+                            )
+                            .await
+                            {
+                                Ok(Ok(usage)) => return Ok(ManagedAgyOutcome::Fetched(usage)),
+                                Ok(Err(ProviderError::AuthRequired)) => {
+                                    return Err(ProviderError::AuthRequired);
+                                }
+                                Ok(Err(error)) => last_error = Some(error),
+                                Err(_) => break,
+                            }
+                        }
+                    }
+                    Err(error) => last_error = Some(error),
+                }
+
+                let remaining = work_deadline.saturating_duration_since(Instant::now());
+                if remaining.is_zero() {
+                    break;
+                }
+                tokio::time::sleep(AGY_READY_POLL_INTERVAL.min(remaining)).await;
+            }
+
+            if let Some(error) = last_error {
+                tracing::debug!(%error, "managed agy quota service did not become ready");
+            }
+            Err(Self::managed_agy_timeout())
+        }
+        .await;
+
+        managed.shutdown(AGY_CLEANUP_RESERVE).await;
+        result
     }
 
-    async fn fetch_user_status(
-        &self,
+    #[cfg(windows)]
+    async fn first_ready_api_port(client: &reqwest::Client, ports: Vec<u16>) -> Option<u16> {
+        let mut probes = stream::iter(
+            ports
+                .into_iter()
+                .map(|port| async move { (port, Self::probe_api_port(client, port).await) }),
+        )
+        .buffer_unordered(4);
+        while let Some((port, ready)) = probes.next().await {
+            if ready {
+                return Some(port);
+            }
+        }
+        None
+    }
+
+    #[cfg(windows)]
+    fn managed_agy_timeout() -> ProviderError {
+        ProviderError::Other(
+            "agy started but its quota service did not become ready before the managed refresh deadline. Open Antigravity or run agy and sign in, then retry."
+                .to_string(),
+        )
+    }
+
+    fn offline_usage_result() -> Option<ProviderFetchResult> {
+        let count = local_sessions::offline_conversation_count();
+        if count == 0 {
+            return None;
+        }
+        let noun = if count == 1 {
+            "conversation"
+        } else {
+            "conversations"
+        };
+        let usage = UsageSnapshot::new(RateWindow::informational(format!(
+            "Offline · {count} {noun}"
+        )))
+        .with_login_method("offline");
+        Some(ProviderFetchResult::new(usage, "offline"))
+    }
+
+    /// Resolve a failure to obtain live usage.
+    ///
+    /// A failed sign-in is actionable, so it always surfaces. Every other
+    /// failure means the runtime/CLI is unavailable or inconclusive, so an
+    /// available offline conversation-history snapshot is preferred over
+    /// discarding it for a transient error.
+    fn resolve_probe_failure(
+        error: ProviderError,
+        offline: Option<ProviderFetchResult>,
+    ) -> Result<ProviderFetchResult, ProviderError> {
+        if matches!(error, ProviderError::AuthRequired) {
+            return Err(error);
+        }
+        offline.ok_or(error)
+    }
+
+    /// Map a managed-lifecycle outcome onto provider policy.
+    ///
+    /// `Reused` means a user-owned runtime answered and the fetch stays local;
+    /// `Fetched` means the task-owned CLI answered; `Missing` is a policy no-op
+    /// so the caller can fall back to offline history; an error follows the
+    /// same offline-preferred resolution as the local probe. This is the policy
+    /// seam that the lifecycle owner deliberately does not own, so a fake
+    /// lifecycle can be driven through it in tests.
+    #[cfg(windows)]
+    fn resolve_managed_outcome(
+        outcome: Result<ManagedAgyOutcome, ProviderError>,
+    ) -> Result<Option<ProviderFetchResult>, ProviderError> {
+        match outcome {
+            Ok(ManagedAgyOutcome::Reused(usage)) => Ok(Some(ProviderFetchResult::new(
+                Self::with_cadence_labels(usage),
+                "local",
+            ))),
+            Ok(ManagedAgyOutcome::Fetched(usage)) => Ok(Some(ProviderFetchResult::new(
+                Self::with_cadence_labels(usage),
+                "cli",
+            ))),
+            Ok(ManagedAgyOutcome::Missing) => Ok(None),
+            Err(error) => {
+                if !matches!(error, ProviderError::AuthRequired) {
+                    tracing::debug!(%error, "managed Antigravity CLI probe failed");
+                }
+                Self::resolve_probe_failure(error, Self::offline_usage_result()).map(Some)
+            }
+        }
+    }
+
+    fn offline_or_unavailable() -> Result<ProviderFetchResult, ProviderError> {
+        Self::offline_usage_result()
+            .ok_or_else(|| ProviderError::NotInstalled(AGY_NOT_FOUND_MESSAGE.to_string()))
+    }
+
+    fn locate_agy_binary() -> Option<PathBuf> {
+        let candidates = Self::agy_binary_candidates(
+            std::env::var_os("ANTIGRAVITY_CLI_PATH").map(PathBuf::from),
+            which::which("agy").ok(),
+            std::env::var_os("LOCALAPPDATA").map(PathBuf::from),
+            dirs::home_dir(),
+        );
+        candidates.into_iter().find(|path| path.is_file())
+    }
+
+    fn agy_binary_candidates(
+        explicit: Option<PathBuf>,
+        path_lookup: Option<PathBuf>,
+        local_app_data: Option<PathBuf>,
+        home: Option<PathBuf>,
+    ) -> Vec<PathBuf> {
+        let mut candidates = Vec::new();
+        if let Some(path) = explicit {
+            candidates.push(path);
+        }
+        if let Some(path) = path_lookup {
+            candidates.push(path);
+        }
+        if let Some(root) = local_app_data {
+            candidates.push(root.join("agy").join("bin").join("agy.exe"));
+        }
+        if let Some(root) = home {
+            candidates.push(root.join(".local").join("bin").join(if cfg!(windows) {
+                "agy.exe"
+            } else {
+                "agy"
+            }));
+        }
+        candidates
+    }
+
+    async fn fetch_local_payload(
         client: &reqwest::Client,
         process_info: &ProcessInfo,
-        requires_csrf: bool,
-        csrf_token: &str,
         api_port: u16,
+        path: &str,
         body: &serde_json::Value,
-    ) -> Result<UsageSnapshot, ProviderError> {
-        let url = format!(
-            "https://127.0.0.1:{}/exa.language_server_pb.LanguageServerService/GetUserStatus",
-            api_port
-        );
-
+        timeout: std::time::Duration,
+    ) -> Result<Vec<u8>, ProviderError> {
+        let url = format!("https://127.0.0.1:{api_port}{path}");
+        let requires_csrf = process_info.source == ProcessSource::Ide;
+        let csrf_token = process_info
+            .extension_server_csrf_token
+            .as_deref()
+            .unwrap_or(&process_info.csrf_token);
         let mut request = client
             .post(&url)
             .header("Content-Type", "application/json")
             .header("Connect-Protocol-Version", "1")
+            .timeout(timeout)
             .json(body);
         if requires_csrf {
             request = request.header("X-Codeium-Csrf-Token", csrf_token);
         }
-        let resp = request
+        let response = request
             .send()
             .await
-            .map_err(|e| ProviderError::Other(format!("API request failed: {}", e)))?;
-
-        if !resp.status().is_success() {
-            // Retry with language server CSRF token if extension server token failed
-            if process_info.extension_server_csrf_token.is_some() {
-                let retry_resp = client
-                    .post(&url)
-                    .header("Content-Type", "application/json")
-                    .header("Connect-Protocol-Version", "1")
-                    .header("X-Codeium-Csrf-Token", &process_info.csrf_token)
-                    .json(body)
-                    .send()
-                    .await;
-
-                if let Ok(retry) = retry_resp
-                    && retry.status().is_success()
-                {
-                    let json: UserStatusResponse = retry
-                        .json()
-                        .await
-                        .map_err(|e| ProviderError::Parse(e.to_string()))?;
-                    return self.parse_user_status(json);
-                }
-            }
-
-            let status = resp.status();
-            let text = resp.text().await.unwrap_or_default();
-            if process_info.source == ProcessSource::Cli
-                && (status == reqwest::StatusCode::UNAUTHORIZED
-                    || status == reqwest::StatusCode::FORBIDDEN
-                    || text.to_ascii_lowercase().contains("not logged")
-                    || text.to_ascii_lowercase().contains("login method")
-                    || text.to_ascii_lowercase().contains("keyring"))
-            {
-                return Err(ProviderError::AuthRequired);
-            }
-            return Err(ProviderError::Other(format!(
-                "API error {}: {}",
-                status, text
-            )));
+            .map_err(|e| ProviderError::Other(format!("API request failed: {e}")))?;
+        if response.status().is_success() {
+            return response
+                .bytes()
+                .await
+                .map(|bytes| bytes.to_vec())
+                .map_err(|e| ProviderError::Other(format!("Failed to read response: {e}")));
         }
 
-        let json: UserStatusResponse = resp
-            .json()
-            .await
-            .map_err(|e| ProviderError::Other(format!("Failed to parse response: {}", e)))?;
+        let status = response.status();
+        let text = response.text().await.unwrap_or_default();
+        if requires_csrf && process_info.extension_server_csrf_token.is_some() {
+            let retry = client
+                .post(&url)
+                .header("Content-Type", "application/json")
+                .header("Connect-Protocol-Version", "1")
+                .header("X-Codeium-Csrf-Token", &process_info.csrf_token)
+                .timeout(timeout)
+                .json(body)
+                .send()
+                .await;
+            if let Ok(retry) = retry
+                && retry.status().is_success()
+            {
+                return retry
+                    .bytes()
+                    .await
+                    .map(|bytes| bytes.to_vec())
+                    .map_err(|e| ProviderError::Other(format!("Failed to read response: {e}")));
+            }
+        }
 
-        self.parse_user_status(json)
+        if process_info.source == ProcessSource::Cli
+            && (status == reqwest::StatusCode::UNAUTHORIZED
+                || status == reqwest::StatusCode::FORBIDDEN
+                || text.to_ascii_lowercase().contains("not logged")
+                || text.to_ascii_lowercase().contains("login method")
+                || text.to_ascii_lowercase().contains("keyring"))
+        {
+            return Err(ProviderError::AuthRequired);
+        }
+        Err(ProviderError::Other(format!("API error {status}: {text}")))
+    }
+
+    fn apply_user_identity(snapshot: &mut UsageSnapshot, response: &UserStatusResponse) {
+        let Some(status) = response.user_status.as_ref() else {
+            return;
+        };
+        snapshot.account_email = status
+            .email
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(str::to_string);
+        snapshot.login_method = status
+            .plan_status
+            .as_ref()
+            .and_then(|plan_status| plan_status.plan_info.as_ref())
+            .and_then(|plan| plan.plan_display_name.as_ref().or(plan.plan_name.as_ref()))
+            .cloned();
     }
 
     fn parse_user_status(
@@ -723,6 +883,10 @@ impl Default for AntigravityProvider {
 
 #[async_trait]
 impl Provider for AntigravityProvider {
+    fn automatic_metric_prioritizes_exhausted_window(&self) -> bool {
+        false
+    }
+
     fn id(&self) -> ProviderId {
         ProviderId::Antigravity
     }
@@ -734,33 +898,38 @@ impl Provider for AntigravityProvider {
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
         // `oauth` is not supported (no remote API path is ported yet); surface it
         // explicitly instead of silently probing locally. Both `auto` and `cli`
-        // resolve to the same local language-server probe: `detect_process_info`
-        // prefers the CSRF-protected desktop IDE/app server and falls back to the
-        // tokenless `agy` CLI when only that is running.
+        // prefer an existing desktop/CLI language server. When neither is
+        // running, start a task-owned `agy` session for this fetch only.
         if ctx.source_mode == SourceMode::OAuth {
             return Err(ProviderError::UnsupportedSource(ctx.source_mode));
         }
 
         tracing::debug!("Fetching Antigravity usage via local probe");
 
-        match self.fetch_usage_snapshot().await {
-            Ok(usage) => Ok(ProviderFetchResult::new(usage, "local")),
-            Err(e) => {
-                let count = local_sessions::offline_conversation_count();
-                if count > 0 {
-                    let noun = if count == 1 {
-                        "conversation"
-                    } else {
-                        "conversations"
-                    };
-                    let usage = UsageSnapshot::new(RateWindow::informational(format!(
-                        "Offline · {count} {noun}"
-                    )))
-                    .with_login_method("offline");
-                    return Ok(ProviderFetchResult::new(usage, "offline"));
+        match self.fetch_user_status().await {
+            Ok(Some(usage)) => Ok(ProviderFetchResult::new(
+                Self::with_cadence_labels(usage),
+                "local",
+            )),
+            Ok(None) => {
+                #[cfg(windows)]
+                {
+                    if let Some(result) =
+                        Self::resolve_managed_outcome(self.fetch_with_managed_agy().await)?
+                    {
+                        return Ok(result);
+                    }
                 }
-                tracing::warn!("Antigravity probe failed: {}", e);
-                Err(e)
+
+                Self::offline_or_unavailable()
+            }
+            Err(error) => {
+                // The local probe is inconclusive (e.g. PowerShell unavailable);
+                // preserve offline history before surfacing the probe error.
+                if !matches!(error, ProviderError::AuthRequired) {
+                    tracing::debug!(%error, "Antigravity local probe failed");
+                }
+                Self::resolve_probe_failure(error, Self::offline_usage_result())
             }
         }
     }
@@ -797,6 +966,16 @@ struct ProcessInfo {
     /// Whether the process is the desktop IDE/app server (CSRF required) or the
     /// `agy` CLI (no CSRF). See [`ProcessSource`].
     source: ProcessSource,
+}
+
+#[cfg(windows)]
+enum ManagedAgyOutcome {
+    /// A user-owned desktop or CLI process appeared after the launch lock.
+    Reused(UsageSnapshot),
+    /// Usage came from the short-lived process owned by this fetch.
+    Fetched(UsageSnapshot),
+    /// No configured `agy` executable exists, so offline history may be used.
+    Missing,
 }
 
 // API Response types
@@ -855,175 +1034,6 @@ struct ModelConfig {
 struct QuotaInfo {
     remaining_fraction: Option<f64>,
     reset_time: Option<String>,
-}
-
-// ── Quota summary (RetrieveUserQuotaSummary) ────────────────────────
-
-/// Top-level `RetrieveUserQuotaSummary` response.
-///
-/// Observed servers wrap the payload under `response` (app/CLI) or `summary`;
-/// groups at the root are accepted as well. All fields are optional so a shape
-/// mismatch falls back to the legacy `GetUserStatus` parse instead of failing
-/// the whole fetch.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaSummaryResponse {
-    response: Option<QuotaSummaryPayload>,
-    summary: Option<QuotaSummaryPayload>,
-    #[serde(default)]
-    groups: Option<Vec<QuotaSummaryGroup>>,
-}
-
-impl QuotaSummaryResponse {
-    fn root_groups(&self) -> Option<&[QuotaSummaryGroup]> {
-        self.groups.as_deref()
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaSummaryPayload {
-    #[serde(default)]
-    groups: Option<Vec<QuotaSummaryGroup>>,
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaSummaryGroup {
-    #[serde(default)]
-    display_name: String,
-    #[serde(default)]
-    buckets: Vec<QuotaSummaryBucket>,
-}
-
-/// A quota bucket. `remainingFraction` may appear directly or nested under
-/// `remaining.remainingFraction` (different observed server versions), so both
-/// are accepted. `window` is an explicit cadence when the server provides one;
-/// otherwise the cadence is inferred from `bucketId` / `displayName`.
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaSummaryBucket {
-    #[serde(default)]
-    bucket_id: String,
-    #[serde(default)]
-    display_name: String,
-    #[serde(default)]
-    description: Option<String>,
-    #[serde(default)]
-    window: Option<String>,
-    #[serde(default)]
-    remaining_fraction: Option<f64>,
-    #[serde(default)]
-    remaining: Option<QuotaSummaryRemaining>,
-    #[serde(default)]
-    reset_time: Option<String>,
-}
-
-impl QuotaSummaryBucket {
-    /// The effective remaining fraction (direct or nested), clamped to
-    /// `0.0..=1.0` for any finite value. Returns `None` if missing or
-    /// non-finite (NaN/±inf), which makes the bucket unusable.
-    fn usable_fraction(&self) -> Option<f64> {
-        let raw = self
-            .remaining_fraction
-            .or_else(|| self.remaining.as_ref().and_then(|r| r.remaining_fraction))?;
-        if !raw.is_finite() {
-            return None;
-        }
-        Some(raw.clamp(0.0, 1.0))
-    }
-}
-
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct QuotaSummaryRemaining {
-    remaining_fraction: Option<f64>,
-}
-
-/// Cadence of a quota-summary bucket.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum BucketCadence {
-    FiveHour,
-    Weekly,
-}
-
-/// True when the group is the Gemini Models group. Matches case-insensitively
-/// on a normalized display name and requires the "gemini" token so Claude/GPT
-/// groups are never selected.
-fn is_gemini_group(group: &QuotaSummaryGroup) -> bool {
-    let lower = group.display_name.to_lowercase();
-    lower.contains("gemini") && !lower.contains("claude") && !lower.contains("gpt")
-}
-
-/// Classify a bucket cadence: explicit `window` wins, then normalized
-/// `bucketId`/`displayName` (e.g. `gemini-5h` / `Five Hour Limit` => 5h,
-/// `gemini-weekly` / `Weekly Limit` => weekly).
-fn is_bucket_cadence(bucket: &QuotaSummaryBucket, cadence: BucketCadence) -> bool {
-    if let Some(window) = bucket.window.as_deref() {
-        let normalized = window.trim().to_lowercase();
-        return match cadence {
-            BucketCadence::FiveHour => FIVE_HOUR_ALIASES.contains(&normalized.as_str()),
-            BucketCadence::Weekly => normalized == "weekly",
-        };
-    }
-
-    // Tokenize on separators so `gemini-5h` -> ["gemini","5h"] and `15h`
-    // cannot match the five-hour cadence.
-    let combined = format!("{} {}", bucket.bucket_id, bucket.display_name).to_lowercase();
-    let tokens = combined
-        .split(|ch: char| !ch.is_ascii_alphanumeric())
-        .filter(|t| !t.is_empty())
-        .collect::<Vec<_>>();
-
-    match cadence {
-        BucketCadence::FiveHour => {
-            tokens.iter().any(|t| FIVE_HOUR_TOKENS.contains(t))
-                || tokens
-                    .windows(2)
-                    .any(|pair| pair[0] == "five" && matches!(pair[1], "hour" | "hours"))
-                || tokens.contains(&"session")
-        }
-        BucketCadence::Weekly => tokens.contains(&"weekly"),
-    }
-}
-
-/// Token aliases accepted for an explicit `window` value.
-const FIVE_HOUR_ALIASES: &[&str] = &["5h", "5-hour", "five hour", "five-hour", "session"];
-
-/// Tokens (after separator splitting) that identify a five-hour cadence.
-const FIVE_HOUR_TOKENS: &[&str] = &["5h", "5hour", "5hours"];
-
-/// Order two usable buckets by remaining fraction ascending (most constrained
-/// first). Callers filter to usable buckets first, so `unwrap_or` here only
-/// covers ordering ties.
-fn bucket_fraction_cmp(a: &QuotaSummaryBucket, b: &QuotaSummaryBucket) -> std::cmp::Ordering {
-    a.usable_fraction()
-        .unwrap_or(0.0)
-        .partial_cmp(&b.usable_fraction().unwrap_or(0.0))
-        .unwrap_or(std::cmp::Ordering::Equal)
-}
-
-fn rate_window_from_bucket(bucket: &QuotaSummaryBucket) -> RateWindow {
-    let used_percent = bucket
-        .usable_fraction()
-        .map(|remaining| (1.0 - remaining) * 100.0)
-        .unwrap_or(0.0);
-    let window_minutes = if is_bucket_cadence(bucket, BucketCadence::FiveHour) {
-        Some(300)
-    } else {
-        Some(10_080)
-    };
-    let resets_at = bucket
-        .reset_time
-        .as_deref()
-        .and_then(|raw| chrono::DateTime::parse_from_rfc3339(raw).ok())
-        .map(|dt| dt.with_timezone(&chrono::Utc));
-    RateWindow::with_details(
-        used_percent,
-        window_minutes,
-        resets_at,
-        bucket.description.clone(),
-    )
 }
 
 // ── Model-family classification ──────────────────────────────────────

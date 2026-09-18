@@ -1,224 +1,12 @@
 use super::*;
 
-fn make_summary(groups: Vec<serde_json::Value>) -> String {
-    serde_json::json!({ "response": { "groups": groups } }).to_string()
-}
-
-fn gemini_group(buckets: Vec<serde_json::Value>) -> serde_json::Value {
-    serde_json::json!({ "displayName": "Gemini Models", "buckets": buckets })
-}
-
-fn bucket(bucket_id: &str, display_name: &str, remaining_fraction: f64) -> serde_json::Value {
-    serde_json::json!({
-        "bucketId": bucket_id,
-        "displayName": display_name,
-        "remainingFraction": remaining_fraction
-    })
-}
-
 #[test]
-fn test_parse_quota_summary_maps_five_hour_and_weekly() {
-    // Observed agy 1.1.5 shape: weekly first, then 5h — order must not matter.
-    let text = make_summary(vec![
-        gemini_group(vec![
-            bucket("gemini-weekly", "Weekly Limit", 0.958),
-            bucket("gemini-5h", "Five Hour Limit", 0.749),
-        ]),
-        serde_json::json!({
-            "displayName": "Claude and GPT models",
-            "buckets": [
-                bucket("3p-weekly", "Weekly Limit", 1.0),
-                bucket("3p-5h", "Five Hour Limit", 1.0),
-            ]
-        }),
-    ]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    assert!((snap.primary.used_percent - 25.1).abs() < 0.1);
-    assert_eq!(snap.primary.window_minutes, Some(300));
-    let sec = snap.secondary.unwrap();
-    assert!((sec.used_percent - 4.2).abs() < 0.1);
-    assert_eq!(sec.window_minutes, Some(10_080));
-    assert!(snap.model_specific.is_none());
-    assert!(snap.extra_rate_windows.is_empty());
-}
-
-#[test]
-fn test_parse_quota_summary_accepts_nested_remaining_fraction() {
-    let text = make_summary(vec![gemini_group(vec![
-        serde_json::json!({
-            "bucketId": "gemini-weekly",
-            "displayName": "Weekly Limit",
-            "window": "weekly",
-            "remaining": { "remainingFraction": 0.5 }
-        }),
-        serde_json::json!({
-            "bucketId": "gemini-5h",
-            "displayName": "Five Hour Limit",
-            "window": "5h",
-            "remaining": { "remainingFraction": 0.25 }
-        }),
-    ])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    assert!((snap.primary.used_percent - 75.0).abs() < 0.1);
-    assert!((snap.secondary.unwrap().used_percent - 50.0).abs() < 0.1);
-}
-
-#[test]
-fn test_parse_quota_summary_prefers_explicit_window_field() {
-    // Explicit `window` wins over bucketId/displayName inference.
-    let text = make_summary(vec![gemini_group(vec![
-        serde_json::json!({
-            "bucketId": "anything-weekly",
-            "displayName": "Weekly Limit",
-            "window": "weekly",
-            "remainingFraction": 0.1
-        }),
-        serde_json::json!({
-            "bucketId": "anything-5h",
-            "displayName": "Five Hour Limit",
-            "window": "5h",
-            "remainingFraction": 0.2
-        }),
-    ])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    assert!((snap.primary.used_percent - 80.0).abs() < 0.1);
-    assert_eq!(snap.primary.window_minutes, Some(300));
-    assert!((snap.secondary.unwrap().used_percent - 90.0).abs() < 0.1);
-}
-
-#[test]
-fn test_parse_quota_summary_weekly_only_is_partial_but_usable() {
-    let text = make_summary(vec![gemini_group(vec![bucket(
-        "gemini-weekly",
-        "Weekly Limit",
-        0.4,
-    )])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    // Weekly-only: the weekly bucket becomes primary (classified by minutes),
-    // and is not duplicated into secondary.
-    assert!((snap.primary.used_percent - 60.0).abs() < 0.1);
-    assert_eq!(snap.primary.window_minutes, Some(10_080));
-    assert!(snap.secondary.is_none());
-}
-
-#[test]
-fn test_parse_quota_summary_most_constrained_bucket_wins() {
-    let text = make_summary(vec![gemini_group(vec![
-        bucket("gemini-5h-a", "Five Hour Limit", 0.9),
-        bucket("gemini-5h-b", "Five Hour Limit", 0.5),
-    ])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    // Lowest remaining (most constrained) represents the cadence.
-    assert!((snap.primary.used_percent - 50.0).abs() < 0.1);
-}
-
-#[test]
-fn test_parse_quota_summary_rejects_fifteen_hour_as_five_hour() {
-    let text = make_summary(vec![gemini_group(vec![
-        bucket("gemini-15h", "Fifteen Hour Limit", 0.5),
-        bucket("gemini-weekly", "Weekly Limit", 0.9),
-    ])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    // 15h is not five-hour; weekly still surfaces.
-    assert_eq!(snap.primary.window_minutes, Some(10_080));
-    assert!(snap.secondary.is_none());
-}
-
-#[test]
-fn test_parse_quota_summary_rejects_non_finite_fraction() {
-    // serde_json cannot represent NaN, so build the bucket struct directly.
-    let nan_bucket = QuotaSummaryBucket {
-        bucket_id: "gemini-5h".to_string(),
-        display_name: "Five Hour Limit".to_string(),
-        description: None,
-        window: None,
-        remaining_fraction: Some(f64::NAN),
-        remaining: None,
-        reset_time: None,
-    };
-    assert!(nan_bucket.usable_fraction().is_none());
-    assert!(
-        QuotaSummaryBucket {
-            remaining_fraction: Some(f64::INFINITY),
-            ..nan_bucket
-        }
-        .usable_fraction()
-        .is_none()
-    );
-}
-
-#[test]
-fn test_parse_quota_summary_clamps_fraction() {
-    let text = make_summary(vec![gemini_group(vec![
-        bucket("gemini-5h", "Five Hour Limit", 1.5),
-        bucket("gemini-weekly", "Weekly Limit", -0.5),
-    ])]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    assert!((snap.primary.used_percent - 0.0).abs() < 0.1);
-    assert!((snap.secondary.unwrap().used_percent - 100.0).abs() < 0.1);
-}
-
-#[test]
-fn test_parse_quota_summary_no_gemini_group_fails() {
-    let text = make_summary(vec![serde_json::json!({
-        "displayName": "Claude and GPT models",
-        "buckets": [
-            bucket("3p-weekly", "Weekly Limit", 0.5),
-            bucket("3p-5h", "Five Hour Limit", 0.5),
-        ]
-    })]);
-    let provider = AntigravityProvider::new();
-    assert!(provider.parse_quota_summary(&text).is_err());
-}
-
-#[test]
-fn test_parse_quota_summary_ignores_claude_group_capitalization() {
-    // "Claude and GPT models" must not be selected as the Gemini group.
-    let text = make_summary(vec![
-        gemini_group(vec![bucket("gemini-5h", "Five Hour Limit", 0.2)]),
-        serde_json::json!({
-            "displayName": "CLAUDE AND GPT MODELS",
-            "buckets": [bucket("3p-5h", "Five Hour Limit", 0.0)]
-        }),
-    ]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    assert_eq!(snap.primary.window_minutes, Some(300));
-    assert!((snap.primary.used_percent - 80.0).abs() < 0.1);
-}
-
-#[test]
-fn test_parse_quota_summary_missing_payload_fails() {
-    let provider = AntigravityProvider::new();
-    assert!(provider.parse_quota_summary(r#"{"code": 0}"#).is_err());
-    assert!(provider.parse_quota_summary("not json").is_err());
-}
-
-#[test]
-fn test_parse_quota_summary_parses_reset_time() {
-    let mut g = gemini_group(vec![bucket("gemini-5h", "Five Hour Limit", 0.2)]);
-    g["buckets"][0]["resetTime"] = serde_json::json!("2026-07-23T17:05:10Z");
-    let text = make_summary(vec![g]);
-    let provider = AntigravityProvider::new();
-    let snap = provider.parse_quota_summary(&text).unwrap();
-
-    let resets = snap.primary.resets_at.unwrap();
-    assert_eq!(resets.to_rfc3339(), "2026-07-23T17:05:10+00:00");
+fn cadence_labels_are_owned_by_antigravity_snapshot() {
+    let mut secondary = RateWindow::new(20.0);
+    secondary.window_minutes = Some(7 * 24 * 60);
+    let usage = UsageSnapshot::new(RateWindow::new(10.0)).with_secondary(secondary);
+    let usage = AntigravityProvider::with_cadence_labels(usage);
+    assert_eq!(usage.secondary_label.as_deref(), Some("Weekly"));
 }
 
 #[test]
@@ -431,10 +219,83 @@ fn test_noisy_models_do_not_drive_summary_windows() {
 }
 
 #[test]
-fn not_running_error_tells_user_how_to_start() {
-    let error = ProviderError::NotInstalled(NOT_RUNNING_MESSAGE.to_string()).to_string();
+fn missing_cli_error_explains_runtime_state() {
+    let error = ProviderError::NotInstalled(AGY_NOT_FOUND_MESSAGE.to_string()).to_string();
 
-    assert!(error.contains("Start Google Antigravity and sign in"));
+    assert!(error.contains("not running"));
+    assert!(error.contains("agy CLI was not found"));
+}
+
+#[test]
+fn managed_agy_candidates_prefer_override_then_path_then_known_installs() {
+    let explicit = PathBuf::from(r"D:\tools\agy.exe");
+    let path_lookup = PathBuf::from(r"C:\path\agy.exe");
+    let local_app_data = PathBuf::from(r"C:\Users\test\AppData\Local");
+    let home = PathBuf::from(r"C:\Users\test");
+
+    let candidates = AntigravityProvider::agy_binary_candidates(
+        Some(explicit.clone()),
+        Some(path_lookup.clone()),
+        Some(local_app_data.clone()),
+        Some(home.clone()),
+    );
+
+    assert_eq!(candidates[0], explicit);
+    assert_eq!(candidates[1], path_lookup);
+    // Build expectations with `join` so the assertions match on every host:
+    // on Unix `\` is an ordinary character and `join` inserts `/`.
+    assert_eq!(
+        candidates[2],
+        local_app_data.join("agy").join("bin").join("agy.exe")
+    );
+    assert_eq!(
+        candidates[3],
+        home.join(".local")
+            .join("bin")
+            .join(if cfg!(windows) { "agy.exe" } else { "agy" })
+    );
+}
+
+// ── Managed lifecycle policy (fake outcomes) ───────────────────────
+//
+// The process lifecycle itself is covered by `crate::managed_process`; these
+// exercise the provider-side policy that maps a lifecycle outcome onto a fetch
+// result without spawning a real `agy`.
+
+#[cfg(windows)]
+#[test]
+fn reused_user_runtime_stays_local() {
+    let usage = UsageSnapshot::new(RateWindow::new(10.0));
+    let result = AntigravityProvider::resolve_managed_outcome(Ok(ManagedAgyOutcome::Reused(usage)))
+        .expect("reused outcome resolves")
+        .expect("reused outcome yields usage");
+    assert_eq!(result.source_label, "local");
+}
+
+#[cfg(windows)]
+#[test]
+fn owned_cli_fetch_reports_cli_source() {
+    let usage = UsageSnapshot::new(RateWindow::new(10.0));
+    let result =
+        AntigravityProvider::resolve_managed_outcome(Ok(ManagedAgyOutcome::Fetched(usage)))
+            .expect("owned outcome resolves")
+            .expect("owned outcome yields usage");
+    assert_eq!(result.source_label, "cli");
+}
+
+#[cfg(windows)]
+#[test]
+fn missing_runtime_is_a_policy_no_op() {
+    let result = AntigravityProvider::resolve_managed_outcome(Ok(ManagedAgyOutcome::Missing))
+        .expect("a missing runtime is not an error");
+    assert!(result.is_none(), "missing runtime falls through to offline");
+}
+
+#[cfg(windows)]
+#[test]
+fn managed_auth_required_surfaces_instead_of_offline() {
+    let result = AntigravityProvider::resolve_managed_outcome(Err(ProviderError::AuthRequired));
+    assert!(matches!(result, Err(ProviderError::AuthRequired)));
 }
 
 // ── agy CLI process matching ───────────────────────────────────────
@@ -554,35 +415,6 @@ fn is_agy_cli_command_matches_known_names() {
 }
 
 #[test]
-fn is_agy_cli_command_matches_quoted_windows_paths() {
-    // Observed real Windows command line: the executable path is double-quoted
-    // and a closing `"` immediately follows agy.exe before the arguments.
-    assert!(is_agy_cli_command(
-        "\"C:\\Users\\RyooJungsub\\AppData\\Local\\agy\\bin\\agy.exe\" --dangerously-skip-permissions"
-    ));
-    assert!(is_agy_cli_command(
-        "\"C:\\Users\\test\\AppData\\Local\\agy\\bin\\antigravity-cli.exe\" serve"
-    ));
-    assert!(is_agy_cli_command(
-        "\"C:\\Users\\test\\AppData\\Local\\agy\\bin\\antigravity_cli.exe\" serve"
-    ));
-}
-
-#[test]
-fn detects_quoted_agy_exe_command_line() {
-    // Regression: a double-quoted agy.exe path (Windows command line) must be
-    // recognized as the CLI even though a closing quote follows the name.
-    let output = "5555\t\"C:\\Users\\RyooJungsub\\AppData\\Local\\agy\\bin\\agy.exe\" --dangerously-skip-permissions";
-
-    let process = AntigravityProvider::parse_process_info(output)
-        .expect("quoted agy.exe command should be detected");
-
-    assert_eq!(process.pid, Some(5555));
-    assert_eq!(process.source, ProcessSource::Cli);
-    assert!(process.csrf_token.is_empty());
-}
-
-#[test]
 fn is_agy_cli_command_rejects_unrelated_names() {
     // A leading path separator prevents `notantigravity-cli` from matching.
     assert!(!is_agy_cli_command(
@@ -595,12 +427,6 @@ fn is_agy_cli_command_rejects_unrelated_names() {
     assert!(!is_agy_cli_command("C:\\Tools\\notantigravity-cli status"));
     assert!(!is_agy_cli_command("C:\\Windows\\System32\\notepad.exe"));
     assert!(!is_agy_cli_command("language_server.exe --csrf_token abc"));
-    assert!(
-        !is_agy_cli_command("C:\\agy\\other.exe"),
-        "a directory segment named agy must not match the agy executable"
-    );
-    assert!(!is_agy_cli_command("\"C:\\tools\\agy-helper.exe\" run"));
-    assert!(!is_agy_cli_command("\"C:\\tools\\notagy.exe\" run"));
     assert!(!is_agy_cli_command(""));
 }
 
@@ -643,7 +469,7 @@ fn not_installed_maps_to_local_runtime_offline() {
     // credential problem.
     assert_eq!(
         AntigravityProvider::new()
-            .error_state_kind(&ProviderError::NotInstalled(NOT_RUNNING_MESSAGE.into())),
+            .error_state_kind(&ProviderError::NotInstalled(AGY_NOT_FOUND_MESSAGE.into())),
         crate::core::ProviderStateKind::LocalRuntimeOffline
     );
 }
@@ -658,4 +484,42 @@ fn probe_failure_maps_to_unknown() {
         )),
         crate::core::ProviderStateKind::Unknown
     );
+}
+
+// ── Offline-history fallback on probe failure ──────────────────────
+
+fn offline_result() -> ProviderFetchResult {
+    ProviderFetchResult::new(
+        UsageSnapshot::new(RateWindow::new(0.0)).with_login_method("offline"),
+        "offline",
+    )
+}
+
+#[test]
+fn auth_required_surfaces_instead_of_offline_history() {
+    let resolved = AntigravityProvider::resolve_probe_failure(
+        ProviderError::AuthRequired,
+        Some(offline_result()),
+    );
+    assert!(matches!(resolved, Err(ProviderError::AuthRequired)));
+}
+
+#[test]
+fn non_auth_failure_prefers_offline_history() {
+    // A transient managed-start or local-probe failure must not discard the
+    // existing offline conversation-history snapshot.
+    let resolved = AntigravityProvider::resolve_probe_failure(
+        ProviderError::Other("agy readiness timeout".to_string()),
+        Some(offline_result()),
+    );
+    assert!(resolved.is_ok());
+}
+
+#[test]
+fn non_auth_failure_without_history_surfaces_error() {
+    let resolved = AntigravityProvider::resolve_probe_failure(
+        ProviderError::Other("agy readiness timeout".to_string()),
+        None,
+    );
+    assert!(matches!(resolved, Err(ProviderError::Other(_))));
 }

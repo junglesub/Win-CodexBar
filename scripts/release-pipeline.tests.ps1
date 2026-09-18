@@ -37,8 +37,13 @@ $parsedArray = $jsonArray | ConvertFrom-Json
 Assert-True (@($parsedArray | Where-Object tagName -EQ 'personal-latest').Count -eq 1) 'PowerShell 5.1 enumerates an assigned JSON array'
 
 $prerequisiteText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'install-release-prerequisites.ps1')
+$packageJson = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\apps\desktop-tauri\package.json') | ConvertFrom-Json
+$expectedPnpm = [string]$packageJson.packageManager -replace '^pnpm@', ''
+Assert-True ($packageJson.packageManager -match '^pnpm@\d+\.\d+\.\d+$') 'package metadata pins an exact pnpm semver'
 Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
-Assert-True ($prerequisiteText -match '10\\.18\\.1') 'release prerequisite keeps pnpm 10.18.1 pinned'
+Assert-True ($prerequisiteText -match '\$expectedPnpm\s*=') 'release prerequisite derives pnpm from package metadata'
+Assert-True ($prerequisiteText -match 'pnpm@\$expectedPnpm') 'release prerequisite activates the derived pnpm version'
+Assert-True ($prerequisiteText -notmatch [regex]::Escape("pnpm $expectedPnpm,")) 'release prerequisite does not duplicate the pnpm version in status text'
 
 Assert-Equal (Normalize-GitHubRepository 'https://github.com/junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'HTTPS canonical URL'
 Assert-Equal (Normalize-GitHubRepository 'git@github.com:junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'SSH canonical URL'

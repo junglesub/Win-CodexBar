@@ -15,6 +15,7 @@ mod shortcut_bridge;
 mod state;
 mod surface;
 mod surface_target;
+mod tray_accounts;
 mod tray_bridge;
 mod tray_menu;
 mod tray_visibility;
@@ -176,7 +177,16 @@ fn main() {
             commands::get_cached_providers,
             commands::get_deepseek_pricing_status,
             commands::codex_accounts_list,
+            commands::claude_accounts_list,
+            commands::claude_account_add,
+            commands::claude_account_cancel_login,
+            commands::claude_account_save_current,
+            commands::claude_account_remove,
+            commands::claude_account_switch,
+            commands::claude_swap_accounts_list,
+            commands::claude_swap_account_switch,
             commands::codex_account_add,
+            commands::codex_account_reauthenticate,
             commands::codex_account_remove,
             commands::codex_account_switch,
             commands::codex_account_fetch,
@@ -254,6 +264,9 @@ fn main() {
             floatbar::set_float_bar_orientation,
         ])
         .setup(move |app| {
+            if let Err(error) = codexbar::providers::claude::accounts::cleanup_abandoned_logins() {
+                tracing::warn!("failed to clean abandoned Claude sign-in directories: {error}");
+            }
             if let Some(window) = app.get_webview_window("main") {
                 shell::dwm::force_dark_caption(&window);
                 window.hide()?;

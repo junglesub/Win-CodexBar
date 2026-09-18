@@ -10,11 +10,13 @@ import type { LocaleKey } from "../../../../../i18n/keys";
 import {
   codexAccountAdd,
   codexAccountFetch,
+  codexAccountReauthenticate,
   codexAccountRemove,
   codexAccountRestartDesktop,
   codexAccountSwitch,
   getCodexAccountsState,
 } from "../../../../../lib/tauri";
+import { buildCodexAccountDisplayNames } from "../../../../../components/codexAccountDisplay";
 
 interface Props {
   t: (key: LocaleKey) => string;
@@ -27,15 +29,16 @@ interface Props {
  * Multi-account Codex support (ADR 0003). Reads the shared account +
  * snapshot store via `get_codex_accounts_state` and drives the
  * `codex_account_*` IPC surface: add (login into a managed home), switch the
- * active ambient identity, refresh per-account usage, and remove managed
- * homes. For MSIX Codex Desktop installs a restart action is offered when a
- * session snapshot is available to restore.
+ * active ambient identity, refresh per-account usage, reauthenticate the
+ * ambient identity, and remove managed homes. For MSIX Codex Desktop installs
+ * a restart action is offered when a session snapshot is available to restore.
  */
 export function CodexAccountsSection({ t }: Props) {
   const [accounts, setAccounts] = useState<CodexAccount[]>([]);
   const [snapshots, setSnapshots] = useState<
     Record<string, CodexAccountUsageSnapshot>
   >({});
+  const [displayNames, setDisplayNames] = useState<Record<string, string>>({});
   const [loaded, setLoaded] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -49,6 +52,7 @@ export function CodexAccountsSection({ t }: Props) {
     try {
       const next: CodexAccountsStateBridge = await getCodexAccountsState();
       setAccounts(next.accounts);
+      setDisplayNames(next.displayNames ?? {});
       setSnapshots(next.snapshots);
       setLoaded(true);
     } catch (err: unknown) {
@@ -117,6 +121,20 @@ export function CodexAccountsSection({ t }: Props) {
     }
   };
 
+  const handleReauthenticate = async () => {
+    setBusy(true);
+    setError(null);
+    setSwitchResult(null);
+    try {
+      await codexAccountReauthenticate();
+      await load();
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const handleRemove = async (id: string) => {
     setBusy(true);
     setError(null);
@@ -136,11 +154,8 @@ export function CodexAccountsSection({ t }: Props) {
     setBusy(true);
     setError(null);
     try {
-      await codexAccountRestartDesktop(
-        null,
-        switchResult.desktopSessionBackupPath ?? null,
-        switchResult.desktopSessionRestorePath ?? null,
-      );
+      await codexAccountRestartDesktop(switchResult.switchId);
+      setSwitchResult(null);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : String(err));
     } finally {
@@ -151,6 +166,11 @@ export function CodexAccountsSection({ t }: Props) {
   if (!loaded) {
     return null;
   }
+
+  const accountDisplayNames = buildCodexAccountDisplayNames(
+    accounts,
+    displayNames,
+  );
 
   return (
     <section className="provider-detail-section codex-accounts">
@@ -178,7 +198,7 @@ export function CodexAccountsSection({ t }: Props) {
       {switchResult && (
         <div className="provider-detail-note" role="status">
           {t("CodexSwitchSuccess")}
-          {switchResult.desktopSessionRestoreExists && (
+          {switchResult.desktopSessionRestorePath && (
             <>
               {" "}
               {t("CodexSwitchRestartPrompt")}{" "}
@@ -210,10 +230,7 @@ export function CodexAccountsSection({ t }: Props) {
                   <div className="credential-card__header">
                     <div className="credential-card__info">
                       <strong>
-                        {account.nickname ??
-                          account.emailHint ??
-                          account.authSubject ??
-                          shrink(account.id)}
+                        {accountDisplayNames[account.id]}
                       </strong>
                       <span className="credential-card__meta">
                         <span className="credential-card__badge credential-card__badge--set">
@@ -231,6 +248,16 @@ export function CodexAccountsSection({ t }: Props) {
                       </span>
                     </div>
                     <div className="credential-card__actions">
+                      {account.source === "ambient" && (
+                        <button
+                          type="button"
+                          className="credential-btn credential-btn--secondary"
+                          disabled={busy}
+                          onClick={() => void handleReauthenticate()}
+                        >
+                          {t("CodexAccountsReauthenticateButton")}
+                        </button>
+                      )}
                       <button
                         type="button"
                         className="credential-btn credential-btn--secondary"
@@ -275,10 +302,6 @@ export function CodexAccountsSection({ t }: Props) {
       )}
     </section>
   );
-}
-
-function shrink(id: string): string {
-  return id.length <= 12 ? id : `${id.slice(0, 8)}…`;
 }
 
 function CodexUsagePill({

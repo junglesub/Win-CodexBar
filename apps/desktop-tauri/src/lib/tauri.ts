@@ -1,5 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import type {
+  ClaudeAccount,
+  ClaudeSwapAccountsState,
   ApiKeyInfoBridge,
   ApiKeyProviderInfoBridge,
   AppInfoBridge,
@@ -41,6 +43,17 @@ import type {
   CodexSwitchResult,
   DeepSeekPricingStatus,
 } from "../types/bridge";
+
+export const claudeAccountsList = () => invoke<ClaudeAccount[]>("claude_accounts_list");
+export const claudeAccountAdd = () => invoke<void>("claude_account_add");
+export const claudeAccountCancelLogin = () => invoke<void>("claude_account_cancel_login");
+export const claudeAccountSaveCurrent = () => invoke<void>("claude_account_save_current");
+export const claudeAccountRemove = (id: string) => invoke<void>("claude_account_remove", { id });
+export const claudeAccountSwitch = (id: string) => invoke<void>("claude_account_switch", { id });
+export const claudeSwapAccountsList = () =>
+  invoke<ClaudeSwapAccountsState>("claude_swap_accounts_list");
+export const claudeSwapAccountSwitch = (slot: number) =>
+  invoke<void>("claude_swap_account_switch", { slot });
 
 export function getBootstrapState(): Promise<BootstrapState> {
   return invoke<BootstrapState>("get_bootstrap_state");
@@ -491,6 +504,10 @@ export function codexAccountAdd(): Promise<CodexAccount> {
   return invoke<CodexAccount>("codex_account_add");
 }
 
+export function codexAccountReauthenticate(): Promise<CodexAccount> {
+  return invoke<CodexAccount>("codex_account_reauthenticate");
+}
+
 export function codexAccountRemove(id: string): Promise<void> {
   return invoke<void>("codex_account_remove", { id });
 }
@@ -514,14 +531,10 @@ export function codexAccountSnapshots(): Promise<
 }
 
 export function codexAccountRestartDesktop(
-  sessionRoot?: string | null,
-  backupDestination?: string | null,
-  restoreSource?: string | null,
+  switchId: string,
 ): Promise<void> {
   return invoke<void>("codex_account_restart_desktop", {
-    sessionRoot,
-    backupDestination,
-    restoreSource,
+    switchId,
   });
 }
 

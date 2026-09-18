@@ -86,17 +86,17 @@ tray. Open **Settings → Menu** and enable **Float Bar**.
 
 ## Development
 
-Use Windows 10/11 x64 with Git, Node.js 20, Rust stable MSVC, Visual Studio Build
+Use Windows 10/11 x64 with Git, Node.js 24, Rust stable MSVC, Visual Studio Build
 Tools (**Desktop development with C++**), and WebView2 Runtime.
 
 ```powershell
 git clone --branch personal https://github.com/junglesub/Win-CodexBar.git
 cd Win-CodexBar
 
-nvm install 20
-nvm use 20
+nvm install 24
+nvm use 24
 corepack enable
-corepack prepare pnpm@10.18.1 --activate
+corepack prepare pnpm@11.25.0 --activate
 
 rustup default stable-x86_64-pc-windows-msvc
 rustup target add x86_64-pc-windows-msvc

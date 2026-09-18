@@ -37,7 +37,8 @@ Developer-confirmed collision decisions:
 - **Grok-3:** use `main`'s full billing-cycle cadence extraction so complete
   cycles are classified dynamically as weekly or monthly. Keep `Weekly` as
   `GrokProvider`'s metadata fallback when the response does not expose a
-  complete cycle.
+  complete cycle. (Superseded by **Grok-4** below: the `Weekly` metadata
+  fallback was dropped.)
 - **Updater-2:** preserve current `personal` commit `6b04f5c6`: release builds
   use the `junglesub/Win-CodexBar` `personal-latest` commit-SHA updater, including
   startup/manual checks, banners, optional auto-download, and install-on-quit.
@@ -48,13 +49,53 @@ interaction guard, GitHub templates/dependabot configuration, and localized
 READMEs remain intentional. `main` added no new files in those removed
 categories in this sync range.
 
+## Sync resolution record — 2026-09-18
+
+PR `junglesub/Win-CodexBar#4` merges `sync/upstream` into `personal` with
+normal merge ancestry. The reviewed inputs were:
+
+| Ref | SHA |
+| --- | --- |
+| Merge base | `1e3d04c7ef03353d4cae73afb76e7256a3c71144` |
+| `junglesub/main` | `c65fd783bc3f1a4b50a8b2b45856ae60c9113872` |
+| `junglesub/sync/upstream` | `c65fd783bc3f1a4b50a8b2b45856ae60c9113872` |
+| `junglesub/personal` | `53c3c07f1149b381807785132386890b288a82c1` |
+
+Developer-confirmed collision decisions:
+
+- **Toolchain-1:** follow `main` versions. `apps/desktop-tauri/package.json`
+  takes `main` (`0.56.8`, `pnpm@11.25.0`); the personal workflows move to Node
+  24.18.0 because pnpm 11 requires Node `>=22.13` and the old Node 20 gate can
+  no longer activate it. `README.md` follows the same pins.
+- **Scripts-1:** scripts that `personal` did not change take `main` verbatim.
+  `scripts/install-release-prerequisites.ps1` and
+  `scripts/release-pipeline.tests.ps1` are `main` in the merge result.
+- **Antigravity-1:** `main` wins. `rust/src/providers/antigravity/mod.rs` and
+  `tests.rs` return to `main`, and the personal summary-first parser with its
+  quota-summary tests is dropped because `main` already surfaces the Gemini
+  five-hour and weekly buckets. Float Bar slot rules (`float-bar-usage`) are
+  unchanged.
+- **Grok-4:** `main` wins. `rust/src/providers/grok/{billing,mod,tests}.rs` are
+  `main`; the personal `Weekly` metadata fallback label is dropped. This
+  supersedes the `Grok-3` record from 2026-09-09.
+- **Docs-1:** keep both documented surfaces in `docs/CONFIGURATION.md`
+  (`main`'s Claude Code accounts plus personal Floating Bar background and
+  exhausted-display settings). `docs/release/ci-cd.md` stays personal because
+  `main`'s version documents the retired CircleCI publisher.
+
+The personal deletions of CircleCI configuration and publisher scripts, the
+interaction guard, GitHub templates/dependabot configuration, and localized
+READMEs remain intentional in this sync range as well.
+
+
 ---
 
 ## How to use this document
 
 1. When upstream/`main` changes a file or concept listed under **Collision risk**, read the matching commits here before merging.
 2. Treat **concept** collisions as more important than line conflicts. A clean merge can still invert Float Bar semantics, Antigravity quota mapping, or updater behavior.
-3. Theme tags:
+3. **Conflict priority (충돌 시 무시 우선):** When upstream changes collide or conflict with `personal` features, policies, or intentional behavior, prioritize ignoring, skipping, or dropping the conflicting upstream changes over forcing a merge or overwriting `personal`. The default is to preserve `personal` as-is and ignore the conflicting upstream delta.
+4. Theme tags:
 
    - `float-bar-usage` — overlay quota display model
    - `antigravity` — Gemini quota fetch / CLI detection
@@ -92,6 +133,11 @@ On `personal`, the pill is a **three-slot used-quota strip**:
 Local implementation: `apps/desktop-tauri/src/floatbar/FloatBar.tsx` only. Shared `usageWindows.ts` and other surfaces were not switched to this model.
 
 ### 2. Antigravity usage source (`antigravity`)
+
+**Superseded by the 2026-09-18 record:** `main` now implements the same
+Gemini five-hour/weekly quota-summary mapping, so `antigravity/mod.rs` and
+`tests.rs` follow `main` again. The description below documents the personal
+implementation that existed between 2026-08-19 and 2026-09-18.
 
 Prefer local `RetrieveUserQuotaSummary` and map **Gemini Models** group:
 

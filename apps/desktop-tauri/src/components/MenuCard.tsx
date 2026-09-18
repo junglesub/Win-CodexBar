@@ -11,6 +11,7 @@ import type { LocaleKey } from "../i18n/keys";
 import { providerSupportsChartData } from "../lib/providerCharts";
 import MenuCardDetails, { describeCard, type MetricEntry } from "./MenuCardDetails";
 import CodexAccountsMenu from "./CodexAccountsMenu";
+import ClaudeAccountsMenu from "./ClaudeAccountsMenu";
 import { DEEPSEEK_PRICING_EVENT } from "../hooks/useDeepSeekPricingStatus";
 import { getDeepSeekPricingStatus } from "../lib/tauri";
 import type { DeepSeekPricingStatus } from "../types/bridge";
@@ -74,8 +75,14 @@ function localizeWindowLabel(
   t: (key: LocaleKey) => string,
   language?: string,
   windowMinutes?: number | null,
+  windowId?: string,
 ): string {
   const normalized = raw?.trim().toLowerCase();
+  if (windowId?.startsWith("claude-weekly-scoped-")) {
+    const modelName = raw?.trim().replace(/\s+only\s*$/i, "").trim();
+    const template = t("ClaudeScopedWeeklyLabel");
+    return modelName ? template.replace("{}", modelName) : template.replace("{}", "");
+  }
   // Upstream 0.55.0 #3070: quota windows in Simplified Chinese use their
   // actual duration instead of the conversational Session wording.
   if (language === "chinese" && normalized === "session" && windowMinutes != null) {
@@ -218,7 +225,9 @@ export default function MenuCard({
   for (const extra of provider.extraRateWindows ?? []) {
     metrics.push({
       id: `extra-${extra.id}`,
-      label: extra.title,
+      label:
+        localizeWindowLabel(extra.title, t, language, extra.window.windowMinutes, extra.id) ||
+        extra.title,
       snap: extra.window,
       resetFormatMode: extra.id === "reset-credits" ? "expires" : "reset",
     });
@@ -274,6 +283,17 @@ export default function MenuCard({
         )}
       </header>
 
+      {provider.providerId === "codex" && (
+        <CodexAccountsMenu
+          hideEmail={hideEmail}
+          resetTimeRelative={resetTimeRelative}
+          onLayoutChange={onLayoutChange}
+        />
+      )}
+      {provider.providerId === "claude" && (
+        <ClaudeAccountsMenu hideEmail={hideEmail} onLayoutChange={onLayoutChange} />
+      )}
+
       {hasDetails && <div className="menu-card__divider" />}
 
       {hasDetails && (
@@ -320,12 +340,6 @@ export default function MenuCard({
         </section>
       )}
 
-      {provider.providerId === "codex" && (
-        <CodexAccountsMenu
-          hideEmail={hideEmail}
-          resetTimeRelative={resetTimeRelative}
-        />
-      )}
     </article>
   );
 }

@@ -108,8 +108,8 @@ pnpm run tauri:build
 
 ## Runtime/Tooling Preferences
 
-- Package manager: **pnpm@10.18.1** (`packageManager` in `apps/desktop-tauri/package.json` + lockfile). Do not introduce npm or yarn lockfiles.
-- Node: personal workflows pin **Node 20**; no `.nvmrc` in repo. Prefer Node 20 locally for hosted parity.
+- Package manager: **pnpm@11.25.0** (`packageManager` in `apps/desktop-tauri/package.json` + lockfile). Do not introduce npm or yarn lockfiles.
+- Node: personal workflows pin **Node 24.18.0** (pnpm 11 requires Node `>=22.13`); no `.nvmrc` in repo. Prefer Node 24.18.0 locally for hosted parity.
 - Rust: edition **2024**, stable toolchain; CI target `x86_64-pc-windows-msvc`. No committed `rust-toolchain.toml` / `rustfmt.toml` / `clippy.toml` — defaults plus CI flags (`clippy -- -D warnings`).
 - Tray / DPAPI / browser-cookie behavior: validate on **Windows-native** hosts. WSL/Linux is insufficient for those paths.
 - **CUA (computer-use) for UI proof** — see [Testing & QA](#testing--qa). Project: [trycua/cua](https://github.com/trycua/cua). On this machine the Windows driver is typically `%LOCALAPPDATA%\Programs\Cua\cua-driver\bin\cua-driver.exe`.
@@ -119,7 +119,7 @@ pnpm run tauri:build
 
 - Rust: prefer focused `#[cfg(test)]` unit tests near the changed module. Run both manifests after Rust changes.
 - Frontend: Vitest 3 + jsdom + Testing Library. From `apps/desktop-tauri`: `pnpm test` (`src/**/*.{test,spec}.{ts,tsx}`).
-- **Hosted PR check**: `.github/workflows/pr-check.yml` runs automatically for pull requests targeting `personal` on GitHub-hosted `windows-2025` with Node 20 and pnpm 10.18.1. It checks Rust formatting, workspace Clippy/tests, and frontend tests/build.
+- **Hosted PR check**: `.github/workflows/pr-check.yml` runs automatically for pull requests targeting `personal` on GitHub-hosted `windows-2025` with Node 24.18.0 and the `packageManager` pin from `apps/desktop-tauri/package.json`. It checks Rust formatting, workspace Clippy/tests, and frontend tests/build.
 - **Local mirror**: `.\scripts\local-check.ps1` (default Rust + Tauri + frontend). It does not run full installer/smoke unless requested.
 - Parser / fetcher changes: add deterministic samples or fixtures where practical.
 - No coverage thresholds are configured — do not invent any.
