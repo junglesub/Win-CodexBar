@@ -24,9 +24,11 @@ AppName={#MyAppName}
 AppVersion={#AppVersion}
 AppVerName={#MyAppName} {#AppVersion}
 AppPublisher=CodexBar Contributors
-AppPublisherURL=https://github.com/Finesssee/Win-CodexBar
-AppSupportURL=https://github.com/Finesssee/Win-CodexBar/issues
-AppUpdatesURL=https://github.com/Finesssee/Win-CodexBar/releases
+AppPublisherURL=https://junglesub.github.io/Win-CodexBar/
+AppSupportURL=https://github.com/junglesub/Win-CodexBar/issues
+; In-app updates are temporarily disabled; the update URL stays dormant
+; until `personal-latest` release integration is designed.
+; AppUpdatesURL=https://github.com/junglesub/Win-CodexBar/releases
 DefaultDirName={localappdata}\Programs\CodexBar
 DefaultGroupName=CodexBar
 DisableProgramGroupPage=yes

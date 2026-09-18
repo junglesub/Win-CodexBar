@@ -1,7 +1,7 @@
 # ADR 0004: CircleCI release-only pipeline and dual-CI trust boundary
 
 Date: 2026-08-14
-Status: Accepted; supersedes the release-local portion of ADR 0001
+Status: Superseded for the personal fork by `.github/workflows/personal-release.yml` on 2026-08-18
 
 ## Context
 

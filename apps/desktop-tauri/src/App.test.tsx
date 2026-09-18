@@ -89,6 +89,10 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     menuBarShowsHighestUsage: false,
     menuBarShowsPercent: false,
     showAsUsed: true,
+    floatBarBatteryStyle: false,
+    floatBarBatterySlots: [],
+    floatBarShowRemaining: false,
+    floatBarFollowProviderOrder: false,
     showAllTokenAccountsInMenu: false,
     enableAnimations: true,
     resetTimeRelative: true,
@@ -113,6 +117,8 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     providerMetrics: {},
     floatBarEnabled: false,
     floatBarOpacity: 80,
+    floatBarBackgroundColor: "#FFFFFF",
+    floatBarBackgroundOpacity: 8,
     floatBarScale: 100,
     floatBarOrientation: "horizontal",
     floatBarStyle: "floating",
@@ -120,6 +126,9 @@ function settings(overrides: Partial<SettingsSnapshot> = {}): SettingsSnapshot {
     floatBarProviderIds: [],
     floatBarDarkText: false,
     floatBarShowResetInline: false,
+    floatBarHidePercentWhenExhausted: false,
+    floatBarExhaustedClockTime: false,
+    floatBarExhaustedWeekdayTime: false,
     floatBarShowCost: false,
     claudeDailyRoutinesUsageVisible: true,
     claudeAllowReadingClaudeCodeCredentials: false,
@@ -196,6 +205,34 @@ describe("App window-label routing", () => {
       expect(queryByTestId("surface-float-bar")).not.toBeNull();
     });
     expect(queryByTestId("surface-tray-panel")).toBeNull();
+  });
+
+  it("invokes the update check on the startup timer and downloads if auto-download is enabled", async () => {
+    webviewWindowMocks.label = "main";
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(
+      settings({ autoDownloadUpdates: true })
+    );
+    tauriMocks.checkForUpdates.mockResolvedValue({
+      status: "available",
+      version: "personal-latest-1234567",
+      error: null,
+      progress: null,
+      releaseUrl: null,
+      canDownload: true,
+      canApply: false,
+      lastCheckedAt: null,
+    });
+
+    render(<App />);
+
+    await waitFor(() => {
+      expect(tauriMocks.getBootstrapState).toHaveBeenCalled();
+    });
+
+    await new Promise((resolve) => setTimeout(resolve, 2_100));
+
+    expect(tauriMocks.checkForUpdates).toHaveBeenCalledTimes(1);
+    expect(tauriMocks.downloadUpdate).toHaveBeenCalledTimes(1);
   });
 
   it("does not route the shared main window to TrayPanel while hidden", async () => {

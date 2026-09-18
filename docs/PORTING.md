@@ -99,23 +99,20 @@ For upstream `X.Y.Z`:
 7. Keep SKIP / DEFER notes in that canonical PR body. Do not open empty stub
    modules "for later".
 
-#### CI budget rule for micro PRs
+#### CI rule for micro PRs
 
-Hosted CI and review granularity are intentionally different:
+Hosted CI and review granularity are intentionally different on the personal fork:
 
-- Micro PRs targeting `port/upstream-*` are filtered out at CircleCI workflow
-  compilation time, before Windows compute starts. The decision uses the PR base/target
-  branch, not the head-branch name; a `port/micro-*` head opened directly to `main`
-  still receives the full hosted gate. Their required evidence is focused local tests
-  plus any broader local gate justified by the change.
-- High-risk Windows-native micro PRs may use the manual Blacksmith backup workflow
-  as a deliberate second opinion, but it is not automatic.
-- The canonical `port/upstream-X.Y.Z` -> `main` PR receives the full CircleCI
-  Windows gate. Run full local checks, CUA for UI-affecting work, and thermo review
-  before relying on hosted CI.
-- CircleCI Project Settings should have **Auto-cancel redundant workflows** enabled
-  so superseded non-default-branch runs stop consuming credits.
-- Do not use `[skip ci]` to bypass the canonical release PR gate.
+- `.github/workflows/pr-check.yml` runs automatically only for pull requests
+  targeting `personal`.
+- Micro PRs targeting `port/upstream-*` therefore require focused local tests plus
+  any broader local gate justified by the change.
+- Before the canonical `port/upstream-X.Y.Z` -> `main` PR, run the full local
+  checks, CUA for UI-affecting work, and thermo review. Do not assume that the
+  personal PR workflow covers a PR targeting `main`.
+- The later sync PR from `sync/upstream` to `personal` receives the automatic
+  GitHub-hosted Windows gate.
+- Do not use `[skip ci]` to bypass the `personal` sync PR gate.
 
 ### 4. Port fixtures from exact wire shapes
 
@@ -208,7 +205,7 @@ port PR unless that is an explicit separate decision. Port first; release later.
 | Review scope | One complete behavior per micro PR; branch `port/micro-X.Y.Z-<slug>` |
 | Canonical scope | One release-wide PR from `port/upstream-X.Y.Z` to `main` |
 | Commit scope | One workstream per commit; message prefix `Port upstream X.Y.Z: ...` |
-| Hosted CI | Micro branches skip automatic CircleCI; canonical release PR gets full CircleCI; Blacksmith is manual reserve |
+| Hosted CI | GitHub-hosted Windows checks run automatically for PRs targeting `personal`; other port branches require local evidence |
 | Source pin | Always `vX.Y.Z` tag URLs / compare range — never `main` |
 | Locales | Add keys in existing catalog style; machine translation allowed |
 | Ambiguity | **DEFER-with-evidence** > guess-port |

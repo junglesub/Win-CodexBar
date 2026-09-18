@@ -18,6 +18,10 @@ fn test_settings_default() {
     assert_eq!(settings.high_usage_threshold, 70.0);
     assert_eq!(settings.critical_usage_threshold, 90.0);
     assert!(!settings.show_reset_when_exhausted);
+    assert!(!settings.float_bar_battery_style);
+    assert!(settings.float_bar_battery_slots.is_empty());
+    assert!(!settings.float_bar_show_remaining);
+    assert!(!settings.float_bar_follow_provider_order);
     assert!(!settings.predictive_pace_warning_enabled);
     assert!(!settings.float_bar_show_cost);
     assert!(settings.promote_tray_icon);
@@ -26,6 +30,75 @@ fn test_settings_default() {
     assert_eq!(
         settings.low_power_mode_preference,
         LowPowerModePreference::Off
+    );
+    assert_eq!(settings.float_bar_background_color, "#FFFFFF");
+    assert_eq!(settings.float_bar_background_opacity, 8);
+}
+
+#[test]
+fn test_float_bar_battery_style_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_battery_style should deserialize to false");
+    assert!(!defaulted.float_bar_battery_style);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_battery_style": true }"#)
+        .expect("explicit float_bar_battery_style true parses");
+    assert!(enabled.float_bar_battery_style);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_battery_style);
+}
+
+#[test]
+fn test_float_bar_show_remaining_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_show_remaining should deserialize to false");
+    assert!(!defaulted.float_bar_show_remaining);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_show_remaining": true }"#)
+        .expect("explicit float_bar_show_remaining true parses");
+    assert!(enabled.float_bar_show_remaining);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_show_remaining);
+}
+
+#[test]
+fn test_float_bar_follow_provider_order_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_follow_provider_order should deserialize to false");
+    assert!(!defaulted.float_bar_follow_provider_order);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_follow_provider_order": true }"#)
+        .expect("explicit float_bar_follow_provider_order true parses");
+    assert!(enabled.float_bar_follow_provider_order);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_follow_provider_order);
+}
+
+#[test]
+fn test_float_bar_battery_slots_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_battery_slots should deserialize to an empty list");
+    assert!(defaulted.float_bar_battery_slots.is_empty());
+
+    let selected: Settings =
+        serde_json::from_str(r#"{ "float_bar_battery_slots": ["5h", "fallback", "unknown"] }"#)
+            .expect("explicit float_bar_battery_slots parses");
+    assert_eq!(
+        selected.float_bar_battery_slots,
+        ["5h", "fallback", "unknown"]
+    );
+
+    let serialized = serde_json::to_string(&selected).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert_eq!(
+        round_tripped.float_bar_battery_slots,
+        ["5h", "fallback", "unknown"]
     );
 }
 
@@ -212,6 +285,9 @@ fn float_bar_defaults_are_safe() {
     assert!(settings.float_bar_provider_ids.is_empty());
     assert!(!settings.float_bar_dark_text);
     assert!(!settings.float_bar_show_reset_inline);
+    assert!(!settings.float_bar_hide_percent_when_exhausted);
+    assert!(!settings.float_bar_exhausted_clock_time);
+    assert!(!settings.float_bar_exhausted_weekday_time);
     assert!(!settings.float_bar_show_cost);
 }
 
@@ -328,6 +404,9 @@ fn float_bar_settings_round_trip_through_raw() {
         float_bar_provider_ids: vec!["claude".into(), "codex".into()],
         float_bar_dark_text: true,
         float_bar_show_reset_inline: true,
+        float_bar_hide_percent_when_exhausted: true,
+        float_bar_exhausted_clock_time: true,
+        float_bar_exhausted_weekday_time: true,
         float_bar_show_cost: true,
         ..Settings::default()
     };
@@ -343,6 +422,9 @@ fn float_bar_settings_round_trip_through_raw() {
     assert_eq!(back.float_bar_provider_ids, vec!["claude", "codex"]);
     assert!(back.float_bar_dark_text);
     assert!(back.float_bar_show_reset_inline);
+    assert!(back.float_bar_hide_percent_when_exhausted);
+    assert!(back.float_bar_exhausted_clock_time);
+    assert!(back.float_bar_exhausted_weekday_time);
     assert!(back.float_bar_show_cost);
 }
 

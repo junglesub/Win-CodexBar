@@ -1,7 +1,7 @@
 # ADR 0001: PR check on Blacksmith Windows, release stays local
 
 Date: 2026-07-24
-Status: Accepted
+Status: Superseded for the personal fork by `.github/workflows/personal-release.yml` on 2026-08-18
 
 ## Context
 

@@ -5286,6 +5286,27 @@ html:has(.menu-surface--tray) {
   align-self: center;
 }
 
+.floatbar__battery-slots {
+  display: inline-flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px 10px;
+  max-width: 260px;
+}
+
+.floatbar__battery-slot {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  white-space: nowrap;
+  font-size: var(--font-caption);
+  color: var(--text-primary);
+}
+
+.floatbar__battery-slot input {
+  margin: 0;
+}
+
 /* Flat field stack: matches upstream SwiftUI VStack + Divider() per
    section. No card container, just a 1px divider between sibling
    fields (the divider rule below). */
