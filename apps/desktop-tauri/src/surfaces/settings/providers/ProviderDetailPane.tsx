@@ -24,7 +24,7 @@ import {
 import { buildSubtitle } from "./providerDetailFormat";
 import { IdentitySection } from "./sections/IdentitySection";
 import { UsageSection } from "./sections/UsageSection";
-import { PaceSection } from "./sections/PaceSection";
+import { PaceSection, type PaceLane } from "./sections/PaceSection";
 import { CostSection } from "./sections/CostSection";
 import { QuickActionsSection } from "./sections/QuickActionsSection";
 import { ChartsSection } from "./sections/charts/ChartsSection";
@@ -211,6 +211,14 @@ export function ProviderDetailPane({
   const subtitle = buildSubtitle(detail, t);
   const reload = () => void load(detail.id);
   const credKey = `${detail.id}-${credentialRevision}`;
+  // Personal-only: pace for every lane with data (5h / weekly / monthly).
+  const paceLanes: PaceLane[] = providerAllowsPace(detail.id, detail.sourceLabel)
+    ? [
+        { label: detail.sessionLabel ?? null, pace: detail.pace },
+        { label: detail.weeklyLabel ?? null, pace: detail.secondaryPace ?? null },
+        { label: detail.tertiaryLabel ?? null, pace: detail.tertiaryPace ?? null },
+      ].flatMap((lane) => (lane.pace ? [{ label: lane.label, pace: lane.pace }] : []))
+    : [];
 
   const handleRefresh = async () => {
     setBusy(true);
@@ -305,14 +313,7 @@ export function ProviderDetailPane({
         t={t}
         onChange={onSettingsChange}
       />
-      <PaceSection
-        pace={
-          providerAllowsPace(detail.id, detail.sourceLabel)
-            ? detail.pace
-            : null
-        }
-        t={t}
-      />
+      <PaceSection lanes={paceLanes} t={t} />
       <CostSection cost={detail.cost} t={t} />
 
       <UsageSourceSection

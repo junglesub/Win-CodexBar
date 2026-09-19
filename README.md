@@ -58,6 +58,12 @@ order:
   `float_bar_follow_provider_order`). An empty custom sequence keeps usage
   order, and turning the toggle off is the way back to usage order because the
   custom sequence itself has no reset UI.
+- Personal-only per-window pace: provider cards and the Settings detail pane
+  show expected-vs-actual pace for every lane with data (5h, weekly, monthly),
+  not just the primary lane. Each metric row also gets on-pace budget bars for
+  every timed window, including 5h. `codexbar usage` prints a `Pace:` line under
+  each lane (including monthly) and the JSON output carries a `tertiary` pace
+  entry next to `primary`/`secondary`.
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

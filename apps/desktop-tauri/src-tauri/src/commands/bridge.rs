@@ -221,6 +221,13 @@ pub struct ProviderUsageSnapshot {
     pub error_state: codexbar::core::ProviderStateKind,
     #[serde(default)]
     pub pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the weekly (secondary) lane so the
+    /// menu card can show 5h / weekly / monthly pace side by side.
+    #[serde(default)]
+    pub secondary_pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the monthly (tertiary) lane.
+    #[serde(default)]
+    pub tertiary_pace: Option<PaceSnapshot>,
     #[serde(default)]
     pub account_organization: Option<String>,
     #[serde(default)]
@@ -275,6 +282,23 @@ pub(crate) fn filter_hidden_codex_spark_rows(
     }
 }
 
+/// Build a [`PaceSnapshot`] for one rate window, or `None` when the window
+/// has no usable timing (no future reset, zero-length window, …).
+fn lane_pace_snapshot(
+    window: Option<&codexbar::core::RateWindow>,
+    default_minutes: u32,
+) -> Option<PaceSnapshot> {
+    let pace = codexbar::core::UsagePace::weekly(window?, None, default_minutes)?;
+    Some(PaceSnapshot {
+        stage: pace::stage_str(pace.stage).to_string(),
+        delta_percent: pace.delta_percent,
+        will_last_to_reset: pace.will_last_to_reset,
+        eta_seconds: pace.eta_seconds,
+        expected_used_percent: pace.expected_used_percent,
+        actual_used_percent: pace.actual_used_percent,
+    })
+}
+
 impl ProviderUsageSnapshot {
     pub(super) fn from_fetch_result(
         id: ProviderId,
@@ -316,6 +340,20 @@ impl ProviderUsageSnapshot {
                 .and_then(|sw| codexbar::core::UsagePace::weekly(sw, None, 10080))
         });
         let secondary_pace = secondary_pace.flatten();
+        // Personal-only: per-lane pace snapshots so the menu card and the
+        // Settings detail pane can show 5h / weekly / monthly pace side by
+        // side instead of the primary lane only.
+        let secondary_pace_snapshot = allows_pace
+            .then(|| lane_pace_snapshot(usage.secondary.as_ref(), 10080))
+            .flatten();
+        let tertiary_pace_snapshot = allows_pace
+            .then(|| {
+                lane_pace_snapshot(
+                    usage.tertiary.as_ref(),
+                    codexbar::core::MONTHLY_WINDOW_MINUTES,
+                )
+            })
+            .flatten();
 
         let primary_snap = RateWindowSnapshot::from_rate_window(&usage.primary);
 
@@ -423,6 +461,8 @@ impl ProviderUsageSnapshot {
             error: None,
             error_state: codexbar::core::ProviderStateKind::Ready,
             pace,
+            secondary_pace: secondary_pace_snapshot,
+            tertiary_pace: tertiary_pace_snapshot,
             account_organization: usage.account_organization.clone(),
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -471,6 +511,8 @@ impl ProviderUsageSnapshot {
             error: Some(error),
             error_state: state_kind,
             pace: None,
+            secondary_pace: None,
+            tertiary_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,

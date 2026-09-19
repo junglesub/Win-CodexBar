@@ -612,6 +612,19 @@ fn render_json_result(
         .as_ref()
         .and_then(|w| UsagePace::weekly(w, None, w.window_minutes.unwrap_or(10080)))
         .map(pace_json);
+    // Personal: monthly (tertiary) lane pace, mirroring the session/weekly lanes.
+    let tertiary_pace = usage
+        .tertiary
+        .as_ref()
+        .and_then(|w| {
+            UsagePace::weekly(
+                w,
+                None,
+                w.window_minutes
+                    .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES),
+            )
+        })
+        .map(pace_json);
 
     let mut json_result = serde_json::json!({
         "provider": provider_id.cli_name(),
@@ -619,10 +632,11 @@ fn render_json_result(
         "usage": result.usage,
         "cost": result.cost,
     });
-    if primary_pace.is_some() || secondary_pace.is_some() {
+    if primary_pace.is_some() || secondary_pace.is_some() || tertiary_pace.is_some() {
         json_result["pace"] = serde_json::json!({
             "primary": primary_pace,
             "secondary": secondary_pace,
+            "tertiary": tertiary_pace,
         });
     }
 
@@ -793,6 +807,7 @@ fn append_usage_window_lines(
     );
     append_model_specific_line(lines, usage.model_specific.as_ref(), use_color);
     // F5 (upstream 0.48.0): monthly (30-day) lane. Label by duration cadence.
+    // Personal: monthly lane also gets a pace line like the session/weekly lanes.
     if let Some(tertiary) = usage.tertiary.as_ref() {
         let cadence =
             crate::core::RateWindowCadence::from_minutes(tertiary.window_minutes.unwrap_or(0));
@@ -801,6 +816,16 @@ fn append_usage_window_lines(
             _ => "Tertiary",
         };
         append_window_line(lines, label, tertiary, use_color);
+        let window_minutes = tertiary
+            .window_minutes
+            .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES);
+        if let Some(pace) = UsagePace::weekly(tertiary, None, window_minutes) {
+            lines.push(format!(
+                "  Pace:    {} {}",
+                pace.stage.emoji(),
+                pace.format_status()
+            ));
+        }
     }
 }
 
@@ -1156,5 +1181,45 @@ mod tests {
 
         assert!(output.contains("Plan:    Gemini Code Assist in Google One AI Pro"));
         assert!(!output.contains("Google One Ai Pro"));
+    }
+
+    #[test]
+    fn monthly_lane_renders_pace_line_in_full_text() {
+        use chrono::{Duration, Utc};
+
+        let now = Utc::now();
+        let tertiary = RateWindow::with_details(
+            60.0,
+            Some(crate::core::MONTHLY_WINDOW_MINUTES),
+            Some(now + Duration::days(12)),
+            None,
+        );
+        let result =
+            fetch_result(UsageSnapshot::new(RateWindow::new(10.0)).with_tertiary(tertiary));
+
+        let output = render_text_with_status(ProviderId::Codex, &result, None, false);
+
+        assert!(output.contains("Monthly:"));
+        assert!(output.contains("Pace:"));
+    }
+
+    #[test]
+    fn json_payload_includes_tertiary_pace_when_monthly_lane_present() {
+        use chrono::{Duration, Utc};
+
+        let now = Utc::now();
+        let tertiary = RateWindow::with_details(
+            60.0,
+            Some(crate::core::MONTHLY_WINDOW_MINUTES),
+            Some(now + Duration::days(12)),
+            None,
+        );
+        let result =
+            fetch_result(UsageSnapshot::new(RateWindow::new(10.0)).with_tertiary(tertiary));
+
+        let payload = render_json_result(ProviderId::Codex, result, None);
+
+        assert!(payload["pace"]["tertiary"].is_object());
+        assert!(payload["pace"]["tertiary"]["expectedUsedPercent"].is_number());
     }
 }

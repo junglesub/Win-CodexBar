@@ -522,9 +522,22 @@ fn make_pace(usage: &UsageSnapshot) -> Option<ProviderPacePayload> {
             .as_ref()
             .and_then(|window| UsagePace::weekly(window, None, 10080))
             .map(|pace| pace_payload(&pace)),
-        tertiary: None,
+        // Personal: monthly (tertiary) lane pace alongside the weekly lane.
+        tertiary: usage
+            .tertiary
+            .as_ref()
+            .and_then(|window| {
+                UsagePace::weekly(
+                    window,
+                    None,
+                    window
+                        .window_minutes
+                        .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES),
+                )
+            })
+            .map(|pace| pace_payload(&pace)),
     };
-    (payload.secondary.is_some()).then_some(payload)
+    (payload.secondary.is_some() || payload.tertiary.is_some()).then_some(payload)
 }
 
 /// Upstream `PacePayload` mapping: rounded percents, camelCase stage names.

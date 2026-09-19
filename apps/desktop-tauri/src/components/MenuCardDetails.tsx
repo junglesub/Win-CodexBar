@@ -237,8 +237,66 @@ function paceStageKey(stage: PaceSnapshot["stage"]): LocaleKey {
   }
 }
 
+interface PaceLane {
+  label: string | null;
+  pace: PaceSnapshot;
+}
+
+/**
+ * Personal-only: one expected/actual pace block for a single lane
+ * (5h / weekly / monthly). The first lane keeps the legacy unlabelled look;
+ * further lanes are prefixed with their lane label.
+ */
+function PaceLaneBlock({
+  label,
+  pace,
+  showLabel,
+  t,
+}: {
+  label: string | null;
+  pace: PaceSnapshot;
+  showLabel: boolean;
+  t: (key: LocaleKey) => string;
+}) {
+  return (
+    <div className="menu-card__pace-lane">
+      <div className="menu-card__pace-header">
+        {showLabel && label ? (
+          <span className="menu-card__pace-lane-label">{label}</span>
+        ) : null}
+        <span className="menu-card__pace-label" data-pace={paceCategory(pace.stage)}>
+          {t(paceStageKey(pace.stage))} ({pace.deltaPercent >= 0 ? "+" : ""}
+          {pace.deltaPercent.toFixed(1)}%)
+        </span>
+      </div>
+      <div className="menu-card__pace-bars">
+        <div className="menu-card__pace-track" title={t("PanelExpected")}>
+          <div
+            className="menu-card__pace-fill menu-card__pace-fill--expected"
+            style={{ width: `${pace.expectedUsedPercent.toFixed(1)}%` }}
+          />
+        </div>
+        <div className="menu-card__pace-track" title={t("PanelActual")}>
+          <div
+            className="menu-card__pace-fill"
+            data-pace={paceCategory(pace.stage)}
+            style={{ width: `${pace.actualUsedPercent.toFixed(1)}%` }}
+          />
+        </div>
+      </div>
+      {pace.etaSeconds != null && !pace.willLastToReset && (
+        <div className="menu-card__pace-eta">
+          ⚠ {t("DetailPaceRunsOutIn")} {formatEta(pace.etaSeconds)}
+        </div>
+      )}
+      {pace.willLastToReset && (
+        <div className="menu-card__pace-ok">✓ {t("DetailPaceWillLastToReset")}</div>
+      )}
+    </div>
+  );
+}
+
 type UsageLevel = "normal" | "high" | "critical" | "exhausted";
-const WEEKLY_WINDOW_MINUTES = 7 * 24 * 60;
 
 function levelOf(remainPct: number, exhausted: boolean): UsageLevel {
   if (exhausted) return "exhausted";
@@ -263,9 +321,9 @@ type MetricPaceView =
 function getMetricPaceView(snap: RateWindowSnapshot): MetricPaceView {
   if (snap.isExhausted) return { kind: "none" };
 
-  const isWeeklyWindow =
-    snap.windowMinutes != null && snap.windowMinutes >= WEEKLY_WINDOW_MINUTES;
-  const budget = isWeeklyWindow ? getPaceBudget(snap) : null;
+  // Personal: on-pace budgets for every timed window (5h included), not just
+  // weekly-or-longer lanes.
+  const budget = getPaceBudget(snap);
   if (budget) return { kind: "budget", budget };
 
   if (snap.reservePercent != null) {
@@ -462,7 +520,7 @@ export function describeCard(
   const hasPace =
     showPace &&
     providerAllowsPace(provider.providerId, provider.sourceLabel) &&
-    !!provider.pace;
+    (!!provider.pace || !!provider.secondaryPace || !!provider.tertiaryPace);
   const hasDetails =
     !provider.error &&
     (hasMetrics || hasCost || hasPace || hasCharts || !!localUsage || !!wayfinderUsage);
@@ -502,6 +560,15 @@ export default function MenuCardDetails({
   );
   const localCostHistory = chartData?.costHistory ?? [];
   const costStyle = display.costSummaryDisplayStyle ?? "detailed";
+  // Personal-only: pace for every lane with data (5h / weekly / monthly),
+  // not just the primary lane.
+  const paceLanes: PaceLane[] = paceEnabled
+    ? [
+        { label: provider.primaryLabel ?? null, pace: provider.pace },
+        { label: provider.secondaryLabel ?? null, pace: provider.secondaryPace ?? null },
+        { label: provider.tertiaryLabel ?? null, pace: provider.tertiaryPace ?? null },
+      ].filter((lane): lane is PaceLane => lane.pace != null)
+    : [];
 
   const {
     hasMetrics,
@@ -630,45 +697,20 @@ export default function MenuCardDetails({
               />
             )}
 
-            {paceEnabled && hasPace && provider.pace && (
+            {paceEnabled && paceLanes.length > 0 && (
               <section className="menu-card__group menu-card__pace">
                 <div className="menu-card__pace-header">
                   <span className="menu-card__group-title">{t("DetailPaceTitle")}</span>
-                  <span
-                    className="menu-card__pace-label"
-                    data-pace={paceCategory(provider.pace.stage)}
-                  >
-                    {t(paceStageKey(provider.pace.stage))} (
-                    {provider.pace.deltaPercent >= 0 ? "+" : ""}
-                    {provider.pace.deltaPercent.toFixed(1)}%)
-                  </span>
                 </div>
-                <div className="menu-card__pace-bars">
-                  <div className="menu-card__pace-track" title={t("PanelExpected")}>
-                    <div
-                      className="menu-card__pace-fill menu-card__pace-fill--expected"
-                      style={{ width: `${provider.pace.expectedUsedPercent.toFixed(1)}%` }}
-                    />
-                  </div>
-                  <div className="menu-card__pace-track" title={t("PanelActual")}>
-                    <div
-                      className="menu-card__pace-fill"
-                      data-pace={paceCategory(provider.pace.stage)}
-                      style={{ width: `${provider.pace.actualUsedPercent.toFixed(1)}%` }}
-                    />
-                  </div>
-                </div>
-                {provider.pace.etaSeconds != null && !provider.pace.willLastToReset && (
-                  <div className="menu-card__pace-eta">
-                    ⚠{" "}
-                    {t("DetailPaceRunsOutIn")} {formatEta(provider.pace.etaSeconds)}
-                  </div>
-                )}
-                {provider.pace.willLastToReset && (
-                  <div className="menu-card__pace-ok">
-                    ✓ {t("DetailPaceWillLastToReset")}
-                  </div>
-                )}
+                {paceLanes.map((lane) => (
+                  <PaceLaneBlock
+                    key={lane.label ?? "primary"}
+                    label={lane.label}
+                    pace={lane.pace}
+                    showLabel={paceLanes.length > 1}
+                    t={t}
+                  />
+                ))}
               </section>
             )}
 

@@ -691,6 +691,10 @@ export interface ProviderUsageSnapshot {
   error: string | null;
   errorState: ProviderStateKind;
   pace: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the weekly (secondary) lane. */
+  secondaryPace?: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the monthly (tertiary) lane. */
+  tertiaryPace?: PaceSnapshot | null;
   accountOrganization: string | null;
   trayStatusLabel: string | null;
   fetchDurationMs?: number | null;
@@ -946,6 +950,10 @@ export interface ProviderDetail {
   weekly: RateWindowSnapshot | null;
   modelSpecific: RateWindowSnapshot | null;
   tertiary: RateWindowSnapshot | null;
+  /** Personal-only: lane labels backing the per-lane pace section. */
+  sessionLabel?: string | null;
+  weeklyLabel?: string | null;
+  tertiaryLabel?: string | null;
   extraRateWindows: Array<{
     id: string;
     title: string;
@@ -954,6 +962,10 @@ export interface ProviderDetail {
 
   cost: CostSnapshotBridge | null;
   pace: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the weekly lane. */
+  secondaryPace?: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the monthly lane. */
+  tertiaryPace?: PaceSnapshot | null;
 
   lastError: string | null;
   errorState: ProviderStateKind | null;
