@@ -19,13 +19,17 @@ import {
   refreshProvidersIfStale,
 } from "../lib/tauri";
 import { formatRelativeUpdated } from "../lib/relativeTime";
+import { formatEta } from "../lib/formatEta";
 import { orderProviderSnapshots } from "../lib/providerOrder";
+import { providerAllowsPace } from "../lib/providerPace";
+import { paceCategory, type PaceCategory } from "../surfaces/tray/paceCategory";
 import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
 import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
   BootstrapState,
   MetricPreference,
+  PaceSnapshot,
   ProviderLocalUsageSummary,
   ProviderUsageSnapshot,
   RateWindowSnapshot,
@@ -63,6 +67,28 @@ function isBatterySlotEnabled(
   // A non-empty list with no recognized values therefore selects none, while
   // unknown values alongside known ones are harmlessly ignored.
   return selected.length === 0 || selected.includes(slot);
+}
+
+/** Personal: pace stage to its localized label (mirrors MenuCardDetails). */
+function paceStageKey(stage: PaceSnapshot["stage"]): LocaleKey {
+  switch (stage) {
+    case "on_track":
+      return "DetailPaceOnTrack";
+    case "slightly_ahead":
+      return "DetailPaceSlightlyAhead";
+    case "ahead":
+      return "DetailPaceAhead";
+    case "far_ahead":
+      return "DetailPaceFarAhead";
+    case "slightly_behind":
+      return "DetailPaceSlightlyBehind";
+    case "behind":
+      return "DetailPaceBehind";
+    case "far_behind":
+      return "DetailPaceFarBehind";
+    default:
+      return "DetailPaceOnTrack";
+  }
 }
 
 function cadenceFromMinutes(minutes: number): UsageCadence | null {
@@ -393,6 +419,8 @@ function UsageMetric({
   label,
   batteryEnabled = false,
   batteryLowPercent = -1,
+  paceBucket = null,
+  paceTextColor = false,
   showRemaining = false,
   remainingSuffix,
 }: {
@@ -408,6 +436,10 @@ function UsageMetric({
   batteryEnabled?: boolean;
   /** Remaining % below which battery cells fall back to numbers. -1 disables. */
   batteryLowPercent?: number;
+  /** Personal: pace bucket tinting the number when enabled and not a battery. */
+  paceBucket?: PaceCategory | null;
+  /** Personal: use the pace bucket color instead of the threshold tone. */
+  paceTextColor?: boolean;
   showRemaining?: boolean;
   /** Suffix appended to the battery meter's accessible name. */
   remainingSuffix?: string;
@@ -444,12 +476,16 @@ function UsageMetric({
     batteryValue < batteryLowPercent;
   const isBattery =
     batteryEnabled && batteryValue != null && !providerError && !hidePercent && !lowRemaining;
-  const visible =
-    displayValue == null || providerError
-      ? "—"
-      : hidePercent
-        ? (hiddenTime ?? `${Math.round(displayValue)}%`)
-        : `${Math.round(displayValue)}%${showResetInline && compactReset ? ` ${compactReset}` : ""}`;
+  const percentText =
+    displayValue == null || providerError ? "—" : `${Math.round(displayValue)}%`;
+  const inlineReset =
+    !hidePercent &&
+    showResetInline &&
+    compactReset &&
+    displayValue != null &&
+    !providerError
+      ? compactReset
+      : null;
 
   // Battery tones always describe remaining quota. Percentage text keeps the
   // existing used/remaining semantics controlled by showRemaining.
@@ -465,6 +501,13 @@ function UsageMetric({
           (toneUsesRemaining ? toneValue <= 100 - highUsage : toneValue >= highUsage)
         ? "warn"
         : "ok";
+
+  // Personal: only the reset-date text takes the pace bucket color.
+  // Battery cells and percentage numbers keep the usage-threshold tone.
+  const paceClassName =
+    paceTextColor && paceBucket != null && !providerError
+      ? `floatbar__metric--pace-${paceBucket}`
+      : "";
 
   return (
     <span
@@ -497,13 +540,35 @@ function UsageMetric({
             <span className="floatbar__battery-nub" aria-hidden="true" data-tauri-drag-region />
           </span>
           {showResetInline && compactReset ? (
-            <span className="floatbar__battery-reset" data-tauri-drag-region>
+            <span
+              className={`floatbar__battery-reset${paceClassName ? ` ${paceClassName}` : ""}`}
+              data-tauri-drag-region
+            >
               {compactReset}
             </span>
           ) : null}
         </>
+      ) : hidePercent ? (
+        hiddenTime != null ? (
+          <span className={paceClassName || undefined} data-tauri-drag-region>
+            {hiddenTime}
+          </span>
+        ) : (
+          percentText
+        )
       ) : (
-        visible
+        <>
+          {percentText}
+          {inlineReset != null ? (
+            <span
+              className={`floatbar__metric-reset${paceClassName ? ` ${paceClassName}` : ""}`}
+              data-tauri-drag-region
+            >
+              {" "}
+              {inlineReset}
+            </span>
+          ) : null}
+        </>
       )}
     </span>
   );
@@ -534,6 +599,7 @@ function ProviderPill({
   showRemaining,
   batterySlots,
   batteryLowPercent = -1,
+  paceTextColor = false,
   preference,
   now,
   t,
@@ -556,6 +622,8 @@ function ProviderPill({
   batterySlots?: readonly string[];
   /** Remaining % below which battery cells fall back to numbers. -1 disables. */
   batteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  paceTextColor?: boolean;
   preference: MetricPreference | undefined;
   now: number;
   t: (key: LocaleKey) => string;
@@ -568,6 +636,20 @@ function ProviderPill({
   const hasError = Boolean(provider.error);
   const batteryEnabledFor = (slot: FloatBarBatterySlot) =>
     batteryStyle && isBatterySlotEnabled(batterySlots, slot);
+  // Personal: lane pace for the window actually shown in a slot, matched by
+  // identity against the provider lanes (slots are picked from those lanes).
+  const paceAllows = providerAllowsPace(provider.providerId, provider.sourceLabel);
+  const paceForWindow = (window: RateWindowSnapshot | null): PaceSnapshot | null => {
+    if (!paceAllows || !window) return null;
+    if (window === provider.primary) return provider.pace;
+    if (window === provider.secondary) return provider.secondaryPace ?? null;
+    if (window === provider.tertiary) return provider.tertiaryPace ?? null;
+    return null;
+  };
+  const paceBucketFor = (window: RateWindowSnapshot | null): PaceCategory | null => {
+    const pace = paceForWindow(window);
+    return pace ? paceCategory(pace.stage) : null;
+  };
   // "Show remaining" flips every percentage this pill reports — the metric
   // values and the cadence/fallback detail lines — to remaining quota.
   const shownPercent = (percent: number) => {
@@ -616,7 +698,34 @@ function ProviderPill({
   const updatedDetail = Number.isNaN(updatedAtMs)
     ? `${t("LastUpdated")}: ${provider.updatedAt}`
     : `${t("LastUpdated")}: ${formatRelativeUpdated(updatedAtMs, t, now)}`;
-  pillDetail = `${pillDetail}\n${updatedDetail}`;
+  // Personal: per-lane pace summary in the hover/accessibility detail, one
+  // line per shown slot (fallback included).
+  const paceLines: string[] = [];
+  if (!hasError && paceAllows) {
+    const pushLane = (label: string, pace: PaceSnapshot | null) => {
+      if (!pace) return;
+      const delta = `${pace.deltaPercent >= 0 ? "+" : ""}${pace.deltaPercent.toFixed(1)}%`;
+      // Personal: ahead lanes (exhaustion predicted) append a short ETA.
+      const eta =
+        pace.etaSeconds != null && !pace.willLastToReset
+          ? `, out ${formatEta(pace.etaSeconds)}`
+          : "";
+      paceLines.push(`${label}: ${t(paceStageKey(pace.stage))} (${delta})${eta}`);
+    };
+    if (fallback) {
+      pushLane(fallbackLabel || t(fallback.labelKey), paceForWindow(fallback.window));
+    } else {
+      const laneLabels: Record<UsageCadence, string> = {
+        "5h": t("PanelFiveHours"),
+        weekly: t("ProviderWeeklyLabel"),
+        monthly: t("FloatBarBatterySlotMonthly"),
+      };
+      for (const cadence of USAGE_CADENCES) {
+        pushLane(laneLabels[cadence], paceForWindow(slots[cadence]));
+      }
+    }
+  }
+  pillDetail = [pillDetail, ...paceLines, updatedDetail].join("\n");
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
@@ -654,6 +763,8 @@ function ProviderPill({
             label={fallbackLabel}
             batteryEnabled={batteryEnabledFor("fallback")}
             batteryLowPercent={batteryLowPercent}
+            paceBucket={paceBucketFor(fallback.window)}
+            paceTextColor={paceTextColor}
             showRemaining={showRemaining}
             remainingSuffix={remainingSuffix}
           />
@@ -672,6 +783,8 @@ function ProviderPill({
                 critUsage={critUsage}
                 batteryEnabled={batteryEnabledFor(cadence)}
                 batteryLowPercent={batteryLowPercent}
+                paceBucket={paceBucketFor(slots[cadence])}
+                paceTextColor={paceTextColor}
                 showRemaining={showRemaining}
                 remainingSuffix={remainingSuffix}
               />
@@ -771,6 +884,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const remainingSuffix = t("FloatBarRemainingSuffix");
   const batterySlots = settings.floatBarBatterySlots ?? [];
   const batteryLowPercent = settings.floatBarBatteryLowPercent ?? -1;
+  const paceTextColor = settings.floatBarPaceTextColor ?? false;
   const followProviderOrder = settings.floatBarFollowProviderOrder;
   const providerOrder = settings.providerOrder ?? EMPTY_PROVIDER_ORDER;
   const visible = useMemo(() => {
@@ -984,6 +1098,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               showRemaining={showRemaining}
               batterySlots={batterySlots}
               batteryLowPercent={batteryLowPercent}
+              paceTextColor={paceTextColor}
               preference={settings.providerMetrics[p.providerId]}
               now={now}
               t={t}

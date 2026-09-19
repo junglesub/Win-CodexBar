@@ -322,6 +322,18 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarPaceTextColorLabel")}
+          description={t("FloatBarPaceTextColorHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarPaceTextColor ?? false}
+            disabled={saving || !settings.floatBarEnabled}
+            ariaLabel={t("FloatBarPaceTextColorLabel")}
+            onChange={(v) => set({ floatBarPaceTextColor: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarShowRemainingLabel")}
           description={t("FloatBarShowRemainingHelper")}
           leading

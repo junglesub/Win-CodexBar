@@ -79,6 +79,7 @@ pub struct SettingsUpdate {
     pub float_bar_battery_style: Option<bool>,
     pub float_bar_battery_slots: Option<Vec<String>>,
     pub float_bar_battery_low_percent: Option<i32>,
+    pub float_bar_pace_text_color: Option<bool>,
     pub float_bar_show_remaining: Option<bool>,
     pub float_bar_follow_provider_order: Option<bool>,
     pub promote_tray_icon: Option<bool>,
@@ -116,6 +117,7 @@ impl SettingsUpdate {
             || self.float_bar_battery_style.is_some()
             || self.float_bar_battery_slots.is_some()
             || self.float_bar_battery_low_percent.is_some()
+            || self.float_bar_pace_text_color.is_some()
             || self.float_bar_show_remaining.is_some()
             || self.float_bar_follow_provider_order.is_some()
     }
@@ -409,6 +411,7 @@ impl SettingsUpdate {
             battery_style: self.float_bar_battery_style,
             battery_slots: self.float_bar_battery_slots.clone(),
             battery_low_percent: self.float_bar_battery_low_percent,
+            pace_text_color: self.float_bar_pace_text_color,
             show_remaining: self.float_bar_show_remaining,
             follow_provider_order: self.float_bar_follow_provider_order,
         }
@@ -651,6 +654,13 @@ mod tests {
         assert!(
             SettingsUpdate {
                 float_bar_follow_provider_order: Some(true),
+                ..Default::default()
+            }
+            .notifies_float_bar()
+        );
+        assert!(
+            SettingsUpdate {
+                float_bar_pace_text_color: Some(true),
                 ..Default::default()
             }
             .notifies_float_bar()

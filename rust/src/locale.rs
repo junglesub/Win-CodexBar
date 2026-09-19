@@ -1069,6 +1069,8 @@ locale_keys! {
     FloatBarBatterySlotFallback,
     FloatBarBatteryLowPercentLabel,
     FloatBarBatteryLowPercentHelper,
+    FloatBarPaceTextColorLabel,
+    FloatBarPaceTextColorHelper,
     FloatBarShowRemainingLabel,
     FloatBarShowRemainingHelper,
     FloatBarFollowProviderOrderLabel,

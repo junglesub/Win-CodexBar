@@ -291,6 +291,15 @@ describe("FloatBar", () => {
         UpdatedDaysAgo: "{} days ago",
         PanelToday: "Today",
         PanelUsedSuffix: "used",
+        PanelFiveHours: "5h",
+        ProviderWeeklyLabel: "Weekly",
+        FloatBarBatterySlotMonthly: "Monthly",
+        DetailPaceAhead: "Ahead",
+        DetailPaceOnTrack: "On track",
+        DetailPaceRunsOutIn: "Runs out in",
+        DetailPaceWillLastToReset: "Will last to reset",
+        DetailPaceElapsed: "{} elapsed",
+        DetailPaceResetRemaining: "reset remaining {}",
         FloatBarThirtyDayShort: "30d",
         FloatBarNoProviders: "No providers",
         FloatBarRemainingSuffix: "remaining",
@@ -2196,6 +2205,204 @@ describe("FloatBar", () => {
         expect(container.querySelectorAll(".floatbar__metric")[0].textContent).toBe("—");
       });
       expect(container.querySelector(".floatbar__battery")).toBeNull();
+    });
+  });
+
+  describe("floatBarPaceTextColor", () => {
+    function pacedSnapshot() {
+      const snap = snapshot("claude", "Claude", 40);
+      snap.pace = {
+        stage: "ahead",
+        deltaPercent: 8,
+        expectedUsedPercent: 30,
+        actualUsedPercent: 38,
+        etaSeconds: 49 * 60,
+        willLastToReset: false,
+        elapsedSeconds: 12_000,
+        resetsInSeconds: 6000,
+      };
+      return snap;
+    }
+
+    it("shows per-lane pace in the pill hover detail", async () => {
+      tauriMocks.getCachedProviders.mockResolvedValue([pacedSnapshot()]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+      const { container } = renderFloatBar(bootstrap());
+
+      await waitFor(() => {
+        expect(screen.getByText("40%")).toBeInTheDocument();
+      });
+      const title = container.querySelector(".floatbar__pill")?.getAttribute("title") ?? "";
+      expect(title).toContain("5h: Ahead (+8.0%), out 49m");
+      expect(title).not.toContain("elapsed");
+    });
+
+    it("tints only the reset countdown with the pace color when enabled", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        const snap = snapshot("claude", "Claude", 40, {
+          resetsAt: "2026-08-22T12:00:00Z",
+          primaryWindowMinutes: 300,
+        });
+        snap.pace = {
+          stage: "ahead",
+          deltaPercent: 8,
+          expectedUsedPercent: 30,
+          actualUsedPercent: 38,
+          etaSeconds: null,
+          willLastToReset: true,
+          elapsedSeconds: 12_000,
+          resetsInSeconds: 6000,
+        };
+        tauriMocks.getCachedProviders.mockResolvedValue([snap]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({ floatBarShowResetInline: true, floatBarPaceTextColor: true }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({ floatBarShowResetInline: true, floatBarPaceTextColor: true }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        // Percent keeps the threshold tone (40% used is ok → no tone class).
+        const metric = container.querySelector(".floatbar__metric");
+        expect(metric?.textContent).toBe("40% 4d");
+        expect(metric?.className).not.toContain("pace");
+        // Only the date part carries the pace bucket color.
+        const reset = container.querySelector(".floatbar__metric-reset");
+        expect(reset?.textContent).toContain("4d");
+        expect(reset?.className).toContain("floatbar__metric--pace-racing");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("leaves the countdown untinted when the option is OFF", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        tauriMocks.getCachedProviders.mockResolvedValue([
+          snapshot("claude", "Claude", 40, {
+            resetsAt: "2026-08-22T12:00:00Z",
+            primaryWindowMinutes: 300,
+          }),
+        ]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({ floatBarShowResetInline: true }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({ floatBarShowResetInline: true }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        const reset = container.querySelector(".floatbar__metric-reset");
+        expect(reset?.textContent).toContain("4d");
+        expect(reset?.className).not.toContain("pace");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("tints the battery-adjacent countdown but not the cell when both options are ON", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        const snap = snapshot("claude", "Claude", 40, {
+          resetsAt: "2026-08-22T12:00:00Z",
+          primaryWindowMinutes: 300,
+        });
+        snap.pace = {
+          stage: "ahead",
+          deltaPercent: 8,
+          expectedUsedPercent: 30,
+          actualUsedPercent: 38,
+          etaSeconds: null,
+          willLastToReset: true,
+          elapsedSeconds: 12_000,
+          resetsInSeconds: 6000,
+        };
+        tauriMocks.getCachedProviders.mockResolvedValue([snap]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({
+            floatBarBatteryStyle: true,
+            floatBarShowResetInline: true,
+            floatBarPaceTextColor: true,
+          }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({
+            floatBarBatteryStyle: true,
+            floatBarShowResetInline: true,
+            floatBarPaceTextColor: true,
+          }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        // Battery cell keeps the remaining-quota fill and threshold tone.
+        expect(container.querySelector(".floatbar__battery")).not.toBeNull();
+        expect(
+          container.querySelector<HTMLElement>(".floatbar__battery-fill")?.style.width,
+        ).toBe("60%");
+        expect(
+          container.querySelector(".floatbar__metric.floatbar__metric--pace-racing"),
+        ).toBeNull();
+        // The date next to the cell takes the pace bucket color.
+        const reset = container.querySelector(".floatbar__battery-reset");
+        expect(reset?.textContent).toBe("4d");
+        expect(reset?.className).toContain("floatbar__metric--pace-racing");
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("tints the exhausted hide-percent countdown with the pace color", async () => {
+      vi.useFakeTimers();
+      try {
+        vi.setSystemTime(new Date("2026-08-18T00:00:00Z"));
+        const snap = snapshot("claude", "Claude", 100, {
+          exhausted: true,
+          resetsAt: "2026-08-22T12:00:00Z",
+          primaryWindowMinutes: 300,
+        });
+        snap.pace = {
+          stage: "far_ahead",
+          deltaPercent: 20,
+          expectedUsedPercent: 80,
+          actualUsedPercent: 100,
+          etaSeconds: null,
+          willLastToReset: false,
+          elapsedSeconds: 12_000,
+          resetsInSeconds: 6000,
+        };
+        tauriMocks.getCachedProviders.mockResolvedValue([snap]);
+        tauriMocks.getSettingsSnapshot.mockResolvedValue(
+          settings({ floatBarHidePercentWhenExhausted: true, floatBarPaceTextColor: true }),
+        );
+
+        const { container } = renderFloatBar(
+          bootstrap({ floatBarHidePercentWhenExhausted: true, floatBarPaceTextColor: true }),
+        );
+        await act(async () => vi.runOnlyPendingTimersAsync());
+
+        const metric = container.querySelector(".floatbar__metric");
+        expect(metric?.textContent).toBe("4d 12h");
+        expect(
+          metric?.querySelector("span.floatbar__metric--pace-burning"),
+        ).not.toBeNull();
+      } finally {
+        vi.useRealTimers();
+      }
+    });
+
+    it("declares the pace bucket colors in CSS", () => {
+      expect(cssRuleBlock(floatBarCss, ".floatbar__metric--pace-slow")).toContain("#60a5fa");
+      expect(cssRuleBlock(floatBarCss, ".floatbar__metric--pace-steady")).toContain("#22c55e");
+      expect(cssRuleBlock(floatBarCss, ".floatbar__metric--pace-racing")).toContain("#fb923c");
+      expect(cssRuleBlock(floatBarCss, ".floatbar__metric--pace-burning")).toContain("#ef476f");
     });
   });
 

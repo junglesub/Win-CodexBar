@@ -178,6 +178,25 @@ body.floatbar-window #root {
   color: #7f1d1d;
   font-weight: 700;
 }
+/* Personal: pace bucket text colors for non-battery numbers. Same hues as
+ * the menu-card pace buckets, declared locally so the float bar stays
+ * self-contained. */
+.floatbar__metric--pace-slow {
+  color: #60a5fa;
+  font-weight: 700;
+}
+.floatbar__metric--pace-steady {
+  color: #22c55e;
+  font-weight: 700;
+}
+.floatbar__metric--pace-racing {
+  color: #fb923c;
+  font-weight: 700;
+}
+.floatbar__metric--pace-burning {
+  color: #ef476f;
+  font-weight: 700;
+}
 .floatbar__metric-label {
   font-size: 0.78em;
   font-weight: 600;

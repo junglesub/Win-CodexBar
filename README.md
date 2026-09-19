@@ -67,6 +67,11 @@ order:
   reset remaining 1h 40m`). `codexbar usage` prints a `Pace:` line under
   each lane (including monthly) and the JSON output carries a `tertiary` pace
   entry next to `primary`/`secondary`.
+- Float Bar pills show per-lane pace (stage, delta, elapsed window time, reset
+  remaining) on hover. Optional pace text color ("Pace text color",
+  `float_bar_pace_text_color`) tints reset countdowns with the pace bucket
+  color (slow/steady/racing/burning); battery cells and percentage numbers
+  keep the usage-threshold tone.
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a
   model-specific fallback when unavailable.
 

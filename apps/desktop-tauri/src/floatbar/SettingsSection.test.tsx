@@ -62,6 +62,17 @@ describe("FloatBar settings", () => {
     expect(screen.getByLabelText("FloatBarExhaustedWeekdayTime")).toBeDisabled();
   });
 
+  it("persists the pace text color toggle", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={set} />,
+    );
+
+    expect(screen.getByLabelText("FloatBarPaceTextColorLabel")).toBeEnabled();
+    fireEvent.click(screen.getByLabelText("FloatBarPaceTextColorLabel"));
+    expect(set).toHaveBeenCalledWith({ floatBarPaceTextColor: true });
+  });
+
   it("persists the weekday toggle once clock style is on", () => {
     const set = vi.fn();
     render(

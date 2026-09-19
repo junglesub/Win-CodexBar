@@ -279,6 +279,8 @@ export interface SettingsSnapshot {
    * percentage number. `-1` disables the fallback (default).
    */
   floatBarBatteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
   /**
    * When true, Float Bar percentage text and its accessible detail render
    * remaining quota instead of used quota. Battery cells always track remaining
@@ -393,6 +395,8 @@ export interface SettingsUpdate {
   floatBarBatterySlots?: string[];
   /** `-1` disables the low-remaining fallback to percentage numbers. */
   floatBarBatteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
   /** When true, render Float Bar usage as remaining quota instead of used quota. */
   floatBarShowRemaining?: boolean;
   /**

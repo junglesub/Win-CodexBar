@@ -355,6 +355,12 @@ pub struct Settings {
     #[serde(default = "default_float_bar_battery_low_percent")]
     pub float_bar_battery_low_percent: i32,
 
+    /// Personal: tint Float Bar reset countdowns with the pace bucket color
+    /// (slow/steady/racing/burning). Battery cells and percentage numbers
+    /// keep the usage-threshold tone.
+    #[serde(default)]
+    pub float_bar_pace_text_color: bool,
+
     /// When true, Float Bar percentage text and its accessible detail render
     /// remaining quota instead of used quota. Battery cells always track
     /// remaining quota regardless of this setting.
@@ -666,6 +672,7 @@ impl Default for Settings {
             float_bar_battery_style: false,
             float_bar_battery_slots: Vec::new(),
             float_bar_battery_low_percent: default_float_bar_battery_low_percent(),
+            float_bar_pace_text_color: false,
             float_bar_show_remaining: false,
             float_bar_follow_provider_order: false,
             promote_tray_icon: true,
