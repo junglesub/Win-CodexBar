@@ -9,10 +9,10 @@ export interface PaceTiming {
 }
 
 /**
- * Personal: always-visible one-line pace summary — verdict plus elapsed
- * window time and time left until reset on the same line:
- * `Runs out in 49m / 3h 20m elapsed / reset remaining 1h 30m`,
- * `Will last to reset / 3h 20m elapsed / reset remaining 1h 40m`.
+ * Personal: always-visible one-line pace summary — verdict first, then
+ * reset-remaining, then parenthesized elapsed time:
+ * `Runs out in 38m / 45m reset remaining (4h 32m elapsed)`,
+ * `Will last to reset / 45m reset remaining (4h 32m elapsed)`.
  * Returns null when there is nothing to show.
  */
 export function formatPaceAux(
@@ -25,13 +25,20 @@ export function formatPaceAux(
   } else if (pace.willLastToReset) {
     parts.push(t("DetailPaceWillLastToReset"));
   }
-  const elapsed = formatDuration(pace.elapsedSeconds);
-  if (elapsed != null) {
-    parts.push(t("DetailPaceElapsed").replace("{}", elapsed));
-  }
   const resetsIn = formatDuration(pace.resetsInSeconds);
   if (resetsIn != null) {
     parts.push(t("DetailPaceResetRemaining").replace("{}", resetsIn));
+  }
+  const elapsed = formatDuration(pace.elapsedSeconds);
+  if (elapsed != null) {
+    const elapsedPart = `(${t("DetailPaceElapsed").replace("{}", elapsed)})`;
+    // Elapsed time hugs the reset-remaining part with a space instead of
+    // starting a new slash segment: `… 1h 30m reset remaining (3h 20m elapsed)`.
+    if (parts.length > 0) {
+      parts[parts.length - 1] += ` ${elapsedPart}`;
+    } else {
+      parts.push(elapsedPart);
+    }
   }
   if (parts.length === 0) return null;
   return parts.join(" / ");

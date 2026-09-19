@@ -62,9 +62,9 @@ order:
   show expected-vs-actual pace for every lane with data (5h, weekly, monthly),
   not just the primary lane. Each metric row also gets on-pace budget bars for
   every timed window, including 5h. The pace line always shows elapsed window
-  time and time left until reset on the same line (`Runs out in 49m / 3h 20m
-  elapsed / reset remaining 1h 30m`, `Will last to reset / 3h 20m elapsed /
-  reset remaining 1h 40m`). `codexbar usage` prints a `Pace:` line under
+  time and time left until reset on the same line (`Runs out in 49m / 1h 30m
+  reset remaining (3h 20m elapsed)`, `Will last to reset / 1h 40m reset
+  remaining (3h 20m elapsed)`). `codexbar usage` prints a `Pace:` line under
   each lane (including monthly) and the JSON output carries a `tertiary` pace
   entry next to `primary`/`secondary`.
 - Float Bar pills show per-lane pace (stage, delta, elapsed window time, reset

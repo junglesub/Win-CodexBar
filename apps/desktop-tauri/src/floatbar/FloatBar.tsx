@@ -19,7 +19,7 @@ import {
   refreshProvidersIfStale,
 } from "../lib/tauri";
 import { formatRelativeUpdated } from "../lib/relativeTime";
-import { formatEta } from "../lib/formatEta";
+import { formatDuration, formatEta } from "../lib/formatEta";
 import { orderProviderSnapshots } from "../lib/providerOrder";
 import { providerAllowsPace } from "../lib/providerPace";
 import { paceCategory, type PaceCategory } from "../surfaces/tray/paceCategory";
@@ -705,12 +705,13 @@ function ProviderPill({
     const pushLane = (label: string, pace: PaceSnapshot | null) => {
       if (!pace) return;
       const delta = `${pace.deltaPercent >= 0 ? "+" : ""}${pace.deltaPercent.toFixed(1)}%`;
-      // Personal: ahead lanes (exhaustion predicted) append a short ETA.
-      const eta =
-        pace.etaSeconds != null && !pace.willLastToReset
-          ? `, out ${formatEta(pace.etaSeconds)}`
+      // Personal: only lanes running short show timing, as `ETA/resets`.
+      const resets = formatDuration(pace.resetsInSeconds);
+      const short =
+        pace.etaSeconds != null && !pace.willLastToReset && resets != null
+          ? `, ${formatEta(pace.etaSeconds)}/${resets}`
           : "";
-      paceLines.push(`${label}: ${t(paceStageKey(pace.stage))} (${delta})${eta}`);
+      paceLines.push(`${label}: ${t(paceStageKey(pace.stage))} (${delta})${short}`);
     };
     if (fallback) {
       pushLane(fallbackLabel || t(fallback.labelKey), paceForWindow(fallback.window));

@@ -119,7 +119,7 @@ describe("MenuCard", () => {
         ApiSpendTitle: "API spend",
         DetailPaceRunsOutIn: "Runs out in",
         DetailPaceElapsed: "{} elapsed",
-        DetailPaceResetRemaining: "reset remaining {}",
+        DetailPaceResetRemaining: "{} reset remaining",
         DetailPaceTitle: "Pace",
         DetailPaceOnTrack: "On track",
         DetailPaceAhead: "Ahead",
@@ -515,7 +515,7 @@ describe("MenuCard", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
-        "⚠ Runs out in 49m / 3h 20m elapsed / reset remaining 1h 30m",
+        "⚠ Runs out in 49m / 1h 30m reset remaining (3h 20m elapsed)",
       );
     });
   });
@@ -537,7 +537,7 @@ describe("MenuCard", () => {
 
     await waitFor(() => {
       expect(container.querySelector(".menu-card__pace-ok")).toHaveTextContent(
-        "✓ Will last to reset / 3h 20m elapsed / reset remaining 1h 40m",
+        "✓ Will last to reset / 1h 40m reset remaining (3h 20m elapsed)",
       );
     });
   });

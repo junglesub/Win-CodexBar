@@ -6,7 +6,7 @@ const entries: Record<string, string> = {
   DetailPaceRunsOutIn: "Runs out in",
   DetailPaceWillLastToReset: "Will last to reset",
   DetailPaceElapsed: "{} elapsed",
-  DetailPaceResetRemaining: "reset remaining {}",
+  DetailPaceResetRemaining: "{} reset remaining",
 };
 
 const t = (key: LocaleKey) => entries[key] ?? key;
@@ -23,7 +23,7 @@ describe("formatPaceAux", () => {
         },
         t,
       ),
-    ).toBe("Runs out in 49m / 3h 20m elapsed / reset remaining 1h 30m");
+    ).toBe("Runs out in 49m / 1h 30m reset remaining (3h 20m elapsed)");
   });
 
   it("shows elapsed time next to the will-last verdict", () => {
@@ -37,7 +37,7 @@ describe("formatPaceAux", () => {
         },
         t,
       ),
-    ).toBe("Will last to reset / 3h 20m elapsed / reset remaining 1h 40m");
+    ).toBe("Will last to reset / 1h 40m reset remaining (3h 20m elapsed)");
   });
 
   it("falls back to verdict only without timing data", () => {

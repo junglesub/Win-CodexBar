@@ -2234,7 +2234,7 @@ describe("FloatBar", () => {
         expect(screen.getByText("40%")).toBeInTheDocument();
       });
       const title = container.querySelector(".floatbar__pill")?.getAttribute("title") ?? "";
-      expect(title).toContain("5h: Ahead (+8.0%), out 49m");
+      expect(title).toContain("5h: Ahead (+8.0%), 49m/1h 40m");
       expect(title).not.toContain("elapsed");
     });
 
