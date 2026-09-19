@@ -1065,6 +1065,8 @@ locale_keys! {
     FloatBarBatterySlotsHelper,
     FloatBarBatterySlotMonthly,
     FloatBarBatterySlotFallback,
+    FloatBarBatteryLowPercentLabel,
+    FloatBarBatteryLowPercentHelper,
     FloatBarShowRemainingLabel,
     FloatBarShowRemainingHelper,
     FloatBarFollowProviderOrderLabel,

@@ -49,7 +49,10 @@ order:
   remain available on hover, and exhausted or error slots keep their existing
   display. Battery cells always show remaining quota, while the companion
   "Show remaining" toggle (`float_bar_show_remaining`) only flips percentage
-  text and its accessible detail.
+  text and its accessible detail. When remaining quota drops below
+  `float_bar_battery_low_percent`, a battery cell falls back to a percentage
+  number ("Show percent when low", right under the battery slots). `-1`
+  (default) disables the fallback and always renders battery cells.
 - Optional custom order shows Float Bar providers in your drag-reorder sequence
   from the overview instead of by usage ("Use custom provider order",
   `float_bar_follow_provider_order`). An empty custom sequence keeps usage

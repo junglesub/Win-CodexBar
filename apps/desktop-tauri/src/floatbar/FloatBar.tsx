@@ -392,6 +392,7 @@ function UsageMetric({
   critUsage,
   label,
   batteryEnabled = false,
+  batteryLowPercent = -1,
   showRemaining = false,
   remainingSuffix,
 }: {
@@ -405,6 +406,8 @@ function UsageMetric({
   critUsage: number;
   label?: string;
   batteryEnabled?: boolean;
+  /** Remaining % below which battery cells fall back to numbers. -1 disables. */
+  batteryLowPercent?: number;
   showRemaining?: boolean;
   /** Suffix appended to the battery meter's accessible name. */
   remainingSuffix?: string;
@@ -434,7 +437,13 @@ function UsageMetric({
     detailedReset != null;
   const hiddenTime = exhaustedClockTime ? (clockReset ?? detailedReset) : detailedReset;
   const batteryValue = remaining;
-  const isBattery = batteryEnabled && batteryValue != null && !providerError && !hidePercent;
+  const lowRemaining =
+    batteryLowPercent != null &&
+    batteryLowPercent >= 0 &&
+    batteryValue != null &&
+    batteryValue < batteryLowPercent;
+  const isBattery =
+    batteryEnabled && batteryValue != null && !providerError && !hidePercent && !lowRemaining;
   const visible =
     displayValue == null || providerError
       ? "—"
@@ -524,6 +533,7 @@ function ProviderPill({
   remainingSuffix,
   showRemaining,
   batterySlots,
+  batteryLowPercent = -1,
   preference,
   now,
   t,
@@ -544,6 +554,8 @@ function ProviderPill({
   showRemaining: boolean;
   /** Selected battery slots; empty means all slots. */
   batterySlots?: readonly string[];
+  /** Remaining % below which battery cells fall back to numbers. -1 disables. */
+  batteryLowPercent?: number;
   preference: MetricPreference | undefined;
   now: number;
   t: (key: LocaleKey) => string;
@@ -641,6 +653,7 @@ function ProviderPill({
             critUsage={critUsage}
             label={fallbackLabel}
             batteryEnabled={batteryEnabledFor("fallback")}
+            batteryLowPercent={batteryLowPercent}
             showRemaining={showRemaining}
             remainingSuffix={remainingSuffix}
           />
@@ -658,6 +671,7 @@ function ProviderPill({
                 highUsage={highUsage}
                 critUsage={critUsage}
                 batteryEnabled={batteryEnabledFor(cadence)}
+                batteryLowPercent={batteryLowPercent}
                 showRemaining={showRemaining}
                 remainingSuffix={remainingSuffix}
               />
@@ -756,6 +770,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const usedSuffix = t(showRemaining ? "FloatBarRemainingSuffix" : "PanelUsedSuffix");
   const remainingSuffix = t("FloatBarRemainingSuffix");
   const batterySlots = settings.floatBarBatterySlots ?? [];
+  const batteryLowPercent = settings.floatBarBatteryLowPercent ?? -1;
   const followProviderOrder = settings.floatBarFollowProviderOrder;
   const providerOrder = settings.providerOrder ?? EMPTY_PROVIDER_ORDER;
   const visible = useMemo(() => {
@@ -895,6 +910,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     exhaustedWeekdayTime,
     settings.floatBarBatteryStyle,
     batterySlots,
+    batteryLowPercent,
     settings.resetTimeRelative,
     showRemaining,
   ]);
@@ -967,6 +983,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               remainingSuffix={remainingSuffix}
               showRemaining={showRemaining}
               batterySlots={batterySlots}
+              batteryLowPercent={batteryLowPercent}
               preference={settings.providerMetrics[p.providerId]}
               now={now}
               t={t}

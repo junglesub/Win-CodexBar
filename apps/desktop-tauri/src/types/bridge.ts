@@ -275,6 +275,11 @@ export interface SettingsSnapshot {
   /** Empty array = battery cells for every Float Bar slot. */
   floatBarBatterySlots: string[];
   /**
+   * Remaining-quota percent below which battery cells fall back to a
+   * percentage number. `-1` disables the fallback (default).
+   */
+  floatBarBatteryLowPercent?: number;
+  /**
    * When true, Float Bar percentage text and its accessible detail render
    * remaining quota instead of used quota. Battery cells always track remaining
    * quota regardless of this setting.
@@ -386,6 +391,8 @@ export interface SettingsUpdate {
   floatBarBatteryStyle?: boolean;
   /** Empty array = battery cells for every Float Bar slot. */
   floatBarBatterySlots?: string[];
+  /** `-1` disables the low-remaining fallback to percentage numbers. */
+  floatBarBatteryLowPercent?: number;
   /** When true, render Float Bar usage as remaining quota instead of used quota. */
   floatBarShowRemaining?: boolean;
   /**

@@ -785,6 +785,8 @@ export const ALL_LOCALE_KEYS = [
   "FloatBarBatterySlotsHelper",
   "FloatBarBatterySlotMonthly",
   "FloatBarBatterySlotFallback",
+  "FloatBarBatteryLowPercentLabel",
+  "FloatBarBatteryLowPercentHelper",
   "FloatBarShowRemainingLabel",
   "FloatBarShowRemainingHelper",
   "FloatBarFollowProviderOrderLabel",

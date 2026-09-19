@@ -349,6 +349,12 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_battery_slots: Vec<String>,
 
+    /// Remaining-quota percent below which battery cells fall back to a
+    /// percentage number. `-1` disables the fallback (always render battery
+    /// cells). Otherwise clamped to `0..=100`.
+    #[serde(default = "default_float_bar_battery_low_percent")]
+    pub float_bar_battery_low_percent: i32,
+
     /// When true, Float Bar percentage text and its accessible detail render
     /// remaining quota instead of used quota. Battery cells always track
     /// remaining quota regardless of this setting.
@@ -446,6 +452,17 @@ fn default_float_bar_orientation() -> String {
 
 fn default_float_bar_style() -> String {
     "floating".to_string()
+}
+
+/// Default for [`Settings::float_bar_battery_low_percent`]: disabled.
+fn default_float_bar_battery_low_percent() -> i32 {
+    -1
+}
+
+/// Clamp the battery-to-percent fallback threshold: `-1` disables it,
+/// anything else pins to `0..=100`.
+pub fn clamp_float_bar_battery_low_percent(value: i32) -> i32 {
+    if value < 0 { -1 } else { value.clamp(0, 100) }
 }
 
 /// Clamp the floating-bar opacity to the supported range.
@@ -648,6 +665,7 @@ impl Default for Settings {
             float_bar_show_cost: false,
             float_bar_battery_style: false,
             float_bar_battery_slots: Vec::new(),
+            float_bar_battery_low_percent: default_float_bar_battery_low_percent(),
             float_bar_show_remaining: false,
             float_bar_follow_provider_order: false,
             promote_tray_icon: true,

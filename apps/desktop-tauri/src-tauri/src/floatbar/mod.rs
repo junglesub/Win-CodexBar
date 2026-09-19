@@ -145,6 +145,7 @@ pub struct SettingsPatch {
     pub show_cost: Option<bool>,
     pub battery_style: Option<bool>,
     pub battery_slots: Option<Vec<String>>,
+    pub battery_low_percent: Option<i32>,
     pub show_remaining: Option<bool>,
     pub follow_provider_order: Option<bool>,
 }
@@ -168,6 +169,7 @@ impl SettingsPatch {
             && self.show_cost.is_none()
             && self.battery_style.is_none()
             && self.battery_slots.is_none()
+            && self.battery_low_percent.is_none()
             && self.show_remaining.is_none()
             && self.follow_provider_order.is_none()
     }
@@ -227,6 +229,10 @@ impl SettingsPatch {
         }
         if let Some(v) = &self.battery_slots {
             settings.float_bar_battery_slots = v.clone();
+        }
+        if let Some(v) = self.battery_low_percent {
+            settings.float_bar_battery_low_percent =
+                codexbar::settings::clamp_float_bar_battery_low_percent(v);
         }
         if let Some(v) = self.show_remaining {
             settings.float_bar_show_remaining = v;

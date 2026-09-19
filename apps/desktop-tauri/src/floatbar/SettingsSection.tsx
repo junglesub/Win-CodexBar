@@ -76,6 +76,14 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
     );
   };
   const storedBatterySlots = settings.floatBarBatterySlots ?? [];
+  const batteryLowPercent = useDraftNumber(settings.floatBarBatteryLowPercent ?? -1);
+  const commitBatteryLowPercent = () => {
+    const raw = batteryLowPercent.draft;
+    const parsed = Number.isFinite(raw) ? Math.round(raw) : -1;
+    // -1 disables the fallback; anything below clamps to -1, above to 100.
+    const next = parsed < 0 ? -1 : Math.min(100, parsed);
+    batteryLowPercent.commit(next, (value) => set({ floatBarBatteryLowPercent: value }));
+  };
   const selectedBatterySlots = new Set(storedBatterySlots.filter(isBatterySlot));
   const allBatterySlots = storedBatterySlots.length === 0;
   const batterySlotsDisabled =
@@ -291,6 +299,27 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
               </label>
             ))}
           </div>
+        </Field>
+        <Field
+          label={t("FloatBarBatteryLowPercentLabel")}
+          description={t("FloatBarBatteryLowPercentHelper")}
+        >
+          <input
+            type="number"
+            min={-1}
+            max={100}
+            step={1}
+            value={batteryLowPercent.draft}
+            disabled={batterySlotsDisabled}
+            onChange={(e) =>
+              batteryLowPercent.setDraft(
+                e.target.value === "" ? -1 : Number(e.target.value),
+              )
+            }
+            onBlur={commitBatteryLowPercent}
+            onKeyUp={commitBatteryLowPercent}
+            aria-label={t("FloatBarBatteryLowPercentLabel")}
+          />
         </Field>
         <Field
           label={t("FloatBarShowRemainingLabel")}
