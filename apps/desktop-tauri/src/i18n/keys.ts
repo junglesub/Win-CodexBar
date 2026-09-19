@@ -593,6 +593,8 @@ export const ALL_LOCALE_KEYS = [
   "DetailPaceFarBehind",
   "DetailPaceRunsOutIn",
   "DetailPaceWillLastToReset",
+  "DetailPaceElapsed",
+  "DetailPaceResetRemaining",
   "DetailCostTitle",
   "ApiSpendTitle",
   "DetailCostUsed",

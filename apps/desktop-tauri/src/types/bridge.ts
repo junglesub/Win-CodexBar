@@ -637,6 +637,10 @@ export interface PaceSnapshot {
   etaSeconds: number | null;
   expectedUsedPercent: number;
   actualUsedPercent: number;
+  /** Personal: seconds elapsed since the window started. */
+  elapsedSeconds?: number | null;
+  /** Personal: seconds remaining until the window resets. */
+  resetsInSeconds?: number | null;
 }
 
 export interface SessionEquivalentForecastSnapshot {

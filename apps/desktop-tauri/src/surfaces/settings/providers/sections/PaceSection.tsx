@@ -1,6 +1,6 @@
 import type { PaceSnapshot } from "../../../../types/bridge";
 import type { LocaleKey } from "../../../../i18n/keys";
-import { formatEta } from "../../../../lib/formatEta";
+import { formatPaceAux } from "../../../../lib/paceAux";
 
 export interface PaceLane {
   label: string | null;
@@ -34,11 +34,7 @@ export function PaceSection({ lanes, t }: Props) {
       <h4>{t("DetailPaceTitle")}</h4>
       {visible.map((lane) => {
         const stageLabel = t(STAGE_TO_KEY[lane.pace.stage]);
-        const aux = lane.pace.willLastToReset
-          ? t("DetailPaceWillLastToReset")
-          : lane.pace.etaSeconds !== null
-            ? `${t("DetailPaceRunsOutIn")} ${formatEta(lane.pace.etaSeconds)}`
-            : null;
+        const aux = formatPaceAux(lane.pace, t);
         return (
           <div className="provider-detail-pace__lane" key={lane.label ?? "primary"}>
             <div className="provider-detail-pace__stage" data-stage={lane.pace.stage}>

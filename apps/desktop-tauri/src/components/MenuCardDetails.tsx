@@ -15,7 +15,7 @@ import {
   useFormattedResetTime,
   type ResetTimeFormatMode,
 } from "../hooks/useFormattedResetTime";
-import { formatEta } from "../lib/formatEta";
+import { formatPaceAux } from "../lib/paceAux";
 import type { LocaleKey } from "../i18n/keys";
 import { paceCategory } from "../surfaces/tray/paceCategory";
 import { SimpleBarChart, StackedBarChart } from "./MiniBarChart";
@@ -284,14 +284,17 @@ function PaceLaneBlock({
           />
         </div>
       </div>
-      {pace.etaSeconds != null && !pace.willLastToReset && (
-        <div className="menu-card__pace-eta">
-          ⚠ {t("DetailPaceRunsOutIn")} {formatEta(pace.etaSeconds)}
-        </div>
-      )}
-      {pace.willLastToReset && (
-        <div className="menu-card__pace-ok">✓ {t("DetailPaceWillLastToReset")}</div>
-      )}
+      {(() => {
+        const aux = formatPaceAux(pace, t);
+        if (aux == null) return null;
+        if (pace.etaSeconds != null && !pace.willLastToReset) {
+          return <div className="menu-card__pace-eta">⚠ {aux}</div>;
+        }
+        if (pace.willLastToReset) {
+          return <div className="menu-card__pace-ok">✓ {aux}</div>;
+        }
+        return <div className="menu-card__pace-time">{aux}</div>;
+      })()}
     </div>
   );
 }

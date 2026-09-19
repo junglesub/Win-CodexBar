@@ -179,6 +179,10 @@ pub struct PacePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_out_probability: Option<f64>,
     pub summary: String,
+    /// Personal: seconds elapsed since the window started.
+    pub elapsed_seconds: f64,
+    /// Personal: seconds remaining until the window resets.
+    pub resets_in_seconds: f64,
 }
 
 // ── Builder inputs ────────────────────────────────────────────────────────
@@ -550,6 +554,8 @@ fn pace_payload(pace: &UsagePace) -> PacePayload {
         eta_seconds: pace.eta_seconds.map(|eta| eta.round()),
         run_out_probability: None,
         summary: pace.format_status(),
+        elapsed_seconds: pace.elapsed_seconds.round(),
+        resets_in_seconds: pace.resets_in_seconds.round(),
     }
 }
 

@@ -118,6 +118,8 @@ describe("MenuCard", () => {
         ActionCopyError: "Copy error",
         ApiSpendTitle: "API spend",
         DetailPaceRunsOutIn: "Runs out in",
+        DetailPaceElapsed: "{} elapsed",
+        DetailPaceResetRemaining: "reset remaining {}",
         DetailPaceTitle: "Pace",
         DetailPaceOnTrack: "On track",
         DetailPaceAhead: "Ahead",
@@ -492,6 +494,50 @@ describe("MenuCard", () => {
     await waitFor(() => {
       expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
         "⚠ Runs out in 2h",
+      );
+    });
+  });
+
+  it("shows elapsed and reset-remaining times on the same pace line (personal)", async () => {
+    const snapshot = provider(null, 40);
+    snapshot.pace = {
+      stage: "far_ahead",
+      deltaPercent: 20,
+      expectedUsedPercent: 20,
+      actualUsedPercent: 40,
+      etaSeconds: 49 * 60,
+      willLastToReset: false,
+      elapsedSeconds: 3 * 3600 + 20 * 60,
+      resetsInSeconds: 90 * 60,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    await waitFor(() => {
+      expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
+        "⚠ Runs out in 49m / 3h 20m elapsed / reset remaining 1h 30m",
+      );
+    });
+  });
+
+  it("shows elapsed time next to the will-last verdict (personal)", async () => {
+    const snapshot = provider(null, 40);
+    snapshot.pace = {
+      stage: "behind",
+      deltaPercent: -8,
+      expectedUsedPercent: 50,
+      actualUsedPercent: 42,
+      etaSeconds: null,
+      willLastToReset: true,
+      elapsedSeconds: 12_000,
+      resetsInSeconds: 6000,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    await waitFor(() => {
+      expect(container.querySelector(".menu-card__pace-ok")).toHaveTextContent(
+        "✓ Will last to reset / 3h 20m elapsed / reset remaining 1h 40m",
       );
     });
   });

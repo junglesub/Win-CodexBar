@@ -155,6 +155,12 @@ pub struct PaceSnapshot {
     pub expected_used_percent: f64,
     #[serde(default)]
     pub actual_used_percent: f64,
+    /// Personal: seconds elapsed since the window started.
+    #[serde(default)]
+    pub elapsed_seconds: f64,
+    /// Personal: seconds remaining until the window resets.
+    #[serde(default)]
+    pub resets_in_seconds: f64,
 }
 
 /// Session-equivalent weekly forecast for Claude/Codex menu secondary line.
@@ -282,6 +288,20 @@ pub(crate) fn filter_hidden_codex_spark_rows(
     }
 }
 
+/// Build a [`PaceSnapshot`] from a computed [`UsagePace`].
+fn pace_snapshot(pace: &codexbar::core::UsagePace) -> PaceSnapshot {
+    PaceSnapshot {
+        stage: pace::stage_str(pace.stage).to_string(),
+        delta_percent: pace.delta_percent,
+        will_last_to_reset: pace.will_last_to_reset,
+        eta_seconds: pace.eta_seconds,
+        expected_used_percent: pace.expected_used_percent,
+        actual_used_percent: pace.actual_used_percent,
+        elapsed_seconds: pace.elapsed_seconds,
+        resets_in_seconds: pace.resets_in_seconds,
+    }
+}
+
 /// Build a [`PaceSnapshot`] for one rate window, or `None` when the window
 /// has no usable timing (no future reset, zero-length window, …).
 fn lane_pace_snapshot(
@@ -289,14 +309,7 @@ fn lane_pace_snapshot(
     default_minutes: u32,
 ) -> Option<PaceSnapshot> {
     let pace = codexbar::core::UsagePace::weekly(window?, None, default_minutes)?;
-    Some(PaceSnapshot {
-        stage: pace::stage_str(pace.stage).to_string(),
-        delta_percent: pace.delta_percent,
-        will_last_to_reset: pace.will_last_to_reset,
-        eta_seconds: pace.eta_seconds,
-        expected_used_percent: pace.expected_used_percent,
-        actual_used_percent: pace.actual_used_percent,
-    })
+    Some(pace_snapshot(&pace))
 }
 
 impl ProviderUsageSnapshot {
@@ -323,14 +336,7 @@ impl ProviderUsageSnapshot {
         });
         let primary_pace = primary_pace.flatten();
 
-        let pace = primary_pace.as_ref().map(|p| PaceSnapshot {
-            stage: pace::stage_str(p.stage).to_string(),
-            delta_percent: p.delta_percent,
-            will_last_to_reset: p.will_last_to_reset,
-            eta_seconds: p.eta_seconds,
-            expected_used_percent: p.expected_used_percent,
-            actual_used_percent: p.actual_used_percent,
-        });
+        let pace = primary_pace.as_ref().map(pace_snapshot);
 
         // Compute pace for secondary window (weekly) to derive reserve info
         let secondary_pace = allows_pace.then(|| {

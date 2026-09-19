@@ -686,6 +686,8 @@ mod tests {
             actual_used_percent: 60.0,
             eta_seconds,
             will_last_to_reset,
+            elapsed_seconds: 0.0,
+            resets_in_seconds: 0.0,
         }
     }
 

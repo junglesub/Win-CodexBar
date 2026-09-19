@@ -867,6 +867,8 @@ locale_keys! {
     DetailPaceFarBehind,
     DetailPaceRunsOutIn,
     DetailPaceWillLastToReset,
+    DetailPaceElapsed,
+    DetailPaceResetRemaining,
     DetailCostTitle,
     ApiSpendTitle,
     DetailCostUsed,

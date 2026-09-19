@@ -61,7 +61,10 @@ order:
 - Personal-only per-window pace: provider cards and the Settings detail pane
   show expected-vs-actual pace for every lane with data (5h, weekly, monthly),
   not just the primary lane. Each metric row also gets on-pace budget bars for
-  every timed window, including 5h. `codexbar usage` prints a `Pace:` line under
+  every timed window, including 5h. The pace line always shows elapsed window
+  time and time left until reset on the same line (`Runs out in 49m / 3h 20m
+  elapsed / reset remaining 1h 30m`, `Will last to reset / 3h 20m elapsed /
+  reset remaining 1h 40m`). `codexbar usage` prints a `Pace:` line under
   each lane (including monthly) and the JSON output carries a `tertiary` pace
   entry next to `primary`/`secondary`.
 - Antigravity uses Gemini quota summary data for 5h and weekly usage, with a

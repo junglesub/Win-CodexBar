@@ -657,6 +657,8 @@ fn pace_json(pace: UsagePace) -> serde_json::Value {
         "deltaPercent": pace.delta_percent,
         "expectedUsedPercent": pace.expected_used_percent,
         "willLastToReset": pace.will_last_to_reset,
+        "elapsedSeconds": pace.elapsed_seconds,
+        "resetsInSeconds": pace.resets_in_seconds,
     })
 }
 
