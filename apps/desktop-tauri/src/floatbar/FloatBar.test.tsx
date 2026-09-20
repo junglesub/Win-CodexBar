@@ -328,8 +328,8 @@ describe("FloatBar", () => {
       (el) => el.getAttribute("title") ?? "",
     );
     // Highest used (codex, 75%) shows first; pill carries full slot detail.
-    expect(titles[0]).toMatch(/Codex: 5h: 75% used\nweekly: —\nmonthly: —/);
-    expect(titles[1]).toMatch(/Claude: 5h: 20% used\nweekly: —\nmonthly: —/);
+    expect(titles[0]).toMatch(/Codex: 5h: 75% used\nUpdated/);
+    expect(titles[1]).toMatch(/Claude: 5h: 20% used\nUpdated/);
   });
 
   it("exposes the float bar and each provider pill as named semantic groups", async () => {
@@ -349,10 +349,10 @@ describe("FloatBar", () => {
     // Each provider pill is a semantically exposed named group.
     await waitFor(() => {
       const codex = screen.getByRole("group", {
-        name: /Codex: 5h: 75% used\nweekly: —\nmonthly: —/,
+        name: /Codex: 5h: 75% used\nUpdated/,
       });
       const claude = screen.getByRole("group", {
-        name: /Claude: 5h: 20% used\nweekly: —\nmonthly: —/,
+        name: /Claude: 5h: 20% used\nUpdated/,
       });
       expect(codex).not.toBeNull();
       expect(claude).not.toBeNull();
@@ -748,7 +748,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "—", "8%"]);
+      ).toEqual(["8%"]);
     });
   });
 
@@ -765,7 +765,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "41%", "—"]);
+      ).toEqual(["41%"]);
     });
   });
 
@@ -782,7 +782,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "35%", "—"]);
+      ).toEqual(["35%"]);
     });
   });
 
@@ -799,7 +799,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "35%", "—"]);
+      ).toEqual(["35%"]);
     });
   });
 
@@ -817,11 +817,11 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["10%", "41%", "—"]);
+      ).toEqual(["10%", "41%"]);
     });
   });
 
-  it("renders missing and informational windows as dashes", async () => {
+  it("drops missing and informational lanes, keeping only quota lanes", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, {
         informational: true,
@@ -835,7 +835,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "41%", "—"]);
+      ).toEqual(["41%"]);
     });
   });
 
@@ -875,7 +875,7 @@ describe("FloatBar", () => {
       await waitFor(() => {
         expect(
           Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-        ).toEqual(["8%", "41%", "—"]);
+        ).toEqual(["8%", "41%"]);
       });
     },
   );
@@ -895,7 +895,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["10%", "41%", "—"]);
+      ).toEqual(["10%", "41%"]);
     });
   });
 
@@ -915,7 +915,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["10%", "—", "90%"]);
+      ).toEqual(["10%", "90%"]);
     });
   });
 
@@ -989,7 +989,7 @@ describe("FloatBar", () => {
       // primary defaults to 5h; secondary defaults to weekly.
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["20%", "90%", "—"]);
+      ).toEqual(["20%", "90%"]);
     });
   });
 
@@ -1013,7 +1013,7 @@ describe("FloatBar", () => {
       // informational primary is treated as absent; weekly secondary shows.
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "80%", "—"]);
+      ).toEqual(["80%"]);
       // The pill stays neutral; the weekly 80% metric is warn.
       expect(container.querySelector(".floatbar__pill")?.className).toBe("floatbar__pill");
       expect(container.querySelectorAll(".floatbar__metric--warn").length).toBe(1);
@@ -1025,7 +1025,7 @@ describe("FloatBar", () => {
     });
   });
 
-  it("keeps an informational primary window when no secondary window is available", async () => {
+  it("drops an informational-only primary with no usable secondary", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, { informational: true }),
     ]);
@@ -1033,13 +1033,28 @@ describe("FloatBar", () => {
 
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
-      expect(
-        Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "—", "—"]);
+      expect(container.querySelector(".floatbar__pill")).not.toBeNull();
     });
+    expect(container.querySelectorAll(".floatbar__metric")).toHaveLength(0);
+    expect(
+      container.querySelector(".floatbar__pill")?.getAttribute("title"),
+    ).not.toMatch(/5h:|weekly:|monthly:/);
   });
 
-  it("keeps an informational primary window when the secondary window is informational", async () => {
+  it("drops informational lanes when every lane is informational", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 10, { informational: true }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await waitFor(() => {
+      expect(container.querySelector(".floatbar__pill")).not.toBeNull();
+    });
+    expect(container.querySelectorAll(".floatbar__metric")).toHaveLength(0);
+  });
+
+  it("drops informational lanes when primary and secondary are informational", async () => {
     tauriMocks.getCachedProviders.mockResolvedValue([
       snapshot("claude", "Claude", 10, {
         informational: true,
@@ -1050,10 +1065,31 @@ describe("FloatBar", () => {
 
     const { container } = renderFloatBar(bootstrap());
     await waitFor(() => {
+      expect(container.querySelector(".floatbar__pill")).not.toBeNull();
+    });
+    expect(container.querySelectorAll(".floatbar__metric")).toHaveLength(0);
+  });
+
+  it("drops quota-less lanes entirely instead of showing dashes", async () => {
+    tauriMocks.getCachedProviders.mockResolvedValue([
+      snapshot("claude", "Claude", 20, {
+        primaryWindowMinutes: 300,
+        secondary: { used: 41, windowMinutes: 10_080 },
+      }),
+    ]);
+    tauriMocks.getSettingsSnapshot.mockResolvedValue(settings());
+
+    const { container } = renderFloatBar(bootstrap());
+    await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["—", "—", "—"]);
+      ).toEqual(["20%", "41%"]);
     });
+    // One separator between the two remaining lanes; no monthly anywhere.
+    expect(container.querySelectorAll(".floatbar__metric-separator")).toHaveLength(1);
+    const title = container.querySelector(".floatbar__pill")?.getAttribute("title") ?? "";
+    expect(title).toMatch(/^Claude: 5h: 20% used\nweekly: 41% used\nUpdated/);
+    expect(title).not.toContain("monthly");
   });
 
   it("sorts providers by their effective rate window", async () => {
@@ -1074,8 +1110,8 @@ describe("FloatBar", () => {
       const titles = Array.from(container.querySelectorAll(".floatbar__pill")).map(
         (pill) => pill.getAttribute("title"),
       );
-      expect(titles[0]).toMatch(/^Codex: 5h: 50% used\nweekly: —\nmonthly: —/);
-      expect(titles[1]).toMatch(/^Claude: 5h: —\nweekly: 20% used\nmonthly: —/);
+      expect(titles[0]).toMatch(/^Codex: 5h: 50% used\nUpdated/);
+      expect(titles[1]).toMatch(/^Claude: weekly: 20% used\nUpdated/);
     });
   });
 
@@ -1127,7 +1163,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["20%", "—", "—"]);
+      ).toEqual(["20%"]);
     });
   });
 
@@ -1383,7 +1419,7 @@ describe("FloatBar", () => {
     // English-stripped or localized prose.
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["100% 2h", "—", "—"]);
+    ).toEqual(["100% 2h"]);
     // The tooltip/accessibility keeps the localized prose.
     expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
       /5h: 100% 使用済み\nリセットまで 2時間 5分/,
@@ -1422,11 +1458,11 @@ describe("FloatBar", () => {
     expect(pills[1].getAttribute("title")).toBe(claudeLabel);
     // Unparseable updatedAt keeps its raw value after the localized label.
     expect(codexLabel).toMatch(
-      /^Codex: 5h: 50% used\nweekly: —\nmonthly: —\nUpdated: unknown-source-time$/,
+      /^Codex: 5h: 50% used\nUpdated: unknown-source-time$/,
     );
     // Relative text is localized and appended after the full slot detail.
     expect(claudeLabel).toMatch(
-      /^Claude: 5h: 20% used\nweekly: 41% used\nmonthly: —\nUpdated: 6 minutes ago$/,
+      /^Claude: 5h: 20% used\nweekly: 41% used\nUpdated: 6 minutes ago$/,
     );
 
     // The shared 30-second clock advances relative text even though neither
@@ -1447,7 +1483,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["20%", "—", "—"]);
+      ).toEqual(["20%"]);
       // The pill tooltip/accessibility retains the localized reset text.
       expect(container.querySelector(".floatbar__pill")?.getAttribute("aria-label")).toMatch(
         /5h: 20% used\nResets in [12]h/,
@@ -1472,7 +1508,7 @@ describe("FloatBar", () => {
     await waitFor(() => {
       expect(
         Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-      ).toEqual(["20%", "41%", "—"]);
+      ).toEqual(["20%", "41%"]);
     });
   });
 
@@ -1537,7 +1573,7 @@ describe("FloatBar", () => {
 
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["100%", "—", "—"]);
+    ).toEqual(["100%"]);
   });
 
   it("renders the exhausted reset as a local clock when clock mode is on", async () => {
@@ -1580,7 +1616,7 @@ describe("FloatBar", () => {
 
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual([clock("2026-08-22T12:00:00Z"), clock("2026-08-18T03:12:00Z"), "—"]);
+    ).toEqual([clock("2026-08-22T12:00:00Z"), clock("2026-08-18T03:12:00Z")]);
   });
 
   it("uses weekday labels for resets within the coming week", async () => {
@@ -1673,7 +1709,7 @@ describe("FloatBar", () => {
 
     expect(
       Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-    ).toEqual(["4d 12h", "—", "—"]);
+    ).toEqual(["4d 12h"]);
   });
 
   it("polls refreshProvidersIfStale on the configured interval", async () => {
@@ -1782,7 +1818,7 @@ describe("FloatBar", () => {
 
         expect(
           Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-        ).toEqual(["4d 12h", "—", "—"]);
+        ).toEqual(["4d 12h"]);
         expect(container.querySelector(".floatbar__battery")).toBeNull();
       } finally {
         vi.useRealTimers();
@@ -2183,7 +2219,7 @@ describe("FloatBar", () => {
         // reset countdown still replaces the percentage.
         expect(
           Array.from(container.querySelectorAll(".floatbar__metric"), (node) => node.textContent),
-        ).toEqual(["4d 12h", "—", "—"]);
+        ).toEqual(["4d 12h"]);
       } finally {
         vi.useRealTimers();
       }

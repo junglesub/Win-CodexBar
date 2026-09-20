@@ -26,8 +26,10 @@ order:
 | weekly | 10,080–40,319 minutes |
 | monthly | 40,320–44,640 minutes |
 
-- Missing windows show `—`; providers without classified windows use one
-  available fallback metric.
+- Providers without classified windows use one available fallback metric;
+  provider errors still show `—`.
+- Lanes without quota are omitted entirely — a plan without monthly shows
+  `5h / weekly`, with no placeholder slot or hover line.
 - Each value is colored independently: warning at 75%, critical at 90%.
 - Optional reset countdowns append the largest remaining time unit
   (`100% 4d`).

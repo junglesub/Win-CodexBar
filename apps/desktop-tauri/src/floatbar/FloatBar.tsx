@@ -636,6 +636,10 @@ function ProviderPill({
   const hasError = Boolean(provider.error);
   const batteryEnabledFor = (slot: FloatBarBatterySlot) =>
     batteryStyle && isBatterySlotEnabled(batterySlots, slot);
+  // Personal: only lanes with quota render (with separators between them).
+  const presentCadences = USAGE_CADENCES.filter(
+    (cadence): cadence is UsageCadence => slots[cadence] !== null,
+  );
   // Personal: lane pace for the window actually shown in a slot, matched by
   // identity against the provider lanes (slots are picked from those lanes).
   const paceAllows = providerAllowsPace(provider.providerId, provider.sourceLabel);
@@ -672,12 +676,14 @@ function ProviderPill({
   );
   const resetTexts = [reset5h, resetWeekly, resetMonthly];
 
-  const slotDetails = USAGE_CADENCES.map((cadence, index) => {
+  const slotDetails = USAGE_CADENCES.flatMap((cadence, index) => {
     const window = slots[cadence];
-    if (!window) return `${cadence}: —`;
+    // Personal: lanes without quota are dropped entirely (no "—" slot),
+    // so a plan without monthly shows just `5h / wk`.
+    if (!window) return [];
     const used = shownPercent(window.usedPercent);
     const reset = resetTexts[index];
-    return `${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`;
+    return [`${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`];
   });
   let pillDetail: string;
   const fallbackLabel =
@@ -770,7 +776,7 @@ function ProviderPill({
             remainingSuffix={remainingSuffix}
           />
         ) : (
-          USAGE_CADENCES.map((cadence, index) => (
+          presentCadences.map((cadence, index) => (
             <Fragment key={cadence}>
               {index > 0 && <span className="floatbar__metric-separator">/</span>}
               <UsageMetric
