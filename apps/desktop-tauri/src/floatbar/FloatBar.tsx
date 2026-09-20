@@ -600,6 +600,7 @@ function ProviderPill({
   batterySlots,
   batteryLowPercent = -1,
   paceTextColor = false,
+  paceTimeDelta = false,
   preference,
   now,
   t,
@@ -624,6 +625,8 @@ function ProviderPill({
   batteryLowPercent?: number;
   /** Personal: tint non-battery numbers with the pace bucket color. */
   paceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  paceTimeDelta?: boolean;
   preference: MetricPreference | undefined;
   now: number;
   t: (key: LocaleKey) => string;
@@ -708,9 +711,22 @@ function ProviderPill({
   // line per shown slot (fallback included).
   const paceLines: string[] = [];
   if (!hasError && paceAllows) {
-    const pushLane = (label: string, pace: PaceSnapshot | null) => {
+    const pushLane = (label: string, pace: PaceSnapshot | null, windowMinutes?: number | null) => {
       if (!pace) return;
-      const delta = `${pace.deltaPercent >= 0 ? "+" : ""}${pace.deltaPercent.toFixed(1)}%`;
+      // Personal: with the time-delta option, show how far ahead or behind
+      // the lane is in time units (`+24m`) instead of percentage points.
+      let delta = `${pace.deltaPercent >= 0 ? "+" : ""}${pace.deltaPercent.toFixed(1)}%`;
+      if (
+        paceTimeDelta &&
+        Number.isFinite(pace.deltaPercent) &&
+        windowMinutes != null &&
+        Number.isFinite(windowMinutes) &&
+        windowMinutes > 0
+      ) {
+        const secs = (pace.deltaPercent / 100) * windowMinutes * 60;
+        const text = formatDuration(Math.abs(secs));
+        if (text != null) delta = `${secs >= 0 ? "+" : "-"}${text}`;
+      }
       // Personal: only lanes running short show timing, as `ETA/resets`.
       const resets = formatDuration(pace.resetsInSeconds);
       const short =
@@ -720,7 +736,11 @@ function ProviderPill({
       paceLines.push(`${label}: ${t(paceStageKey(pace.stage))} (${delta})${short}`);
     };
     if (fallback) {
-      pushLane(fallbackLabel || t(fallback.labelKey), paceForWindow(fallback.window));
+      pushLane(
+        fallbackLabel || t(fallback.labelKey),
+        paceForWindow(fallback.window),
+        fallback.window.windowMinutes,
+      );
     } else {
       const laneLabels: Record<UsageCadence, string> = {
         "5h": t("PanelFiveHours"),
@@ -728,7 +748,7 @@ function ProviderPill({
         monthly: t("FloatBarBatterySlotMonthly"),
       };
       for (const cadence of USAGE_CADENCES) {
-        pushLane(laneLabels[cadence], paceForWindow(slots[cadence]));
+        pushLane(laneLabels[cadence], paceForWindow(slots[cadence]), slots[cadence]?.windowMinutes);
       }
     }
   }
@@ -892,6 +912,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const batterySlots = settings.floatBarBatterySlots ?? [];
   const batteryLowPercent = settings.floatBarBatteryLowPercent ?? -1;
   const paceTextColor = settings.floatBarPaceTextColor ?? false;
+  const paceTimeDelta = settings.floatBarPaceTimeDelta ?? false;
   const followProviderOrder = settings.floatBarFollowProviderOrder;
   const providerOrder = settings.providerOrder ?? EMPTY_PROVIDER_ORDER;
   const visible = useMemo(() => {
@@ -1106,6 +1127,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               batterySlots={batterySlots}
               batteryLowPercent={batteryLowPercent}
               paceTextColor={paceTextColor}
+              paceTimeDelta={paceTimeDelta}
               preference={settings.providerMetrics[p.providerId]}
               now={now}
               t={t}

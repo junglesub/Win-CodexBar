@@ -147,6 +147,7 @@ pub struct SettingsPatch {
     pub battery_slots: Option<Vec<String>>,
     pub battery_low_percent: Option<i32>,
     pub pace_text_color: Option<bool>,
+    pub pace_time_delta: Option<bool>,
     pub show_remaining: Option<bool>,
     pub follow_provider_order: Option<bool>,
 }
@@ -172,6 +173,7 @@ impl SettingsPatch {
             && self.battery_slots.is_none()
             && self.battery_low_percent.is_none()
             && self.pace_text_color.is_none()
+            && self.pace_time_delta.is_none()
             && self.show_remaining.is_none()
             && self.follow_provider_order.is_none()
     }
@@ -238,6 +240,9 @@ impl SettingsPatch {
         }
         if let Some(v) = self.pace_text_color {
             settings.float_bar_pace_text_color = v;
+        }
+        if let Some(v) = self.pace_time_delta {
+            settings.float_bar_pace_time_delta = v;
         }
         if let Some(v) = self.show_remaining {
             settings.float_bar_show_remaining = v;

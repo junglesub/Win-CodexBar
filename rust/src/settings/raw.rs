@@ -180,6 +180,8 @@ pub(super) struct RawSettings {
     #[serde(default)]
     float_bar_pace_text_color: bool,
     #[serde(default)]
+    float_bar_pace_time_delta: bool,
+    #[serde(default)]
     float_bar_show_remaining: bool,
     #[serde(default)]
     float_bar_follow_provider_order: bool,
@@ -304,6 +306,7 @@ impl Default for RawSettings {
             float_bar_battery_slots: s.float_bar_battery_slots,
             float_bar_battery_low_percent: s.float_bar_battery_low_percent,
             float_bar_pace_text_color: s.float_bar_pace_text_color,
+            float_bar_pace_time_delta: s.float_bar_pace_time_delta,
             float_bar_show_remaining: s.float_bar_show_remaining,
             float_bar_follow_provider_order: s.float_bar_follow_provider_order,
             promote_tray_icon: s.promote_tray_icon,
@@ -622,6 +625,7 @@ impl From<RawSettings> for Settings {
                 raw.float_bar_battery_low_percent,
             ),
             float_bar_pace_text_color: raw.float_bar_pace_text_color,
+            float_bar_pace_time_delta: raw.float_bar_pace_time_delta,
             float_bar_show_remaining: raw.float_bar_show_remaining,
             float_bar_follow_provider_order: raw.float_bar_follow_provider_order,
             promote_tray_icon: raw.promote_tray_icon,

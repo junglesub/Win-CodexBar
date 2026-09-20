@@ -2,10 +2,44 @@ import type { LocaleKey } from "../i18n/keys";
 import { formatDuration, formatEta } from "./formatEta";
 
 export interface PaceTiming {
+  stage: string;
   etaSeconds: number | null;
   willLastToReset: boolean;
   elapsedSeconds?: number | null;
   resetsInSeconds?: number | null;
+  actualUsedPercent?: number | null;
+}
+
+/** Stages consuming faster than expected (delta above +2%). */
+const AHEAD_STAGES: ReadonlySet<string> = new Set([
+  "slightly_ahead",
+  "ahead",
+  "far_ahead",
+]);
+
+/**
+ * Rest time until an ahead lane rejoins the on-track pace assuming zero
+ * usage: expected(t) catches up to actual at
+ * `t = actual% × duration − elapsed`. Null when not computable or when even
+ * full rest cannot rejoin before the reset (e.g. exhausted).
+ */
+export function restToRejoinSeconds(pace: PaceTiming): number | null {
+  if (!AHEAD_STAGES.has(pace.stage)) return null;
+  const { actualUsedPercent: actual, elapsedSeconds: elapsed, resetsInSeconds: resets } = pace;
+  if (
+    actual == null ||
+    elapsed == null ||
+    resets == null ||
+    !Number.isFinite(actual) ||
+    !Number.isFinite(elapsed) ||
+    !Number.isFinite(resets) ||
+    elapsed < 0 ||
+    resets <= 0
+  ) {
+    return null;
+  }
+  const rest = (actual / 100) * (elapsed + resets) - elapsed;
+  return rest > 0 && rest < resets ? rest : null;
 }
 
 /**
@@ -39,6 +73,10 @@ export function formatPaceAux(
     } else {
       parts.push(elapsedPart);
     }
+  }
+  const rest = restToRejoinSeconds(pace);
+  if (rest != null) {
+    parts.push(t("DetailPaceRestToTrack").replace("{}", formatDuration(rest) ?? "?"));
   }
   if (parts.length === 0) return null;
   return parts.join(" / ");

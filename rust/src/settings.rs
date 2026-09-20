@@ -361,6 +361,11 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_pace_text_color: bool,
 
+    /// Personal: show Float Bar hover pace deltas as time ahead or behind
+    /// (e.g. `+24m`) instead of percentage points.
+    #[serde(default)]
+    pub float_bar_pace_time_delta: bool,
+
     /// When true, Float Bar percentage text and its accessible detail render
     /// remaining quota instead of used quota. Battery cells always track
     /// remaining quota regardless of this setting.
@@ -673,6 +678,7 @@ impl Default for Settings {
             float_bar_battery_slots: Vec::new(),
             float_bar_battery_low_percent: default_float_bar_battery_low_percent(),
             float_bar_pace_text_color: false,
+            float_bar_pace_time_delta: false,
             float_bar_show_remaining: false,
             float_bar_follow_provider_order: false,
             promote_tray_icon: true,

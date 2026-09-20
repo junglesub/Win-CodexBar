@@ -21,6 +21,7 @@ fn test_settings_default() {
     assert!(!settings.float_bar_battery_style);
     assert!(settings.float_bar_battery_slots.is_empty());
     assert!(!settings.float_bar_pace_text_color);
+    assert!(!settings.float_bar_pace_time_delta);
     assert!(!settings.float_bar_show_remaining);
     assert!(!settings.float_bar_follow_provider_order);
     assert!(!settings.predictive_pace_warning_enabled);
@@ -64,6 +65,21 @@ fn test_float_bar_pace_text_color_serde_default_and_round_trip() {
     let serialized = serde_json::to_string(&enabled).expect("serialize");
     let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
     assert!(round_tripped.float_bar_pace_text_color);
+}
+
+#[test]
+fn test_float_bar_pace_time_delta_serde_default_and_round_trip() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing float_bar_pace_time_delta should deserialize to false");
+    assert!(!defaulted.float_bar_pace_time_delta);
+
+    let enabled: Settings = serde_json::from_str(r#"{ "float_bar_pace_time_delta": true }"#)
+        .expect("explicit float_bar_pace_time_delta true parses");
+    assert!(enabled.float_bar_pace_time_delta);
+
+    let serialized = serde_json::to_string(&enabled).expect("serialize");
+    let round_tripped: Settings = serde_json::from_str(&serialized).expect("deserialize");
+    assert!(round_tripped.float_bar_pace_time_delta);
 }
 
 #[test]

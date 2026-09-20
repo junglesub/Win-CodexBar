@@ -281,6 +281,8 @@ export interface SettingsSnapshot {
   floatBarBatteryLowPercent?: number;
   /** Personal: tint non-battery numbers with the pace bucket color. */
   floatBarPaceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
   /**
    * When true, Float Bar percentage text and its accessible detail render
    * remaining quota instead of used quota. Battery cells always track remaining
@@ -397,6 +399,8 @@ export interface SettingsUpdate {
   floatBarBatteryLowPercent?: number;
   /** Personal: tint non-battery numbers with the pace bucket color. */
   floatBarPaceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
   /** When true, render Float Bar usage as remaining quota instead of used quota. */
   floatBarShowRemaining?: boolean;
   /**

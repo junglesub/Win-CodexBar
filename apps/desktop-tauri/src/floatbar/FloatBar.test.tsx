@@ -295,6 +295,7 @@ describe("FloatBar", () => {
         ProviderWeeklyLabel: "Weekly",
         FloatBarBatterySlotMonthly: "Monthly",
         DetailPaceAhead: "Ahead",
+        DetailPaceBehind: "Behind",
         DetailPaceOnTrack: "On track",
         DetailPaceRunsOutIn: "Runs out in",
         DetailPaceWillLastToReset: "Will last to reset",
@@ -2432,6 +2433,49 @@ describe("FloatBar", () => {
       } finally {
         vi.useRealTimers();
       }
+    });
+
+    it("shows hover pace deltas as time when the option is ON", async () => {
+      const snap = snapshot("claude", "Claude", 40, {
+        secondary: { used: 30 },
+      });
+      snap.pace = {
+        stage: "ahead",
+        deltaPercent: 8,
+        expectedUsedPercent: 30,
+        actualUsedPercent: 38,
+        etaSeconds: 49 * 60,
+        willLastToReset: false,
+        elapsedSeconds: 12_000,
+        resetsInSeconds: 6000,
+      };
+      snap.secondaryLabel = "Weekly";
+      snap.secondaryPace = {
+        stage: "behind",
+        deltaPercent: -8,
+        expectedUsedPercent: 38,
+        actualUsedPercent: 30,
+        etaSeconds: null,
+        willLastToReset: true,
+        elapsedSeconds: 12_000,
+        resetsInSeconds: 6000,
+      };
+      tauriMocks.getCachedProviders.mockResolvedValue([snap]);
+      tauriMocks.getSettingsSnapshot.mockResolvedValue(
+        settings({ floatBarPaceTimeDelta: true }),
+      );
+
+      const { container } = renderFloatBar(
+        bootstrap({ floatBarPaceTimeDelta: true }),
+      );
+
+      await waitFor(() => {
+        expect(screen.getByText("40%")).toBeInTheDocument();
+      });
+      const title = container.querySelector(".floatbar__pill")?.getAttribute("title") ?? "";
+      expect(title).toContain("5h: Ahead (+24m), 49m/1h 40m");
+      expect(title).toContain("Weekly: Behind (-13h 26m)");
+      expect(title).not.toContain("+8.0%");
     });
 
     it("declares the pace bucket colors in CSS", () => {

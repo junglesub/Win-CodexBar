@@ -73,6 +73,17 @@ describe("FloatBar settings", () => {
     expect(set).toHaveBeenCalledWith({ floatBarPaceTextColor: true });
   });
 
+  it("persists the pace time delta toggle", () => {
+    const set = vi.fn();
+    render(
+      <FloatBarSettingsSection settings={settings()} saving={false} set={set} />,
+    );
+
+    expect(screen.getByLabelText("FloatBarPaceTimeDeltaLabel")).toBeEnabled();
+    fireEvent.click(screen.getByLabelText("FloatBarPaceTimeDeltaLabel"));
+    expect(set).toHaveBeenCalledWith({ floatBarPaceTimeDelta: true });
+  });
+
   it("persists the weekday toggle once clock style is on", () => {
     const set = vi.fn();
     render(

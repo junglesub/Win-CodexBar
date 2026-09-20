@@ -334,6 +334,18 @@ export default function FloatBarSettingsSection({ settings, saving, set }: Props
           />
         </Field>
         <Field
+          label={t("FloatBarPaceTimeDeltaLabel")}
+          description={t("FloatBarPaceTimeDeltaHelper")}
+          leading
+        >
+          <Toggle
+            checked={settings.floatBarPaceTimeDelta ?? false}
+            disabled={saving || !settings.floatBarEnabled}
+            ariaLabel={t("FloatBarPaceTimeDeltaLabel")}
+            onChange={(v) => set({ floatBarPaceTimeDelta: v })}
+          />
+        </Field>
+        <Field
           label={t("FloatBarShowRemainingLabel")}
           description={t("FloatBarShowRemainingHelper")}
           leading
