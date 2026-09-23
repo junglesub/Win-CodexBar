@@ -308,3 +308,41 @@ fn json_inventory_is_additive_and_contains_no_redemption_token() {
             .contains("coupon-token-secret")
     );
 }
+
+#[test]
+fn monthly_lane_renders_pace_line_in_full_text() {
+    use chrono::{Duration, Utc};
+
+    let now = Utc::now();
+    let tertiary = RateWindow::with_details(
+        60.0,
+        Some(crate::core::MONTHLY_WINDOW_MINUTES),
+        Some(now + Duration::days(12)),
+        None,
+    );
+    let result = fetch_result(UsageSnapshot::new(RateWindow::new(10.0)).with_tertiary(tertiary));
+
+    let output = render_text_with_status(ProviderId::Codex, &result, None, false);
+
+    assert!(output.contains("Monthly:"));
+    assert!(output.contains("Pace:"));
+}
+
+#[test]
+fn json_payload_includes_tertiary_pace_when_monthly_lane_present() {
+    use chrono::{Duration, Utc};
+
+    let now = Utc::now();
+    let tertiary = RateWindow::with_details(
+        60.0,
+        Some(crate::core::MONTHLY_WINDOW_MINUTES),
+        Some(now + Duration::days(12)),
+        None,
+    );
+    let result = fetch_result(UsageSnapshot::new(RateWindow::new(10.0)).with_tertiary(tertiary));
+
+    let payload = render_json_result(ProviderId::Codex, result, None);
+
+    assert!(payload["pace"]["tertiary"].is_object());
+    assert!(payload["pace"]["tertiary"]["expectedUsedPercent"].is_number());
+}

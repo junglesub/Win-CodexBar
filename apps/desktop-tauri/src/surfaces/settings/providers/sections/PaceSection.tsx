@@ -1,9 +1,15 @@
 import type { PaceSnapshot } from "../../../../types/bridge";
 import type { LocaleKey } from "../../../../i18n/keys";
-import { formatEta } from "../../../../lib/formatEta";
+import { formatPaceAux } from "../../../../lib/paceAux";
+
+export interface PaceLane {
+  label: string | null;
+  pace: PaceSnapshot;
+}
 
 interface Props {
-  pace: PaceSnapshot | null;
+  /** Personal-only: one entry per lane with data (5h / weekly / monthly). */
+  lanes: PaceLane[];
   t: (key: LocaleKey) => string;
 }
 
@@ -18,23 +24,27 @@ const STAGE_TO_KEY: Record<PaceSnapshot["stage"], LocaleKey> = {
 };
 
 /** 展示配额节奏状态及其辅助说明。 */
-export function PaceSection({ pace, t }: Props) {
-  if (!pace) return null;
-
-  const stageLabel = t(STAGE_TO_KEY[pace.stage]);
-  const aux = pace.willLastToReset
-    ? t("DetailPaceWillLastToReset")
-    : pace.etaSeconds !== null
-      ? `${t("DetailPaceRunsOutIn")} ${formatEta(pace.etaSeconds)}`
-      : null;
+export function PaceSection({ lanes, t }: Props) {
+  const visible = lanes.filter((lane) => lane.pace != null);
+  if (visible.length === 0) return null;
+  const showLabels = visible.length > 1;
 
   return (
     <section className="provider-detail-section provider-detail-pace">
       <h4>{t("DetailPaceTitle")}</h4>
-      <div className="provider-detail-pace__stage" data-stage={pace.stage}>
-        {stageLabel}
-      </div>
-      {aux && <div className="provider-detail-pace__aux">{aux}</div>}
+      {visible.map((lane) => {
+        const stageLabel = t(STAGE_TO_KEY[lane.pace.stage]);
+        const aux = formatPaceAux(lane.pace, t);
+        return (
+          <div className="provider-detail-pace__lane" key={lane.label ?? "primary"}>
+            <div className="provider-detail-pace__stage" data-stage={lane.pace.stage}>
+              {showLabels && lane.label ? `${lane.label} · ` : null}
+              {stageLabel}
+            </div>
+            {aux && <div className="provider-detail-pace__aux">{aux}</div>}
+          </div>
+        );
+      })}
     </section>
   );
 }

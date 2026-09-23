@@ -39,6 +39,19 @@ pub fn render_json_result(
         .as_ref()
         .and_then(|w| UsagePace::weekly(w, None, w.window_minutes.unwrap_or(10080)))
         .map(pace_json);
+    // Personal: monthly (tertiary) lane pace, mirroring the session/weekly lanes.
+    let tertiary_pace = usage
+        .tertiary
+        .as_ref()
+        .and_then(|w| {
+            UsagePace::weekly(
+                w,
+                None,
+                w.window_minutes
+                    .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES),
+            )
+        })
+        .map(pace_json);
 
     let mut json_result = serde_json::json!({
         "provider": provider_id.cli_name(),
@@ -46,10 +59,11 @@ pub fn render_json_result(
         "usage": result.usage,
         "cost": result.cost,
     });
-    if primary_pace.is_some() || secondary_pace.is_some() {
+    if primary_pace.is_some() || secondary_pace.is_some() || tertiary_pace.is_some() {
         json_result["pace"] = serde_json::json!({
             "primary": primary_pace,
             "secondary": secondary_pace,
+            "tertiary": tertiary_pace,
         });
     }
 
@@ -87,6 +101,8 @@ fn pace_json(pace: UsagePace) -> serde_json::Value {
         "deltaPercent": pace.delta_percent,
         "expectedUsedPercent": pace.expected_used_percent,
         "willLastToReset": pace.will_last_to_reset,
+        "elapsedSeconds": pace.elapsed_seconds,
+        "resetsInSeconds": pace.resets_in_seconds,
     })
 }
 
@@ -246,6 +262,17 @@ fn append_usage_window_lines(
             _ => "Tertiary",
         };
         append_window_line(lines, label, tertiary, use_color);
+        // Personal: monthly lane also gets a pace line like the session/weekly lanes.
+        let window_minutes = tertiary
+            .window_minutes
+            .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES);
+        if let Some(pace) = UsagePace::weekly(tertiary, None, window_minutes) {
+            lines.push(format!(
+                "  Pace:    {} {}",
+                pace.stage.emoji(),
+                pace.format_status()
+            ));
+        }
     }
     for extra in &usage.extra_rate_windows {
         if extra.usage_known {

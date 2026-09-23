@@ -44,8 +44,7 @@ function Invoke-WorktreeStorageAudit {
 
 # Hosted pr-check slice (-Slice ci): mirrors .github/workflows/pr-check.yml
 # step for step (workspace-wide fmt/clippy/test, frozen frontend install,
-# frontend lint/rule tests/build, interaction-guard script tests). The guard's
-# script tests are pure Node, so the mirror stays honest locally too.
+# frontend lint/rule tests/build).
 if ($Slice -eq 'ci') {
     Push-Location $RepoRoot
     try {
@@ -59,7 +58,6 @@ if ($Slice -eq 'ci') {
         Invoke-Step "Anti-slop rule tests" "pnpm" @("--dir", "apps\desktop-tauri", "run", "test:anti-slop")
         Invoke-Step "Frontend tests" "pnpm" @("--dir", "apps\desktop-tauri", "test")
         Invoke-Step "Frontend type check / build" "pnpm" @("--dir", "apps\desktop-tauri", "run", "build")
-        Invoke-Step "Interaction guard script tests" "node" @("--test", ".github/scripts/interaction-guard.test.mjs")
     } finally {
         Pop-Location
     }

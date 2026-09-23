@@ -1,4 +1,4 @@
-export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
+﻿export type SurfaceMode = "hidden" | "trayPanel" | "popOut" | "settings";
 export type VisibleSurfaceMode = Exclude<SurfaceMode, "hidden">;
 export type SettingsTabId =
   | "general"
@@ -237,6 +237,10 @@ export interface SettingsSnapshot {
   floatBarEnabled: boolean;
   /** 30..=100 — clamped server-side. */
   floatBarOpacity: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor: string;
+  /** 0..=100, clamped server-side. Affects only the pill surfaces. */
+  floatBarBackgroundOpacity: number;
   /** 75..=200 — clamped server-side. */
   floatBarScale: number;
   floatBarOrientation: FloatBarOrientation;
@@ -246,10 +250,56 @@ export interface SettingsSnapshot {
   floatBarProviderIds: string[];
   /** When true, render with dark text/glass for light desktops. */
   floatBarDarkText: boolean;
+  /** When true, append each quota window's compact reset beside its percentage. */
+  /** When true, render the next primary reset inline in each provider pill. */
   /** When true, render the selected metric's next reset inline in each provider pill. */
   floatBarShowResetInline: boolean;
+  /**
+   * When true, an exhausted Float Bar slot with a future reset shows only the
+   * detailed two-unit countdown (e.g. `4d 12h`) instead of `100% 4d`.
+   * Independent of `floatBarShowResetInline`.
+   */
+  floatBarHidePercentWhenExhausted: boolean;
+  /**
+   * When true, the exhausted hide-percent time renders as a local absolute
+   * clock (`M/D HH:MM`, same-day `HH:MM`) instead of a relative countdown.
+   * Requires `floatBarHidePercentWhenExhausted`.
+   */
+  floatBarExhaustedClockTime: boolean;
+  /**
+   * When true, the exhausted clock-style time replaces the `M/D` date with a
+   * weekday abbreviation (`Mon 21:00`) while the reset falls within the
+   * coming week; beyond that the `M/D` date is kept. Requires
+   * `floatBarExhaustedClockTime`.
+   */
+  floatBarExhaustedWeekdayTime: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
+  floatBarBatteryStyle: boolean;
+  /** Empty array = battery cells for every Float Bar slot. */
+  floatBarBatterySlots: string[];
+  /**
+   * Remaining-quota percent below which battery cells fall back to a
+   * percentage number. `-1` disables the fallback (default).
+   */
+  floatBarBatteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
+  /**
+   * When true, Float Bar percentage text and its accessible detail render
+   * remaining quota instead of used quota. Battery cells always track remaining
+   * quota regardless of this setting.
+   */
+  floatBarShowRemaining: boolean;
+  /**
+   * When true, the Float Bar orders providers with the custom drag-reorder
+   * sequence (`providerOrder`) instead of usage-descending. An empty custom
+   * order keeps usage order; turning this off is the way back to usage order
+   * because the custom sequence itself has no reset UI.
+   */
+  floatBarFollowProviderOrder: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
@@ -338,6 +388,10 @@ export interface SettingsUpdate {
   providerMetrics?: Record<string, MetricPreference>;
   floatBarEnabled?: boolean;
   floatBarOpacity?: number;
+  /** #RRGGBB, normalized server-side. */
+  floatBarBackgroundColor?: string;
+  /** 0..=100, clamped server-side. */
+  floatBarBackgroundOpacity?: number;
   floatBarScale?: number;
   floatBarOrientation?: FloatBarOrientation;
   floatBarStyle?: FloatBarStyle;
@@ -345,7 +399,26 @@ export interface SettingsUpdate {
   floatBarProviderIds?: string[];
   floatBarDarkText?: boolean;
   floatBarShowResetInline?: boolean;
+  floatBarHidePercentWhenExhausted?: boolean;
+  floatBarExhaustedClockTime?: boolean;
+  floatBarExhaustedWeekdayTime?: boolean;
   floatBarShowCost?: boolean;
+  floatBarBatteryStyle?: boolean;
+  /** Empty array = battery cells for every Float Bar slot. */
+  floatBarBatterySlots?: string[];
+  /** `-1` disables the low-remaining fallback to percentage numbers. */
+  floatBarBatteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
+  /** When true, render Float Bar usage as remaining quota instead of used quota. */
+  floatBarShowRemaining?: boolean;
+  /**
+   * When true, order Float Bar providers with the custom drag-reorder sequence
+   * instead of usage-descending. Empty custom order keeps usage order.
+   */
+  floatBarFollowProviderOrder?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;
@@ -587,6 +660,10 @@ export interface PaceSnapshot {
   etaSeconds: number | null;
   expectedUsedPercent: number;
   actualUsedPercent: number;
+  /** Personal: seconds elapsed since the window started. */
+  elapsedSeconds?: number | null;
+  /** Personal: seconds remaining until the window resets. */
+  resetsInSeconds?: number | null;
 }
 
 export interface SessionEquivalentForecastSnapshot {
@@ -652,6 +729,10 @@ export interface ProviderUsageSnapshot {
   error: string | null;
   errorState: ProviderStateKind;
   pace: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the weekly (secondary) lane. */
+  secondaryPace?: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the monthly (tertiary) lane. */
+  tertiaryPace?: PaceSnapshot | null;
   accountOrganization: string | null;
   trayStatusLabel: string | null;
   fetchDurationMs?: number | null;
@@ -912,6 +993,10 @@ export interface ProviderDetail {
   tertiary: RateWindowSnapshot | null;
   /** Locale key for the tertiary metric lane when it carries a semantic label (upstream F5). */
   tertiaryLabelKey?: string | null;
+  /** Personal-only: lane labels backing the per-lane pace section. */
+  sessionLabel?: string | null;
+  weeklyLabel?: string | null;
+  tertiaryLabel?: string | null;
   extraRateWindows: Array<{
     id: string;
     title: string;
@@ -924,6 +1009,10 @@ export interface ProviderDetail {
 
   cost: CostSnapshotBridge | null;
   pace: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the weekly lane. */
+  secondaryPace?: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the monthly lane. */
+  tertiaryPace?: PaceSnapshot | null;
 
   lastError: string | null;
   errorState: ProviderStateKind | null;

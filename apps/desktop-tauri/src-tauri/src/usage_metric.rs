@@ -347,6 +347,8 @@ mod tests {
             error: None,
             error_state: codexbar::core::ProviderStateKind::Ready,
             pace: None,
+            secondary_pace: None,
+            tertiary_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,

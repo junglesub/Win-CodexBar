@@ -18,6 +18,139 @@ fn test_locale_key_english() {
 }
 
 #[test]
+fn float_bar_agy_run_needed_locale_values() {
+    // The FloatBar overlay for the Antigravity-not-running state must stay
+    // short in every supported locale. ko-KR is the exact required string.
+    let cases = [
+        (Language::English, "Start agy"),
+        (Language::Korean, "agy 실행 필요"),
+        (Language::Chinese, "需启动 agy"),
+        (Language::ChineseTraditional, "需啟動 agy"),
+        (Language::Japanese, "agy の起動が必要"),
+        (Language::Spanish, "Inicia agy"),
+        (Language::Russian, "Запустите agy"),
+    ];
+    for (lang, expected) in cases {
+        assert_eq!(
+            get_text(lang, LocaleKey::FloatBarAgyRunNeeded),
+            expected,
+            "{lang:?}"
+        );
+    }
+}
+
+#[test]
+fn float_bar_show_remaining_locale_values() {
+    // The Float Bar "show remaining" option ships in every supported locale. A
+    // missing catalog entry falls back to en-US, so a non-English match means
+    // the key is absent from that locale file.
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarShowRemainingLabel),
+        "Show remaining"
+    );
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarShowRemainingHelper),
+        "Show Float Bar usage as remaining quota instead of used quota."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarShowRemainingLabel),
+            "Show remaining",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarShowRemainingHelper),
+            "Show Float Bar usage as remaining quota instead of used quota.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
+fn float_bar_follow_provider_order_locale_values() {
+    // The Float Bar "follow provider order" option ships in every supported
+    // locale. A missing catalog entry falls back to en-US, so a non-English
+    // match means the key is absent from that locale file.
+    assert_eq!(
+        get_text(
+            Language::English,
+            LocaleKey::FloatBarFollowProviderOrderLabel
+        ),
+        "Use custom provider order"
+    );
+    assert_eq!(
+        get_text(
+            Language::English,
+            LocaleKey::FloatBarFollowProviderOrderHelper
+        ),
+        "Show Float Bar providers in your custom drag-reorder sequence instead of by usage. Turn off to return to usage order."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarFollowProviderOrderLabel),
+            "Use custom provider order",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarFollowProviderOrderHelper),
+            "Show Float Bar providers in your custom drag-reorder sequence instead of by usage. Turn off to return to usage order.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
+fn float_bar_battery_slots_locale_values() {
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarBatterySlotsLabel),
+        "Battery slots"
+    );
+    assert_eq!(
+        get_text(Language::English, LocaleKey::FloatBarBatterySlotsHelper),
+        "Choose which Float Bar slots use battery cells; multiple slots can be selected. The default uses all slots."
+    );
+
+    for lang in [
+        Language::Korean,
+        Language::Chinese,
+        Language::ChineseTraditional,
+        Language::Japanese,
+        Language::Spanish,
+        Language::Russian,
+        Language::Turkish,
+    ] {
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarBatterySlotsLabel),
+            "Battery slots",
+            "{lang:?} label untranslated"
+        );
+        assert_ne!(
+            get_text(lang, LocaleKey::FloatBarBatterySlotsHelper),
+            "Choose which Float Bar slots use battery cells; multiple slots can be selected. The default uses all slots.",
+            "{lang:?} helper untranslated"
+        );
+    }
+}
+
+#[test]
 fn test_locale_key_chinese() {
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabGeneral), "通用");
     assert_eq!(get_text(Language::Chinese, LocaleKey::TabCookies), "Cookie");
@@ -444,6 +577,33 @@ fn test_fluent_preserves_literal_placeholders_and_status_spacing() {
     assert_eq!(
         get_text(Language::English, LocaleKey::RemainingAmount),
         "{:.2} remaining"
+    );
+}
+
+#[test]
+fn test_about_copyright_before_identifies_junglesub_codexbar() {
+    assert_eq!(
+        get_text(Language::English, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. Based on"
+    );
+    assert_eq!(
+        get_text(Language::Japanese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。元プロジェクト："
+    );
+    assert_eq!(
+        get_text(Language::Russian, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar. На основе"
+    );
+    assert_eq!(
+        get_text(Language::Chinese, LocaleKey::AboutCopyrightBefore),
+        "junglesub/CodexBar。基于"
+    );
+    assert_eq!(
+        get_text(
+            Language::ChineseTraditional,
+            LocaleKey::AboutCopyrightBefore
+        ),
+        "junglesub/CodexBar。基於"
     );
 }
 

@@ -69,10 +69,10 @@ Useful release flags:
 .\scripts\release-doctor.ps1 -Version X.Y.Z
 ```
 
-`windows-release-build.ps1` only builds and smoke-tests. It has no upload
-switch. The hosted release path is the approval-gated CircleCI workflow
-documented in `docs/release/ci-cd.md`; publication uses its no-clobber,
-SHA-256-checked draft publisher.
+`windows-release-build.ps1` only builds and smoke-tests; it has no upload
+switch. Pushes to `personal` run `.github/workflows/personal-release.yml`,
+which calls this builder and replaces the `personal-latest` prerelease after
+all four assets exist. See `docs/release/ci-cd.md`.
 
 ## macOS Windows Cross Build
 
@@ -128,7 +128,7 @@ Win-CodexBar/
 | [COOKIES.md](./COOKIES.md) | Browser cookie import (DPAPI) |
 | [WSL.md](./WSL.md) | WSL limitations |
 | [WINDOWS_PROOF.md](./WINDOWS_PROOF.md) | Manual/runtime proof checklist |
-| [release/ci-cd.md](./release/ci-cd.md) | Hosted PR check + local release |
+| [release/ci-cd.md](./release/ci-cd.md) | Automated personal branch release |
 | [../AGENTS.md](../AGENTS.md) | Agent/contributor guidelines |
 
 Upstream macOS docs (`steipete/CodexBar`) are a **read-only** concept source. Do not copy Swift/Keychain/Sparkle instructions here without a Windows rewrite.

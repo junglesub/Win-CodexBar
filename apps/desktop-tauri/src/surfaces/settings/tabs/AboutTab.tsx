@@ -2,13 +2,13 @@ import { useEffect, useState } from "react";
 import { useLocale } from "../../../hooks/useLocale";
 import { useUpdateState } from "../../../hooks/useUpdateState";
 import { getAppInfo, openExternalUrl } from "../../../lib/tauri";
-import { Field, Select, Toggle } from "../../../components/FormControls";
-import type { AppInfoBridge, UpdateChannel } from "../../../types/bridge";
+import { Field, Toggle } from "../../../components/FormControls";
+import type { AppInfoBridge } from "../../../types/bridge";
 import type { LocaleKey } from "../../../i18n/keys";
 import type { TabProps } from "../settingsTabs";
 import codexbarIcon from "../../../assets/codexbar-icon.png";
 
-const REPO_URL = "https://github.com/nesszer/Win-CodexBar";
+const REPO_URL = "https://github.com/junglesub/Win-CodexBar";
 const SUBMIT_ISSUE_URL = `${REPO_URL}/issues/new?labels=bug&template=bug_report.yml`;
 
 const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
@@ -18,7 +18,7 @@ const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
   },
   {
     labelKey: "AboutLinkWebsite",
-    url: "https://codexbar.app",
+    url: "https://junglesub.github.io/Win-CodexBar/",
   },
   {
     labelKey: "AboutLinkOriginalProject",
@@ -92,14 +92,14 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
             {t(link.labelKey)}
           </button>
         ))}
+        <button
+          type="button"
+          className="about-link"
+          onClick={() => openAboutLink(SUBMIT_ISSUE_URL)}
+        >
+          {t("SubmitIssue")}
+        </button>
       </div>
-      <button
-        type="button"
-        className="about-link"
-        onClick={() => openAboutLink(SUBMIT_ISSUE_URL)}
-      >
-        {t("SubmitIssue")}
-      </button>
       {linkError && (
         <p className="about-update-msg">
           {t("ErrorPrefix")} {linkError}
@@ -117,26 +117,10 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
           <Toggle
             checked={settings.autoDownloadUpdates}
             disabled={saving}
+            ariaLabel={t("AutoDownloadUpdates")}
             onChange={(v) => set({ autoDownloadUpdates: v })}
           />
         </Field>
-
-        <div className="about-channel-row">
-          <Field label={t("UpdateChannelChoice")}>
-            <Select
-              value={settings.updateChannel}
-              disabled={saving}
-              options={[
-                { value: "stable", label: t("UpdateChannelStableOption") },
-                { value: "beta", label: t("UpdateChannelBetaOption") },
-              ]}
-              onChange={(v) => set({ updateChannel: v as UpdateChannel })}
-            />
-          </Field>
-          <p className="about-channel-description">
-            {t("UpdateChannelChoiceHelper")}
-          </p>
-        </div>
       </div>
 
       <div className="about-actions">

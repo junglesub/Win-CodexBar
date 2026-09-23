@@ -81,6 +81,11 @@ pub struct UsagePace {
     pub eta_seconds: Option<f64>,
     /// Whether current pace will last until reset
     pub will_last_to_reset: bool,
+    /// Seconds elapsed since the window started (personal: powers the
+    /// always-visible "X elapsed / reset in Y" pace line)
+    pub elapsed_seconds: f64,
+    /// Seconds remaining until the window resets
+    pub resets_in_seconds: f64,
 }
 
 impl UsagePace {
@@ -149,6 +154,8 @@ impl UsagePace {
             actual_used_percent: actual,
             eta_seconds,
             will_last_to_reset,
+            elapsed_seconds: elapsed,
+            resets_in_seconds: time_until_reset,
         })
     }
 
@@ -253,6 +260,20 @@ mod tests {
 
         assert_eq!(pace.stage, PaceStage::OnTrack);
         assert!(pace.delta_percent.abs() < 2.0);
+    }
+
+    #[test]
+    fn test_pace_exposes_elapsed_and_reset_times() {
+        let now = Utc::now();
+        // Window resets in 3.5 days (halfway through a 7-day window)
+        let resets_at = now + Duration::days(3) + Duration::hours(12);
+
+        let window = RateWindow::with_details(50.0, Some(10080), Some(resets_at), None);
+        let pace = UsagePace::weekly(&window, Some(now), 10080).unwrap();
+
+        // Half of 7 days = 302_400 seconds on both sides.
+        assert!((pace.elapsed_seconds - 302_400.0).abs() < 1.0);
+        assert!((pace.resets_in_seconds - 302_400.0).abs() < 1.0);
     }
 
     #[test]

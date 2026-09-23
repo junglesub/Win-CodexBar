@@ -120,6 +120,13 @@ describe("MenuCard", () => {
         ActionCopyError: "Copy error",
         ApiSpendTitle: "API spend",
         DetailPaceRunsOutIn: "Runs out in",
+        DetailPaceElapsed: "{} elapsed",
+        DetailPaceResetRemaining: "{} reset remaining",
+        DetailPaceTitle: "Pace",
+        DetailPaceOnTrack: "On track",
+        DetailPaceAhead: "Ahead",
+        DetailPaceBehind: "Behind",
+        DetailPaceWillLastToReset: "Will last to reset",
         PanelEstimatedFromLocalLogs: "Estimated from local logs",
         PanelLeftSuffix: "left",
         PanelNow: "now",
@@ -510,6 +517,93 @@ describe("MenuCard", () => {
     });
   });
 
+  it("shows elapsed and reset-remaining times on the same pace line (personal)", async () => {
+    const snapshot = provider(null, 40);
+    snapshot.pace = {
+      stage: "far_ahead",
+      deltaPercent: 20,
+      expectedUsedPercent: 20,
+      actualUsedPercent: 40,
+      etaSeconds: 49 * 60,
+      willLastToReset: false,
+      elapsedSeconds: 3 * 3600 + 20 * 60,
+      resetsInSeconds: 90 * 60,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    await waitFor(() => {
+      expect(container.querySelector(".menu-card__pace-eta")).toHaveTextContent(
+        "⚠ Runs out in 49m / 1h 30m reset remaining (3h 20m elapsed)",
+      );
+    });
+  });
+
+  it("shows elapsed time next to the will-last verdict (personal)", async () => {
+    const snapshot = provider(null, 40);
+    snapshot.pace = {
+      stage: "behind",
+      deltaPercent: -8,
+      expectedUsedPercent: 50,
+      actualUsedPercent: 42,
+      etaSeconds: null,
+      willLastToReset: true,
+      elapsedSeconds: 12_000,
+      resetsInSeconds: 6000,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    await waitFor(() => {
+      expect(container.querySelector(".menu-card__pace-ok")).toHaveTextContent(
+        "✓ Will last to reset / 1h 40m reset remaining (3h 20m elapsed)",
+      );
+    });
+  });
+
+  it("shows per-lane pace blocks for 5h, weekly, and monthly lanes (personal)", async () => {
+    const snapshot = provider(null, 40);
+    snapshot.primaryLabel = "5h";
+    snapshot.secondaryLabel = "Weekly";
+    snapshot.tertiaryLabel = "Monthly";
+    snapshot.pace = {
+      stage: "on_track",
+      deltaPercent: 0.5,
+      expectedUsedPercent: 40,
+      actualUsedPercent: 40,
+      etaSeconds: null,
+      willLastToReset: true,
+    };
+    snapshot.secondaryPace = {
+      stage: "ahead",
+      deltaPercent: 8,
+      expectedUsedPercent: 30,
+      actualUsedPercent: 38,
+      etaSeconds: null,
+      willLastToReset: true,
+    };
+    snapshot.tertiaryPace = {
+      stage: "behind",
+      deltaPercent: -8,
+      expectedUsedPercent: 50,
+      actualUsedPercent: 42,
+      etaSeconds: null,
+      willLastToReset: true,
+    };
+
+    const { container } = renderCard(snapshot);
+
+    expect(await screen.findByText("Pace")).toBeInTheDocument();
+    const laneLabels = [...container.querySelectorAll(".menu-card__pace-lane-label")].map(
+      (el) => el.textContent,
+    );
+    expect(laneLabels).toEqual(["5h", "Weekly", "Monthly"]);
+    expect(screen.getByText(/On track/)).toBeInTheDocument();
+    expect(screen.getByText(/Ahead/)).toBeInTheDocument();
+    expect(screen.getByText(/Behind/)).toBeInTheDocument();
+    expect(container.querySelectorAll(".menu-card__pace-lane")).toHaveLength(3);
+  });
+
   it("hides pace, budgets, and forecast text when Show pace is off", async () => {
     const resetAt = new Date(Date.now() + 6 * 24 * 60 * 60 * 1000);
     const snapshot = provider(null, 31);
@@ -646,7 +740,7 @@ describe("MenuCard", () => {
     expect(screen.queryByText("Lasts until reset")).not.toBeInTheDocument();
   });
 
-  it("does not show pace budgets for a five-hour session window", async () => {
+  it("shows pace budgets for a five-hour session window (personal)", async () => {
     const resetAt = new Date(Date.now() + 4 * 60 * 60 * 1000);
     const snapshot = provider(null, 31);
     snapshot.primary = rateWindow(31, {
@@ -657,10 +751,11 @@ describe("MenuCard", () => {
     renderCard(snapshot);
 
     expect(await screen.findByText("69% left")).toBeInTheDocument();
-    expect(screen.queryByText("On-pace budget")).not.toBeInTheDocument();
+    const toggle = await screen.findByRole("button", { name: /On-pace budget/ });
+    fireEvent.click(toggle);
     expect(
-      screen.queryByRole("img", { name: /PaceChartAriaLabel/i }),
-    ).not.toBeInTheDocument();
+      screen.getByRole("img", { name: /PaceChartAriaLabel/i }),
+    ).toBeInTheDocument();
   });
 
   it("keeps the reserve row when timing data is incomplete", async () => {

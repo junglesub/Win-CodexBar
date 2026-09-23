@@ -30,10 +30,18 @@ pub struct ProviderDetail {
     pub tertiary_label_key: Option<&'static str>,
     pub extra_rate_windows: Vec<NamedRateWindowSnapshot>,
     pub inventory: Vec<ProviderInventoryItemSnapshot>,
+    /// Personal-only: lane labels backing the per-lane pace section.
+    pub session_label: Option<String>,
+    pub weekly_label: Option<String>,
+    pub tertiary_label: Option<String>,
 
     // Cost / pace.
     pub cost: Option<CostSnapshotBridge>,
     pub pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the weekly lane.
+    pub secondary_pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the monthly lane.
+    pub tertiary_pace: Option<PaceSnapshot>,
 
     // Error / state.
     pub last_error: Option<String>,
@@ -95,10 +103,15 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
         model_specific: None,
         tertiary: None,
         tertiary_label_key: metadata.tertiary_label_key,
+        session_label: None,
+        weekly_label: None,
+        tertiary_label: None,
         extra_rate_windows: Vec::new(),
         inventory: Vec::new(),
         cost: None,
         pace: None,
+        secondary_pace: None,
+        tertiary_pace: None,
         last_error: None,
         error_state: None,
         dashboard_url: dashboard_url.clone(),
@@ -159,10 +172,15 @@ pub fn get_provider_detail(
             detail.weekly = snapshot.secondary.clone();
             detail.model_specific = snapshot.model_specific.clone();
             detail.tertiary = snapshot.tertiary.clone();
+            detail.session_label = snapshot.primary_label.clone();
+            detail.weekly_label = snapshot.secondary_label.clone();
+            detail.tertiary_label = snapshot.tertiary_label.clone();
             detail.extra_rate_windows = snapshot.extra_rate_windows.clone();
             detail.inventory = snapshot.inventory.clone();
             detail.cost = snapshot.cost.clone();
             detail.pace = snapshot.pace.clone();
+            detail.secondary_pace = snapshot.secondary_pace.clone();
+            detail.tertiary_pace = snapshot.tertiary_pace.clone();
         }
         detail.last_error = snapshot.error.clone();
         detail.error_state = Some(snapshot.error_state);

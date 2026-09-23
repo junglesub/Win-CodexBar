@@ -149,6 +149,10 @@ pub(super) struct RawSettings {
     float_bar_enabled: bool,
     #[serde(default = "default_float_bar_opacity")]
     float_bar_opacity: u8,
+    #[serde(default = "default_float_bar_background_color")]
+    float_bar_background_color: String,
+    #[serde(default = "default_float_bar_background_opacity")]
+    float_bar_background_opacity: u8,
     #[serde(default = "default_float_bar_scale")]
     float_bar_scale: u8,
     #[serde(default = "default_float_bar_orientation")]
@@ -164,7 +168,27 @@ pub(super) struct RawSettings {
     #[serde(default)]
     float_bar_show_reset_inline: bool,
     #[serde(default)]
+    float_bar_hide_percent_when_exhausted: bool,
+    #[serde(default)]
+    float_bar_exhausted_clock_time: bool,
+    #[serde(default)]
+    float_bar_exhausted_weekday_time: bool,
+    #[serde(default)]
     float_bar_show_cost: bool,
+    #[serde(default)]
+    float_bar_battery_style: bool,
+    #[serde(default)]
+    float_bar_battery_slots: Vec<String>,
+    #[serde(default = "default_float_bar_battery_low_percent")]
+    float_bar_battery_low_percent: i32,
+    #[serde(default)]
+    float_bar_pace_text_color: bool,
+    #[serde(default)]
+    float_bar_pace_time_delta: bool,
+    #[serde(default)]
+    float_bar_show_remaining: bool,
+    #[serde(default)]
+    float_bar_follow_provider_order: bool,
     #[serde(default = "default_true")]
     promote_tray_icon: bool,
     #[serde(default = "default_true")]
@@ -271,6 +295,8 @@ impl Default for RawSettings {
             powertoys_status_pipe_enabled: s.powertoys_status_pipe_enabled,
             float_bar_enabled: s.float_bar_enabled,
             float_bar_opacity: s.float_bar_opacity,
+            float_bar_background_color: s.float_bar_background_color,
+            float_bar_background_opacity: s.float_bar_background_opacity,
             float_bar_scale: s.float_bar_scale,
             float_bar_orientation: s.float_bar_orientation,
             float_bar_style: s.float_bar_style,
@@ -278,7 +304,17 @@ impl Default for RawSettings {
             float_bar_provider_ids: s.float_bar_provider_ids,
             float_bar_dark_text: s.float_bar_dark_text,
             float_bar_show_reset_inline: s.float_bar_show_reset_inline,
+            float_bar_hide_percent_when_exhausted: s.float_bar_hide_percent_when_exhausted,
+            float_bar_exhausted_clock_time: s.float_bar_exhausted_clock_time,
+            float_bar_exhausted_weekday_time: s.float_bar_exhausted_weekday_time,
             float_bar_show_cost: s.float_bar_show_cost,
+            float_bar_battery_style: s.float_bar_battery_style,
+            float_bar_battery_slots: s.float_bar_battery_slots,
+            float_bar_battery_low_percent: s.float_bar_battery_low_percent,
+            float_bar_pace_text_color: s.float_bar_pace_text_color,
+            float_bar_pace_time_delta: s.float_bar_pace_time_delta,
+            float_bar_show_remaining: s.float_bar_show_remaining,
+            float_bar_follow_provider_order: s.float_bar_follow_provider_order,
             promote_tray_icon: s.promote_tray_icon,
             claude_daily_routines_usage_visible: s.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: s
@@ -574,6 +610,12 @@ impl From<RawSettings> for Settings {
             powertoys_status_pipe_enabled: raw.powertoys_status_pipe_enabled,
             float_bar_enabled: raw.float_bar_enabled,
             float_bar_opacity: clamp_float_bar_opacity(raw.float_bar_opacity),
+            float_bar_background_color: normalize_float_bar_background_color(
+                &raw.float_bar_background_color,
+            ),
+            float_bar_background_opacity: clamp_float_bar_background_opacity(
+                raw.float_bar_background_opacity,
+            ),
             float_bar_scale: clamp_float_bar_scale(raw.float_bar_scale),
             float_bar_orientation: normalize_float_bar_orientation(&raw.float_bar_orientation),
             float_bar_style: normalize_float_bar_style(&raw.float_bar_style),
@@ -581,7 +623,19 @@ impl From<RawSettings> for Settings {
             float_bar_provider_ids: raw.float_bar_provider_ids,
             float_bar_dark_text: raw.float_bar_dark_text,
             float_bar_show_reset_inline: raw.float_bar_show_reset_inline,
+            float_bar_hide_percent_when_exhausted: raw.float_bar_hide_percent_when_exhausted,
+            float_bar_exhausted_clock_time: raw.float_bar_exhausted_clock_time,
+            float_bar_exhausted_weekday_time: raw.float_bar_exhausted_weekday_time,
             float_bar_show_cost: raw.float_bar_show_cost,
+            float_bar_battery_style: raw.float_bar_battery_style,
+            float_bar_battery_slots: raw.float_bar_battery_slots,
+            float_bar_battery_low_percent: clamp_float_bar_battery_low_percent(
+                raw.float_bar_battery_low_percent,
+            ),
+            float_bar_pace_text_color: raw.float_bar_pace_text_color,
+            float_bar_pace_time_delta: raw.float_bar_pace_time_delta,
+            float_bar_show_remaining: raw.float_bar_show_remaining,
+            float_bar_follow_provider_order: raw.float_bar_follow_provider_order,
             promote_tray_icon: raw.promote_tray_icon,
             claude_daily_routines_usage_visible: raw.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: raw

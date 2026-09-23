@@ -159,6 +159,12 @@ pub struct PaceSnapshot {
     pub expected_used_percent: f64,
     #[serde(default)]
     pub actual_used_percent: f64,
+    /// Personal: seconds elapsed since the window started.
+    #[serde(default)]
+    pub elapsed_seconds: f64,
+    /// Personal: seconds remaining until the window resets.
+    #[serde(default)]
+    pub resets_in_seconds: f64,
 }
 
 /// Session-equivalent weekly forecast for Claude/Codex menu secondary line.
@@ -238,6 +244,13 @@ pub struct ProviderUsageSnapshot {
     pub error_state: codexbar::core::ProviderStateKind,
     #[serde(default)]
     pub pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the weekly (secondary) lane so the
+    /// menu card can show 5h / weekly / monthly pace side by side.
+    #[serde(default)]
+    pub secondary_pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the monthly (tertiary) lane.
+    #[serde(default)]
+    pub tertiary_pace: Option<PaceSnapshot>,
     #[serde(default)]
     pub account_organization: Option<String>,
     #[serde(default)]
@@ -292,6 +305,30 @@ pub(crate) fn filter_hidden_codex_spark_rows(
     }
 }
 
+/// Build a [`PaceSnapshot`] from a computed [`UsagePace`].
+fn pace_snapshot(pace: &codexbar::core::UsagePace) -> PaceSnapshot {
+    PaceSnapshot {
+        stage: pace::stage_str(pace.stage).to_string(),
+        delta_percent: pace.delta_percent,
+        will_last_to_reset: pace.will_last_to_reset,
+        eta_seconds: pace.eta_seconds,
+        expected_used_percent: pace.expected_used_percent,
+        actual_used_percent: pace.actual_used_percent,
+        elapsed_seconds: pace.elapsed_seconds,
+        resets_in_seconds: pace.resets_in_seconds,
+    }
+}
+
+/// Build a [`PaceSnapshot`] for one rate window, or `None` when the window
+/// has no usable timing (no future reset, zero-length window, …).
+fn lane_pace_snapshot(
+    window: Option<&codexbar::core::RateWindow>,
+    default_minutes: u32,
+) -> Option<PaceSnapshot> {
+    let pace = codexbar::core::UsagePace::weekly(window?, None, default_minutes)?;
+    Some(pace_snapshot(&pace))
+}
+
 impl ProviderUsageSnapshot {
     pub(super) fn from_fetch_result(
         id: ProviderId,
@@ -316,14 +353,7 @@ impl ProviderUsageSnapshot {
         });
         let primary_pace = primary_pace.flatten();
 
-        let pace = primary_pace.as_ref().map(|p| PaceSnapshot {
-            stage: pace::stage_str(p.stage).to_string(),
-            delta_percent: p.delta_percent,
-            will_last_to_reset: p.will_last_to_reset,
-            eta_seconds: p.eta_seconds,
-            expected_used_percent: p.expected_used_percent,
-            actual_used_percent: p.actual_used_percent,
-        });
+        let pace = primary_pace.as_ref().map(pace_snapshot);
 
         // Compute pace for secondary window (weekly) to derive reserve info
         let secondary_pace = allows_pace.then(|| {
@@ -333,6 +363,20 @@ impl ProviderUsageSnapshot {
                 .and_then(|sw| codexbar::core::UsagePace::weekly(sw, None, 10080))
         });
         let secondary_pace = secondary_pace.flatten();
+        // Personal-only: per-lane pace snapshots so the menu card and the
+        // Settings detail pane can show 5h / weekly / monthly pace side by
+        // side instead of the primary lane only.
+        let secondary_pace_snapshot = allows_pace
+            .then(|| lane_pace_snapshot(usage.secondary.as_ref(), 10080))
+            .flatten();
+        let tertiary_pace_snapshot = allows_pace
+            .then(|| {
+                lane_pace_snapshot(
+                    usage.tertiary.as_ref(),
+                    codexbar::core::MONTHLY_WINDOW_MINUTES,
+                )
+            })
+            .flatten();
 
         let primary_snap = RateWindowSnapshot::from_rate_window(&usage.primary);
 
@@ -451,6 +495,8 @@ impl ProviderUsageSnapshot {
             error: None,
             error_state: codexbar::core::ProviderStateKind::Ready,
             pace,
+            secondary_pace: secondary_pace_snapshot,
+            tertiary_pace: tertiary_pace_snapshot,
             account_organization: usage.account_organization.clone(),
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -500,6 +546,8 @@ impl ProviderUsageSnapshot {
             error: Some(error),
             error_state: state_kind,
             pace: None,
+            secondary_pace: None,
+            tertiary_pace: None,
             account_organization: None,
             tray_status_label: None,
             fetch_duration_ms: None,
@@ -661,6 +709,8 @@ pub struct SettingsSnapshot {
     provider_metrics: std::collections::HashMap<String, &'static str>,
     float_bar_enabled: bool,
     float_bar_opacity: u8,
+    float_bar_background_color: String,
+    float_bar_background_opacity: u8,
     float_bar_scale: u8,
     float_bar_orientation: String,
     float_bar_style: String,
@@ -668,7 +718,17 @@ pub struct SettingsSnapshot {
     float_bar_provider_ids: Vec<String>,
     float_bar_dark_text: bool,
     float_bar_show_reset_inline: bool,
+    float_bar_hide_percent_when_exhausted: bool,
+    float_bar_exhausted_clock_time: bool,
+    float_bar_exhausted_weekday_time: bool,
     float_bar_show_cost: bool,
+    float_bar_battery_style: bool,
+    float_bar_battery_slots: Vec<String>,
+    float_bar_battery_low_percent: i32,
+    float_bar_pace_text_color: bool,
+    float_bar_pace_time_delta: bool,
+    float_bar_show_remaining: bool,
+    float_bar_follow_provider_order: bool,
     promote_tray_icon: bool,
     claude_daily_routines_usage_visible: bool,
     claude_allow_reading_claude_code_credentials: bool,
@@ -783,6 +843,8 @@ impl From<Settings> for SettingsSnapshot {
             provider_metrics,
             float_bar_enabled: settings.float_bar_enabled,
             float_bar_opacity: settings.float_bar_opacity,
+            float_bar_background_color: settings.float_bar_background_color,
+            float_bar_background_opacity: settings.float_bar_background_opacity,
             float_bar_scale: settings.float_bar_scale,
             float_bar_orientation: settings.float_bar_orientation,
             float_bar_style: settings.float_bar_style,
@@ -790,7 +852,17 @@ impl From<Settings> for SettingsSnapshot {
             float_bar_provider_ids: settings.float_bar_provider_ids,
             float_bar_dark_text: settings.float_bar_dark_text,
             float_bar_show_reset_inline: settings.float_bar_show_reset_inline,
+            float_bar_hide_percent_when_exhausted: settings.float_bar_hide_percent_when_exhausted,
+            float_bar_exhausted_clock_time: settings.float_bar_exhausted_clock_time,
+            float_bar_exhausted_weekday_time: settings.float_bar_exhausted_weekday_time,
             float_bar_show_cost: settings.float_bar_show_cost,
+            float_bar_battery_style: settings.float_bar_battery_style,
+            float_bar_battery_slots: settings.float_bar_battery_slots,
+            float_bar_battery_low_percent: settings.float_bar_battery_low_percent,
+            float_bar_pace_text_color: settings.float_bar_pace_text_color,
+            float_bar_pace_time_delta: settings.float_bar_pace_time_delta,
+            float_bar_show_remaining: settings.float_bar_show_remaining,
+            float_bar_follow_provider_order: settings.float_bar_follow_provider_order,
             promote_tray_icon: settings.promote_tray_icon,
             claude_daily_routines_usage_visible: settings.claude_daily_routines_usage_visible,
             claude_allow_reading_claude_code_credentials: settings

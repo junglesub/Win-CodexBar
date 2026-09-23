@@ -32,17 +32,21 @@ Assert-Equal (Get-NodeMajor 'v24.18.0') 24 'Node 24 major parsing'
 Assert-Equal (Assert-NodeMajor 'v24.18.0' 24) 24 'Node 24 requirement'
 Assert-Throws { Assert-NodeMajor 'v23.11.0' 24 } 'non-24 Node major rejected by release prerequisite'
 
+$jsonArray = '[{"tagName":"personal-staging"},{"tagName":"personal-latest"}]'
+$parsedArray = $jsonArray | ConvertFrom-Json
+Assert-True (@($parsedArray | Where-Object tagName -EQ 'personal-latest').Count -eq 1) 'PowerShell 5.1 enumerates an assigned JSON array'
+
 $prerequisiteText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'install-release-prerequisites.ps1')
-Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
 $packageJson = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\apps\desktop-tauri\package.json') | ConvertFrom-Json
 $expectedPnpm = [string]$packageJson.packageManager -replace '^pnpm@', ''
 Assert-True ($packageJson.packageManager -match '^pnpm@\d+\.\d+\.\d+$') 'package metadata pins an exact pnpm semver'
+Assert-True ($prerequisiteText -match '\$requiredNodeMajor\s*=\s*24') 'release prerequisite pins Node major 24'
 Assert-True ($prerequisiteText -match '\$expectedPnpm\s*=') 'release prerequisite derives pnpm from package metadata'
 Assert-True ($prerequisiteText -match 'pnpm@\$expectedPnpm') 'release prerequisite activates the derived pnpm version'
 Assert-True ($prerequisiteText -notmatch [regex]::Escape("pnpm $expectedPnpm,")) 'release prerequisite does not duplicate the pnpm version in status text'
 
-Assert-Equal (Normalize-GitHubRepository 'https://github.com/nesszer/Win-CodexBar.git') 'nesszer/win-codexbar' 'HTTPS canonical URL'
-Assert-Equal (Normalize-GitHubRepository 'git@github.com:nesszer/Win-CodexBar.git') 'nesszer/win-codexbar' 'SSH canonical URL'
+Assert-Equal (Normalize-GitHubRepository 'https://github.com/junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'HTTPS canonical URL'
+Assert-Equal (Normalize-GitHubRepository 'git@github.com:junglesub/Win-CodexBar.git') 'junglesub/win-codexbar' 'SSH canonical URL'
 Assert-True (Test-CanonicalReleaseTag 'v1.2.3') 'canonical release tag accepted'
 Assert-True (-not (Test-CanonicalReleaseTag 'v1.2.3-rc.1')) 'prerelease tag rejected'
 Assert-True (-not (Test-CanonicalReleaseTag 'v01.2.3')) 'leading-zero tag rejected'
@@ -73,51 +77,51 @@ try {
 
 $builderText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'windows-release-build.ps1')
 $legacySwitch = 'Upload' + 'Release'
-$clobberFlag = '--' + 'clobber'
 Assert-True ($builderText -notmatch $legacySwitch) 'legacy upload parameter removed'
-Assert-True ($builderText -notmatch $clobberFlag) 'builder has no clobber upload path'
-$publisherText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'publish-github-release.ps1')
-Assert-True ($publisherText -notmatch $clobberFlag) 'publisher has no clobber flag'
-Assert-True ($publisherText -match '\[Parameter\(Mandatory\)\]\[string\]\$Sha') 'publisher requires an explicit immutable SHA'
-Assert-True ($publisherText -notmatch 'CIRCLE_SHA1|RELEASE_SHA') 'publisher has no CircleCI SHA dependency'
 
-$artifactConfigText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\.signpath\artifact-configuration.xml')
-Assert-True ($artifactConfigText -match '<pe-file path="CodexBar-\$\{version\}-Setup\.exe"') 'SignPath config signs installer'
-Assert-True ($artifactConfigText -match '<pe-file path="CodexBar-\$\{version\}-portable\.exe"') 'SignPath config signs portable executable'
-Assert-True ($artifactConfigText -match '<zip-file path="CodexBarCLI-v\$\{version\}-windows-x64\.zip"') 'SignPath config opens the CLI ZIP'
-Assert-True ($artifactConfigText -match '<pe-file path="codexbar-cli\.exe"') 'SignPath config signs nested CLI executable'
+$workflowPath = Join-Path (Split-Path -Parent $scriptRoot) '.github\workflows\personal-release.yml'
+$workflowText = Get-Content -Raw -LiteralPath $workflowPath
+Assert-True ($workflowText -match 'branches:\s*\[personal\]') 'personal pushes trigger release'
+Assert-True ($workflowText -match 'permissions:\s*\r?\n\s+contents:\s*read') 'build defaults to read-only contents'
+Assert-True ($workflowText -match 'publish:[\s\S]+permissions:\s*\r?\n\s+contents:\s*write') 'only publish job can write releases'
+Assert-True ($workflowText -match 'GH_REPO:\s*\$\{\{ github\.repository \}\}') 'checkout-free publisher identifies its repository'
+Assert-True ($workflowText -match 'gh release list --limit 100 --json tagName') 'rolling release existence uses a non-failing list query'
+Assert-True ($workflowText -match 'git/matching-refs/tags/personal-latest') 'rolling tag existence uses a non-failing refs query'
+Assert-True ($workflowText -match "Where-Object tagName -EQ 'personal-latest'") 'release probe filters with PowerShell'
+Assert-True ($workflowText -match "Where-Object ref -EQ 'refs/tags/personal-latest'") 'tag probes select the exact ref with PowerShell'
+Assert-True ($workflowText -match '\$previousReleases\s*=\s*\$previousReleasesJson\s*\|\s*ConvertFrom-Json') 'release JSON is assigned before filtering'
+Assert-True ($workflowText -match '\$previousTagRefs\s*=\s*\$previousTagRefsJson\s*\|\s*ConvertFrom-Json') 'tag JSON is assigned before filtering'
+Assert-True ($workflowText -match '\$observedTagRefs\s*=\s*\$observedTagRefsJson\s*\|\s*ConvertFrom-Json') 'tag verification JSON is assigned before filtering'
+Assert-True ($workflowText -notmatch '--jq\s+''[^'']*"personal-latest"') 'native gh arguments do not contain PowerShell-stripped jq quotes'
+Assert-True ($workflowText -notmatch 'git/ref/tags/personal-latest') 'publisher does not probe a missing tag with a failing command'
+Assert-True ($workflowText -match "github\.ref == 'refs/heads/personal'") 'manual runs are restricted to personal'
+Assert-True ($workflowText -match 'persist-credentials:\s*false') 'build checkout does not retain write credentials'
+Assert-True ($builderText -match '\$env:CODEXBAR_BUILD_SHA\s*=\s*\$buildSha') 'release builder stamps compile-time build SHA'
+Assert-True ($builderText -match '\$buildSha\s*=\s*if\s*\(\$env:GITHUB_SHA\)') 'release builder prefers GITHUB_SHA when present'
+Assert-True ($workflowText -match 'windows-release-build\.ps1') 'workflow reuses Windows release builder'
+Assert-True ($workflowText -match 'Expected four release assets') 'workflow checks the complete asset set'
+Assert-True ($workflowText -match 'actions/upload-artifact@v4') 'build passes assets without a write token'
+Assert-True ($workflowText -notmatch 'personal-staging-') 'workflow artifact is the only staging layer'
+Assert-True ($workflowText -notmatch 'personal-backup-') 'publisher does not swap release tag names'
+Assert-True ($workflowText -match 'release upload personal-latest @assets --clobber') 'publisher updates the rolling release in place'
+Assert-True ($workflowText -match 'release delete-asset personal-latest') 'publisher removes superseded version assets'
+Assert-True ($workflowText -match 'Compare-Object \$assetNames \$publishedNames') 'publisher verifies the exact asset set'
+Assert-True ($workflowText -match 'observedTagSha') 'ambiguous tag updates are verified'
+Assert-True ($workflowText -match 'git/ref/heads/personal') 'workflow rejects stale builds before publication'
+Assert-True ($workflowText -notmatch 'release delete personal-latest') 'workflow keeps the previous release during replacement'
+Assert-True ($workflowText -match '--prerelease') 'personal release cannot become canonical latest'
+Assert-True (-not (Test-Path (Join-Path (Split-Path -Parent $scriptRoot) '.circleci\config.yml'))) 'CircleCI config removed'
+foreach ($removedScript in @('circleci-release-build.ps1', 'emit-release-manifest.ps1', 'publish-github-release.ps1', 'release-preflight.ps1')) {
+    Assert-True (-not (Test-Path (Join-Path $scriptRoot $removedScript))) "$removedScript removed"
+}
 
-$finalizerText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'finalize-signed-release.ps1')
-Assert-True ($finalizerText -match 'Get-AuthenticodeSignature') 'finalizer verifies Authenticode'
-Assert-True ($finalizerText -match 'ExpectedSignerThumbprint') 'finalizer can enforce the issued signer certificate'
-Assert-True ($finalizerText -match 'Expand-Archive') 'finalizer inspects nested CLI archive'
-Assert-True ($finalizerText -match 'codexbar-cli\.exe at its root') 'finalizer enforces the configured CLI archive path'
-Assert-True ($finalizerText -match 'CLI ZIP must contain exactly one file') 'finalizer rejects extra CLI archive files'
-Assert-True ($finalizerText -match 'Invoke-ManifestEmission -AssetsDir \$finalAssetsDir') 'finalizer emits manifest from signed-only assets'
-Assert-True ($finalizerText -notmatch '\$BuildOutputDir|keeping unsigned|fallback') 'finalizer has no unsigned fallback'
-Assert-True ($publisherText -match 'unexpected nested files') 'publisher rejects nested final-bundle files'
-
-$releaseWorkflowText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\.github\workflows\release.yml')
-Assert-True ($releaseWorkflowText -match 'signpath/github-action-submit-signing-request@v3') 'production workflow uses current SignPath action'
-Assert-True ($releaseWorkflowText -match 'actions/upload-artifact@v4') 'production workflow uploads a GitHub artifact'
-Assert-True ($releaseWorkflowText -match 'signing-policy-slug: release-signing') 'production workflow pins release-signing'
-Assert-True ($releaseWorkflowText -match 'CodexBarCLI-v\$version-windows-x64\.zip') 'production workflow includes the CLI ZIP'
-Assert-True ($releaseWorkflowText -match 'finalize-signed-release\.ps1') 'production workflow runs signed finalization'
-Assert-True ($releaseWorkflowText -match 'actions/download-artifact@v4') 'production workflow transfers only the verified bundle to publisher'
-Assert-True ($releaseWorkflowText -match 'contents: write') 'production publisher has release write permission'
-Assert-True ($releaseWorkflowText -match 'SIGNPATH_RELEASE_CERT_THUMBPRINT') 'production workflow requires the issued certificate thumbprint'
-Assert-True ($releaseWorkflowText -match [regex]::Escape('ref: ${{ needs.sign.outputs.sha }}')) 'publisher checks out the immutable signed SHA'
-Assert-True ($releaseWorkflowText -notmatch 'trigger-circleci|if:.*SIGNPATH_API_TOKEN') 'production workflow cannot skip SignPath or delegate to CircleCI'
-
-$testWorkflowText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\.github\workflows\signpath-test.yml')
-Assert-True ($testWorkflowText -match 'workflow_dispatch') 'SignPath test is manually dispatched'
-Assert-True ($testWorkflowText -match 'signing-policy-slug: test-signing') 'SignPath test pins test-signing'
-Assert-True ($testWorkflowText -match 'source_ref:') 'SignPath test builds a reviewed workflow source ref'
-Assert-True ($testWorkflowText -match 'AllowTagSourceMismatch') 'SignPath test separates version label from source commit'
-Assert-True ($testWorkflowText -notmatch 'gh release create|Publish draft') 'SignPath test cannot publish a release'
-
-$circleConfigText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot '..\.circleci\config.yml')
-Assert-True ($circleConfigText -notmatch 'release-build|release-publish|release-approval') 'CircleCI has no tag release jobs'
-Assert-True ($circleConfigText -notmatch '(?ms)^  release:\s*$') 'CircleCI has no tag release workflow'
+$upstreamSyncText = Get-Content -Raw -LiteralPath (Join-Path (Split-Path -Parent $scriptRoot) '.github\workflows\upstream-sync.yml')
+Assert-True ($upstreamSyncText -match 'git merge --ff-only upstream/main') 'fork main fast-forwards from upstream'
+Assert-True ($upstreamSyncText -match 'git checkout -B sync/upstream main') 'new sync branches track fork main'
+Assert-True ($upstreamSyncText -match 'git merge --no-edit main') 'existing sync branches merge later main commits normally'
+Assert-True ($upstreamSyncText -match 'comm -12') 'paths changed by both personal and main require developer review'
+Assert-True ($upstreamSyncText -notmatch 'git merge --squash') 'sync never squashes main into personal'
+Assert-True ($upstreamSyncText -notmatch 'git add -A') 'sync never commits unresolved conflict markers'
+Assert-True ($upstreamSyncText -notmatch 'checkout origin/personal -- \.github/workflows') 'main workflow changes are not discarded wholesale'
 
 Write-Host 'Release pipeline focused tests passed.'

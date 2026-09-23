@@ -280,6 +280,17 @@ pub struct Settings {
     #[serde(default = "default_float_bar_opacity")]
     pub float_bar_opacity: u8,
 
+    /// Custom background color for the floating-bar pill surfaces, as `#RRGGBB`.
+    /// Normalized to uppercase on load; anything invalid falls back to `#FFFFFF`.
+    #[serde(default = "default_float_bar_background_color")]
+    pub float_bar_background_color: String,
+
+    /// Opacity of the custom floating-bar background fill (0..=100). Applies
+    /// only to the pill surfaces, never to text or icons. Independent of
+    /// [`Self::float_bar_opacity`], which controls the whole window/surface.
+    #[serde(default = "default_float_bar_background_opacity")]
+    pub float_bar_background_opacity: u8,
+
     /// Floating-bar visual scale, in the inclusive range 75..=200.
     #[serde(default = "default_float_bar_scale")]
     pub float_bar_scale: u8,
@@ -310,9 +321,73 @@ pub struct Settings {
     #[serde(default)]
     pub float_bar_show_reset_inline: bool,
 
+    /// When true, an exhausted Float Bar slot with a future reset shows only
+    /// the remaining time instead of `100% 4d`. Applies to 5h/weekly/monthly
+    /// slots and the cadence-less fallback. Requires `is_exhausted` + a
+    /// parseable future `resetsAt`; otherwise the percentage is kept.
+    /// Independent of [`Self::float_bar_show_reset_inline`]. The time style
+    /// follows [`Self::float_bar_exhausted_clock_time`].
+    #[serde(default)]
+    pub float_bar_hide_percent_when_exhausted: bool,
+
+    /// When true, the exhausted hide-percent time renders as a local absolute
+    /// clock (`M/D HH:MM`, same-day `HH:MM`) instead of the relative countdown
+    /// (`4d 12h`). No effect unless
+    /// [`Self::float_bar_hide_percent_when_exhausted`] is also true.
+    #[serde(default)]
+    pub float_bar_exhausted_clock_time: bool,
+
+    /// When true, the exhausted clock-style time replaces the `M/D` date with
+    /// a weekday abbreviation (`Mon 21:00`) while the reset falls within the
+    /// coming week (tomorrow..+6 days, one occurrence per weekday). Beyond
+    /// that — including the same weekday next week — the `M/D` date is kept.
+    /// No effect unless [`Self::float_bar_exhausted_clock_time`] is also true.
+    #[serde(default)]
+    pub float_bar_exhausted_weekday_time: bool,
+
     /// When true, show local cost summaries in the floating bar.
     #[serde(default)]
     pub float_bar_show_cost: bool,
+
+    /// Display usage as battery cells instead of percentage numbers in the floating bar
+    #[serde(default)]
+    pub float_bar_battery_style: bool,
+
+    /// Float Bar slots that use battery cells. An empty list keeps the battery
+    /// style enabled for every fixed cadence and the cadence-less fallback.
+    #[serde(default)]
+    pub float_bar_battery_slots: Vec<String>,
+
+    /// Remaining-quota percent below which battery cells fall back to a
+    /// percentage number. `-1` disables the fallback (always render battery
+    /// cells). Otherwise clamped to `0..=100`.
+    #[serde(default = "default_float_bar_battery_low_percent")]
+    pub float_bar_battery_low_percent: i32,
+
+    /// Personal: tint Float Bar reset countdowns with the pace bucket color
+    /// (slow/steady/racing/burning). Battery cells and percentage numbers
+    /// keep the usage-threshold tone.
+    #[serde(default)]
+    pub float_bar_pace_text_color: bool,
+
+    /// Personal: show Float Bar hover pace deltas as time ahead or behind
+    /// (e.g. `+24m`) instead of percentage points.
+    #[serde(default)]
+    pub float_bar_pace_time_delta: bool,
+
+    /// When true, Float Bar percentage text and its accessible detail render
+    /// remaining quota instead of used quota. Battery cells always track
+    /// remaining quota regardless of this setting.
+    #[serde(default)]
+    pub float_bar_show_remaining: bool,
+
+    /// When true, the floating bar orders provider pills with the user's
+    /// custom drag-reorder sequence ([`Self::provider_order`]) instead of
+    /// usage-descending. An empty custom order keeps usage order. Because the
+    /// custom sequence itself has no reset UI, turning this off is the way
+    /// back to usage-descending.
+    #[serde(default)]
+    pub float_bar_follow_provider_order: bool,
 
     /// Promote the tray icon out of the Windows hidden-icons overflow area.
     /// Only has effect on Windows 11 (build ≥ 22000); silently ignored elsewhere.
@@ -399,6 +474,17 @@ fn default_float_bar_style() -> String {
     "floating".to_string()
 }
 
+/// Default for [`Settings::float_bar_battery_low_percent`]: disabled.
+fn default_float_bar_battery_low_percent() -> i32 {
+    -1
+}
+
+/// Clamp the battery-to-percent fallback threshold: `-1` disables it,
+/// anything else pins to `0..=100`.
+pub fn clamp_float_bar_battery_low_percent(value: i32) -> i32 {
+    if value < 0 { -1 } else { value.clamp(0, 100) }
+}
+
 /// Clamp the floating-bar opacity to the supported range.
 ///
 /// Opacity values below 30% would make the bar effectively invisible, so we
@@ -429,6 +515,39 @@ pub fn normalize_float_bar_style(value: &str) -> String {
         "taskbar" => "taskbar".to_string(),
         _ => "floating".to_string(),
     }
+}
+
+/// Default floating-bar background color (opaque white).
+fn default_float_bar_background_color() -> String {
+    "#FFFFFF".to_string()
+}
+
+/// Default floating-bar background fill opacity (8%).
+fn default_float_bar_background_opacity() -> u8 {
+    8
+}
+
+/// Normalize a floating-bar background color to uppercase `#RRGGBB`.
+///
+/// Anything that isn't exactly `#` followed by six hex digits falls back to
+/// the default white so invalid persisted/IPC colors can never become
+/// arbitrary CSS values.
+pub fn normalize_float_bar_background_color(value: &str) -> String {
+    let valid = value.len() == 7
+        && value.starts_with('#')
+        && value[1..].bytes().all(|byte| byte.is_ascii_hexdigit());
+    if valid {
+        value.to_ascii_uppercase()
+    } else {
+        default_float_bar_background_color()
+    }
+}
+
+/// Clamp the floating-bar background fill opacity to the valid 0..=100 range.
+/// Unlike whole-bar opacity, 0 is meaningful here (a fully transparent fill),
+/// so no lower bound is applied.
+pub fn clamp_float_bar_background_opacity(value: u8) -> u8 {
+    value.min(100)
 }
 
 /// Canonicalize a requested provider display order.
@@ -553,6 +672,8 @@ impl Default for Settings {
             powertoys_status_pipe_enabled: false,
             float_bar_enabled: false,
             float_bar_opacity: default_float_bar_opacity(),
+            float_bar_background_color: default_float_bar_background_color(),
+            float_bar_background_opacity: default_float_bar_background_opacity(),
             float_bar_scale: default_float_bar_scale(),
             float_bar_orientation: default_float_bar_orientation(),
             float_bar_style: default_float_bar_style(),
@@ -560,7 +681,17 @@ impl Default for Settings {
             float_bar_provider_ids: Vec::new(),
             float_bar_dark_text: false,
             float_bar_show_reset_inline: false,
+            float_bar_hide_percent_when_exhausted: false,
+            float_bar_exhausted_clock_time: false,
+            float_bar_exhausted_weekday_time: false,
             float_bar_show_cost: false,
+            float_bar_battery_style: false,
+            float_bar_battery_slots: Vec::new(),
+            float_bar_battery_low_percent: default_float_bar_battery_low_percent(),
+            float_bar_pace_text_color: false,
+            float_bar_pace_time_delta: false,
+            float_bar_show_remaining: false,
+            float_bar_follow_provider_order: false,
             promote_tray_icon: true,
             claude_daily_routines_usage_visible: true,
             claude_allow_reading_claude_code_credentials: false,

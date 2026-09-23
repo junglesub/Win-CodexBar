@@ -58,7 +58,7 @@ For each bullet / merged PR in the release, assign exactly one class:
 | Class | Meaning |
 |-------|---------|
 | **PORT** | Has a local counterpart (provider, settings path, CLI, UI surface, fixture). |
-| **SKIP** | macOS-exclusive or no Windows analog. Common skips: Keychain, iCloud/CloudKit, AppKit/SwiftUI menu chrome, `libproc`, `0600` POSIX file modes (our `secure_file` + DPAPI already covers owner-only intent). |
+| **SKIP** | macOS-exclusive, no Windows analog, or conflicts with `personal` features. When conflicts or collisions occur, prioritize ignoring/skipping (`personal` takes precedence). Common skips: Keychain, iCloud/CloudKit, AppKit/SwiftUI menu chrome, `libproc`, `0600` POSIX file modes (our `secure_file` + DPAPI already covers owner-only intent). |
 | **DECIDE-by-audit** | Unclear. Needs evidence before coding (see below). |
 
 **DECIDE-by-audit evidence** (collect before touching code):
@@ -69,7 +69,7 @@ For each bullet / merged PR in the release, assign exactly one class:
 - UI surface impact (tray / settings tab / float bar / none)
 - Proposed class: PORT, SKIP, or **DEFER-with-evidence**
 
-When the upstream reference is ambiguous, prefer **DEFER-with-evidence** over a
+When the upstream reference is ambiguous or causes conflict, prefer **DEFER-with-evidence** or **SKIP** (무시 우선) over a
 guess-port. Example from the 0.47.0 pass: Claude cold-boot items
 (`#2493` / `#2494`) were deferred — not portable as written, not silently
 half-implemented.
@@ -99,23 +99,20 @@ For upstream `X.Y.Z`:
 7. Keep SKIP / DEFER notes in that canonical PR body. Do not open empty stub
    modules "for later".
 
-#### CI budget rule for micro PRs
+#### CI rule for micro PRs
 
-Hosted CI and review granularity are intentionally different:
+Hosted CI and review granularity are intentionally different on the personal fork:
 
-- Micro PRs targeting `port/upstream-*` are filtered out at CircleCI workflow
-  compilation time, before Windows compute starts. The decision uses the PR base/target
-  branch, not the head-branch name; a `port/micro-*` head opened directly to `main`
-  still receives the full hosted gate. Their required evidence is focused local tests
-  plus any broader local gate justified by the change.
-- High-risk Windows-native micro PRs may use the manual Blacksmith backup workflow
-  as a deliberate second opinion, but it is not automatic.
-- The canonical `port/upstream-X.Y.Z` -> `main` PR receives the full CircleCI
-  Windows gate. Run full local checks, CUA for UI-affecting work, and thermo review
-  before relying on hosted CI.
-- CircleCI Project Settings should have **Auto-cancel redundant workflows** enabled
-  so superseded non-default-branch runs stop consuming credits.
-- Do not use `[skip ci]` to bypass the canonical release PR gate.
+- `.github/workflows/pr-check.yml` runs automatically only for pull requests
+  targeting `personal`.
+- Micro PRs targeting `port/upstream-*` therefore require focused local tests plus
+  any broader local gate justified by the change.
+- Before the canonical `port/upstream-X.Y.Z` -> `main` PR, run the full local
+  checks, CUA for UI-affecting work, and thermo review. Do not assume that the
+  personal PR workflow covers a PR targeting `main`.
+- The later sync PR from `sync/upstream` to `personal` receives the automatic
+  GitHub-hosted Windows gate.
+- Do not use `[skip ci]` to bypass the `personal` sync PR gate.
 
 ### 4. Port fixtures from exact wire shapes
 
@@ -208,7 +205,7 @@ port PR unless that is an explicit separate decision. Port first; release later.
 | Review scope | One complete behavior per micro PR; branch `port/micro-X.Y.Z-<slug>` |
 | Canonical scope | One release-wide PR from `port/upstream-X.Y.Z` to `main` |
 | Commit scope | One workstream per commit; message prefix `Port upstream X.Y.Z: ...` |
-| Hosted CI | Micro branches skip automatic CircleCI; canonical release PR gets full CircleCI; Blacksmith is manual reserve |
+| Hosted CI | GitHub-hosted Windows checks run automatically for PRs targeting `personal`; other port branches require local evidence |
 | Source pin | Always `vX.Y.Z` tag URLs / compare range — never `main` |
 | Locales | Add keys in existing catalog style; machine translation allowed |
 | Ambiguity | **DEFER-with-evidence** > guess-port |

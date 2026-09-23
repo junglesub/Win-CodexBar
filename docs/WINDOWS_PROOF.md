@@ -63,9 +63,9 @@ For the Inno Setup release artifact, prefer the cached Windows release builder:
 It keeps a clean managed checkout while reusing Cargo, pnpm, and signed
 installer dependency caches. Use `-WarmCacheOnly` after large ports to prepare
 the desktop cache, and `-SmokeInstall` to install/uninstall the generated
-installer. The builder has no upload switch. Publication is performed only by
-the approval-gated CircleCI draft publisher in `docs/release/ci-cd.md`, which
-checks hashes and never overwrites an existing asset.
+installer. The builder has no upload switch. Pushes to `personal` publish its
+four assets through `.github/workflows/personal-release.yml`; see
+`docs/release/ci-cd.md`.
 Run the standalone smoke installer test on a Windows machine before approval:
 
 ```powershell
@@ -94,7 +94,7 @@ the list below. Check each item off in §4.
    near the tray. On multi-monitor setups it should appear on the
    display hosting the tray.
 3. **Right-click the tray icon** → native Windows context menu with
-   Pop Out / Refresh / Settings / Check for updates / Quit entries.
+   Pop Out / Refresh / Check for Updates / Settings / About / Quit entries.
 4. **Preferences window** opens from the tray menu or from the pop-out
    settings gear; all tabs render (General, Providers, Display, API
    keys, Cookies, Token accounts, Advanced, About).
@@ -112,9 +112,12 @@ the list below. Check each item off in §4.
 9. **Reset countdown** — pop-out card shows `Resets in Xh Ym` and
    re-renders at least once during a 1-minute stare (internal tick is
    30 s).
-10. **Update banner** — Advanced → Check for updates; when an update is
-    offered the banner appears at the top of the pop-out and dismiss /
-    download / install-and-restart buttons all respond.
+10. **Update flow** — in a release build, verify About and the tray
+    **Check for Updates** action complete without error. When
+    `personal-latest` points to a different commit, verify the tray/pop-out
+    banner appears and the installer download requires a valid SHA-256 digest.
+    Local development builds without an embedded commit SHA should skip the
+    network check.
 
 ---
 
@@ -127,7 +130,7 @@ the list below. Check each item off in §4.
 - The following CLIs are **Windows-only** in this port and cannot be
   exercised on macOS/Linux: DPAPI-protected browser cookie import
   (Chrome/Edge), the single-instance lock via named mutex, and the
-  MSI-based auto-update channel.
+  installer-based update channel.
 - **`fSingleSessionPerUser`** (terminal-services policy): if the
   post-install tray icon does not appear on a multi-user Windows
   server, toggle
@@ -173,6 +176,7 @@ Tick each entry as it is verified on the Windows target.
 [ ] runtime.provider-order-persists
 [ ] runtime.chart-tooltip-visible
 [ ] runtime.reset-countdown-ticks
-[ ] runtime.update-banner-flow
+[ ] runtime.update-check-controls
+[ ] runtime.update-banner-flow (when personal-latest points to another commit)
 [ ] runtime.single-instance-mutex
 ```

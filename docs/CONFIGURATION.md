@@ -126,6 +126,67 @@ that directory. Switching replaces only `~/.grok/auth.json` (or
 skills, and other Grok home files stay in place. `XAI_API_KEY` and
 `GROK_OAUTH_TOKEN` are unset for the isolated sign-in so the browser OAuth
 flow is used.
+## Floating Bar background (settings.json)
+
+The Floating Bar pill surfaces (provider pills, cost pills, and the empty
+state) are styled by two persisted keys independent of the whole-bar opacity:
+
+| Key | Default | Valid range | Notes |
+|-----|---------|-------------|-------|
+| `float_bar_background_color` | `#FFFFFF` | `#RRGGBB` (six hex digits, case-insensitive) | Applies to provider pills, cost pills, and the empty state in both Floating and Taskbar styles. Invalid values normalize to `#FFFFFF`; stored normalized as uppercase. |
+| `float_bar_background_opacity` | `8` | `0..=100` (integer percent) | Fills only the pill/empty surfaces — it never changes text or provider icon opacity. |
+
+`float_bar_opacity` remains the separate **whole-bar/window** opacity control
+(`30..=100`, default `80`) and affects the complete Floating Bar surface. The
+background opacity affects **only** the pill surfaces, so the two controls are
+independent and combine independently.
+
+Both background keys fall back to their defaults when absent from an existing
+`settings.json` (no migration step needed), and invalid persisted/IPC values
+are normalized/clamped server-side. Reset in Settings writes both defaults
+(`#FFFFFF`, `8`) in a single patch.
+
+## Floating Bar exhausted display (settings.json)
+
+When `float_bar_hide_percent_when_exhausted` is `true` (default `false`), an
+exhausted Float Bar slot (`isExhausted` with a parseable future `resetsAt`)
+shows only the detailed two-unit remaining time instead of the percentage:
+
+| Before | After |
+|--------|-------|
+| `100% 4d` | `4d 12h` |
+| `100% 3h` | `3h 12m` |
+
+5h / weekly / monthly slots share the rule. Without a usable future reset the
+percentage is kept so the slot never goes blank. The tooltip still shows the
+full `100% used` percentage and localized reset text. Independent of
+`float_bar_show_reset_inline` (the existing single-unit `100% 4d` inline mode).
+
+When `float_bar_exhausted_clock_time` is also `true` (default `false`), the
+hidden time renders as a local absolute clock instead of the countdown:
+
+| Local day of reset | Display |
+|--------------------|---------|
+| same calendar day  | `HH:MM` (e.g. `17:30`) |
+| any other day      | `M/D HH:MM` (e.g. `9/22 21:00`) |
+
+Times are zero-padded 24-hour local clock values. The toggle is disabled in
+Settings until `float_bar_hide_percent_when_exhausted` is on.
+
+When `float_bar_exhausted_weekday_time` is also `true` (default `false`), a
+reset that falls within the coming week (tomorrow..=+6 local calendar days)
+renders its weekday abbreviation instead of the date:
+
+| Reset date | Display |
+|------------|---------|
+| today          | `HH:MM` (unchanged) |
+| within 7 days  | `Mon 21:00`, `Tue 21:00`, … |
+| +7 days or more | `M/D HH:MM` (unchanged) |
+
+The window is capped so each weekday appears at most once — a reset exactly
+one week out (same weekday) or later keeps the `M/D` date. This option has no
+effect unless `float_bar_exhausted_clock_time` is on.
+
 
 ## Source mode
 

@@ -57,6 +57,8 @@ codexbar usage --brief
 
 Global-style flags (also on root help): `-p/--provider`, `-f/--format`, `--json`, `--pretty`, `--status`, `--all-accounts`, `--account`, `--no-credits`, `--source`, `--web-timeout`, `--brief`.
 
+Text output prints a `Pace:` line (stage + expected-vs-actual + reset outlook) under every lane with usable timing — 5h, weekly, and monthly. JSON output carries `pace.primary` / `pace.secondary` / `pace.tertiary` with the same per-lane data (personal-only: upstream parity is primary/secondary only).
+
 ### Cost
 
 ```powershell

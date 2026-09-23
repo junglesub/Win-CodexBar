@@ -123,13 +123,15 @@ pub fn apply_state(app: &tauri::AppHandle, settings: &Settings) {
     }
 }
 
-/// All five settings fields the float bar owns, in a single optional
+/// Float Bar settings fields in a single optional
 /// patch. Used by `update_settings` so the bulk of float-bar plumbing
 /// stays in this module rather than spread across the settings handler.
 #[derive(Debug, Default)]
 pub struct SettingsPatch {
     pub enabled: Option<bool>,
     pub opacity: Option<u8>,
+    pub background_color: Option<String>,
+    pub background_opacity: Option<u8>,
     pub scale: Option<u8>,
     pub orientation: Option<String>,
     pub style: Option<String>,
@@ -137,13 +139,25 @@ pub struct SettingsPatch {
     pub provider_ids: Option<Vec<String>>,
     pub dark_text: Option<bool>,
     pub show_reset_inline: Option<bool>,
+    pub hide_percent_when_exhausted: Option<bool>,
+    pub exhausted_clock_time: Option<bool>,
+    pub exhausted_weekday_time: Option<bool>,
     pub show_cost: Option<bool>,
+    pub battery_style: Option<bool>,
+    pub battery_slots: Option<Vec<String>>,
+    pub battery_low_percent: Option<i32>,
+    pub pace_text_color: Option<bool>,
+    pub pace_time_delta: Option<bool>,
+    pub show_remaining: Option<bool>,
+    pub follow_provider_order: Option<bool>,
 }
 
 impl SettingsPatch {
     pub fn is_empty(&self) -> bool {
         self.enabled.is_none()
             && self.opacity.is_none()
+            && self.background_color.is_none()
+            && self.background_opacity.is_none()
             && self.scale.is_none()
             && self.orientation.is_none()
             && self.style.is_none()
@@ -151,7 +165,17 @@ impl SettingsPatch {
             && self.provider_ids.is_none()
             && self.dark_text.is_none()
             && self.show_reset_inline.is_none()
+            && self.hide_percent_when_exhausted.is_none()
+            && self.exhausted_clock_time.is_none()
+            && self.exhausted_weekday_time.is_none()
             && self.show_cost.is_none()
+            && self.battery_style.is_none()
+            && self.battery_slots.is_none()
+            && self.battery_low_percent.is_none()
+            && self.pace_text_color.is_none()
+            && self.pace_time_delta.is_none()
+            && self.show_remaining.is_none()
+            && self.follow_provider_order.is_none()
     }
 
     /// Apply this patch to a mutable `Settings`. Values are clamped and
@@ -162,6 +186,14 @@ impl SettingsPatch {
         }
         if let Some(v) = self.opacity {
             settings.float_bar_opacity = codexbar::settings::clamp_float_bar_opacity(v);
+        }
+        if let Some(v) = &self.background_color {
+            settings.float_bar_background_color =
+                codexbar::settings::normalize_float_bar_background_color(v);
+        }
+        if let Some(v) = self.background_opacity {
+            settings.float_bar_background_opacity =
+                codexbar::settings::clamp_float_bar_background_opacity(v);
         }
         if let Some(v) = self.scale {
             settings.float_bar_scale = codexbar::settings::clamp_float_bar_scale(v);
@@ -184,8 +216,39 @@ impl SettingsPatch {
         if let Some(v) = self.show_reset_inline {
             settings.float_bar_show_reset_inline = v;
         }
+        if let Some(v) = self.hide_percent_when_exhausted {
+            settings.float_bar_hide_percent_when_exhausted = v;
+        }
+        if let Some(v) = self.exhausted_clock_time {
+            settings.float_bar_exhausted_clock_time = v;
+        }
+        if let Some(v) = self.exhausted_weekday_time {
+            settings.float_bar_exhausted_weekday_time = v;
+        }
         if let Some(v) = self.show_cost {
             settings.float_bar_show_cost = v;
+        }
+        if let Some(v) = self.battery_style {
+            settings.float_bar_battery_style = v;
+        }
+        if let Some(v) = &self.battery_slots {
+            settings.float_bar_battery_slots = v.clone();
+        }
+        if let Some(v) = self.battery_low_percent {
+            settings.float_bar_battery_low_percent =
+                codexbar::settings::clamp_float_bar_battery_low_percent(v);
+        }
+        if let Some(v) = self.pace_text_color {
+            settings.float_bar_pace_text_color = v;
+        }
+        if let Some(v) = self.pace_time_delta {
+            settings.float_bar_pace_time_delta = v;
+        }
+        if let Some(v) = self.show_remaining {
+            settings.float_bar_show_remaining = v;
+        }
+        if let Some(v) = self.follow_provider_order {
+            settings.float_bar_follow_provider_order = v;
         }
     }
 }
@@ -230,6 +293,9 @@ mod tests {
             float_bar_style: "floating".into(),
             float_bar_dark_text: false,
             float_bar_show_reset_inline: false,
+            float_bar_hide_percent_when_exhausted: false,
+            float_bar_exhausted_clock_time: false,
+            float_bar_exhausted_weekday_time: false,
             ..Settings::default()
         };
 
@@ -240,6 +306,9 @@ mod tests {
             style: Some("taskbar".into()),
             dark_text: Some(true),
             show_reset_inline: Some(true),
+            hide_percent_when_exhausted: Some(true),
+            exhausted_clock_time: Some(true),
+            exhausted_weekday_time: Some(true),
             ..SettingsPatch::default()
         };
         patch.apply(&mut s);
@@ -249,6 +318,9 @@ mod tests {
         assert_eq!(s.float_bar_style, "taskbar");
         assert!(s.float_bar_dark_text);
         assert!(s.float_bar_show_reset_inline);
+        assert!(s.float_bar_hide_percent_when_exhausted);
+        assert!(s.float_bar_exhausted_clock_time);
+        assert!(s.float_bar_exhausted_weekday_time);
         // Orientation untouched by the patch.
         assert_eq!(s.float_bar_orientation, "horizontal");
     }
@@ -271,6 +343,78 @@ mod tests {
     }
 
     #[test]
+    fn background_patch_is_not_empty_and_clamps_on_apply() {
+        let patch = SettingsPatch {
+            background_color: Some("#12abEF".into()),
+            background_opacity: Some(255),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings {
+            float_bar_background_color: "#ABCDEF".into(),
+            float_bar_background_opacity: 42,
+            ..Settings::default()
+        };
+        let original_enabled = s.float_bar_enabled;
+        let original_style = s.float_bar_style.clone();
+
+        patch.apply(&mut s);
+        assert_eq!(s.float_bar_background_color, "#12ABEF");
+        assert_eq!(s.float_bar_background_opacity, 100);
+        // Unrelated fields are untouched.
+        assert_eq!(s.float_bar_enabled, original_enabled);
+        assert_eq!(s.float_bar_style, original_style);
+    }
+
+    #[test]
+    fn show_remaining_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            show_remaining: Some(true),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(!s.float_bar_show_remaining);
+        patch.apply(&mut s);
+        assert!(s.float_bar_show_remaining);
+        // The neighbouring display flag is untouched by the patch.
+        assert!(!s.float_bar_battery_style);
+    }
+
+    #[test]
+    fn battery_slots_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            battery_slots: Some(vec!["weekly".into(), "fallback".into()]),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(s.float_bar_battery_slots.is_empty());
+        patch.apply(&mut s);
+        assert_eq!(s.float_bar_battery_slots, ["weekly", "fallback"]);
+        assert!(!s.float_bar_battery_style);
+    }
+
+    #[test]
+    fn follow_provider_order_patch_is_not_empty_and_writes_only_that_field() {
+        let patch = SettingsPatch {
+            follow_provider_order: Some(true),
+            ..SettingsPatch::default()
+        };
+        assert!(!patch.is_empty());
+
+        let mut s = Settings::default();
+        assert!(!s.float_bar_follow_provider_order);
+        patch.apply(&mut s);
+        assert!(s.float_bar_follow_provider_order);
+        // The neighbouring display flag is untouched by the patch.
+        assert!(!s.float_bar_show_remaining);
+    }
+
+    #[test]
     fn empty_patch_leaves_settings_unchanged() {
         let original = Settings::default();
         let mut s = Settings::default();
@@ -284,6 +428,26 @@ mod tests {
         assert_eq!(
             s.float_bar_show_reset_inline,
             original.float_bar_show_reset_inline
+        );
+        assert_eq!(
+            s.float_bar_hide_percent_when_exhausted,
+            original.float_bar_hide_percent_when_exhausted
+        );
+        assert_eq!(
+            s.float_bar_exhausted_clock_time,
+            original.float_bar_exhausted_clock_time
+        );
+        assert_eq!(
+            s.float_bar_exhausted_weekday_time,
+            original.float_bar_exhausted_weekday_time
+        );
+        assert_eq!(
+            s.float_bar_background_color,
+            original.float_bar_background_color
+        );
+        assert_eq!(
+            s.float_bar_background_opacity,
+            original.float_bar_background_opacity
         );
     }
 }

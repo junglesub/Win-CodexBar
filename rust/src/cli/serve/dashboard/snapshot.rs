@@ -174,6 +174,10 @@ pub struct PacePayload {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub run_out_probability: Option<f64>,
     pub summary: String,
+    /// Personal: seconds elapsed since the window started.
+    pub elapsed_seconds: f64,
+    /// Personal: seconds remaining until the window resets.
+    pub resets_in_seconds: f64,
 }
 
 pub struct SnapshotInput {
@@ -476,9 +480,22 @@ fn make_pace(usage: &UsageSnapshot) -> Option<ProviderPacePayload> {
             .as_ref()
             .and_then(|window| UsagePace::weekly(window, None, 10080))
             .map(|pace| pace_payload(&pace)),
-        tertiary: None,
+        // Personal: monthly (tertiary) lane pace alongside the weekly lane.
+        tertiary: usage
+            .tertiary
+            .as_ref()
+            .and_then(|window| {
+                UsagePace::weekly(
+                    window,
+                    None,
+                    window
+                        .window_minutes
+                        .unwrap_or(crate::core::MONTHLY_WINDOW_MINUTES),
+                )
+            })
+            .map(|pace| pace_payload(&pace)),
     };
-    (payload.secondary.is_some()).then_some(payload)
+    (payload.secondary.is_some() || payload.tertiary.is_some()).then_some(payload)
 }
 
 /// Upstream `PacePayload` mapping: rounded percents, camelCase stage names.
@@ -491,6 +508,8 @@ fn pace_payload(pace: &UsagePace) -> PacePayload {
         eta_seconds: pace.eta_seconds.map(|eta| eta.round()),
         run_out_probability: None,
         summary: pace.format_status(),
+        elapsed_seconds: pace.elapsed_seconds.round(),
+        resets_in_seconds: pace.resets_in_seconds.round(),
     }
 }
 
