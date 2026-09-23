@@ -55,7 +55,16 @@ Treat deletions on `personal` as deliberate product decisions, not as missing up
 ## Personal Policies That Must Be Preserved
 
 - Frontend toolchain: follow the `main` pins. After the 2026-09-18 sync that is Node.js 24.18.0 and `pnpm@11.25.0` (from `apps/desktop-tauri/package.json`); pnpm 11 requires Node `>=22.13`, so the previous Node 20 gate is no longer viable. Keep upstream dependency and lockfile updates.
-- Release scripts: if `personal` did not modify a script, drop the personal-side line noise and take `main` (or the merged upstream result). Keep personal modifications only where `personal` actually changed behavior. Current sync decision (2026-09-18): `scripts/install-release-prerequisites.ps1` and `scripts/release-pipeline.tests.ps1` take upstream; `package.json` takes upstream `0.56.8` / `pnpm@11.25.0`; `docs/release/ci-cd.md` keeps personal.
+- Release scripts and CI: **`personal` always wins** for scripts
+  (`scripts/**`) and CI configuration (`.github/**`, release/delivery
+  workflows, `docs/release/**`). The personal branch is never merged back into
+  `main`/upstream, so there is no need to track upstream release-script
+  refactors; take upstream script changes only when they also matter for the
+  personal gate (e.g. shared lint/test steps in `scripts/local-check.ps1`).
+  Confirmed by the developer on 2026-09-23. Historical note: the 2026-09-18
+  sync took upstream for `scripts/release-pipeline.tests.ps1`; that decision is
+  reversed — the file follows `personal-release.yml` again. Dependency/toolchain
+  pins (`package.json`, lockfiles) still follow `main`.
 - Antigravity provider internals: follow `main` (`rust/src/providers/antigravity/mod.rs` + `quota_summary.rs` + `tests.rs`). The personal summary-first parser was dropped on 2026-09-18 because `main` also surfaces the Gemini 5h/weekly buckets. Float Bar slot rules stay personal and are unchanged by this.
 - Grok provider internals: follow `main` (`rust/src/providers/grok/{billing,mod,tests}.rs`). The personal `Weekly` metadata fallback label was dropped on 2026-09-18; `main` derives cadence from the full billing cycle and keeps `Credits` as the metadata fallback.
 - Float Bar: three used-percentage slots, per-metric colors, countdowns, and `modelSpecific` as fallback only.

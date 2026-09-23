@@ -171,8 +171,15 @@ $codexProcesses = Get-CimInstance Win32_Process | Where-Object {{
 foreach ($process in $codexProcesses) {{
     if (-not (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) {{ continue }}
     Write-Log ("Stopping Desktop GUI process " + $process.ProcessId)
+    # Killing the first GUI PID often reaps sibling renderer PIDs. taskkill
+    # then prints "process not found"; with $ErrorActionPreference=Stop that
+    # used to abort before session restore, so Switch never reached Desktop.
+    $previousEap = $ErrorActionPreference
+    $ErrorActionPreference = 'SilentlyContinue'
     & taskkill.exe /PID $process.ProcessId /F 2>&1 | Out-Null
-    if ($LASTEXITCODE -ne 0 -and (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) {{
+    $killExit = $LASTEXITCODE
+    $ErrorActionPreference = $previousEap
+    if ($killExit -ne 0 -and (Get-Process -Id $process.ProcessId -ErrorAction SilentlyContinue)) {{
         throw 'Unable to stop Codex Desktop. Session files were left unchanged.'
     }}
 }}
@@ -336,6 +343,7 @@ mod tests {
         assert!(script.contains("Get-CimInstance Win32_Process"));
         assert!(script.contains("Get-AppxPackage"));
         assert!(script.contains("taskkill.exe /PID"));
+        assert!(script.contains("$ErrorActionPreference = 'SilentlyContinue'"));
         assert!(script.contains("$manifest.Package.Applications.Application"));
         assert!(script.contains("$_.ExecutablePath -ieq $launcherPath"));
         assert!(!script.contains("$_.Name -ieq 'Codex.exe'"));

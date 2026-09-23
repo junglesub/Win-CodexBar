@@ -21,10 +21,6 @@ const DEFAULT_BASE_URL: &str = "https://chatgpt.com/backend-api";
 const USAGE_PATH: &str = "/wham/usage";
 const RESET_CREDITS_PATH: &str = "/wham/rate-limit-reset-credits";
 const CREDENTIAL_CACHE_TTL: Duration = Duration::from_secs(5);
-/// How long an external OAuth token set is trusted after the CLI last
-/// refreshed it. Matches the CLI's own `needs_refresh` window (8 days) so a
-/// token the CLI considers fresh is also trusted here (upstream 0.50.1 #2944).
-const EXTERNAL_OAUTH_STALENESS_WINDOW: chrono::TimeDelta = chrono::Duration::days(8);
 const EXTERNAL_OAUTH_REFRESH_WINDOW: chrono::TimeDelta = chrono::Duration::minutes(5);
 
 static CREDENTIAL_CACHE: OnceLock<Mutex<Option<CachedCodexCredentials>>> = OnceLock::new();
@@ -79,11 +75,15 @@ impl CodexApi {
     pub(super) async fn fetch_usage_pat(
         &self,
         cli_version: Option<&str>,
-    ) -> Result<(UsageSnapshot, Option<CostSnapshot>), ProviderError> {
+    ) -> Result<(UsageSnapshot, Option<CostSnapshot>, Option<String>), ProviderError> {
         let token = pat::load_token(&self.get_auth_path())?;
         let (json, whoami) =
             pat::fetch_usage(&self.client, &self.resolve_base_url(), &token, cli_version).await?;
         let account_id = whoami.account_id.clone();
+        // Email is display metadata, not a stable credential/account binding.
+        // A PAT without the provider's account id must fail closed for any
+        // operation that could reopen a local session.
+        let account_identity = account_id.clone();
         let (mut usage, cost) = self.build_result_from_json(&json)?;
         if let Some(email) = whoami.email {
             usage = usage.with_email(email);
@@ -101,7 +101,7 @@ impl CodexApi {
                 usage,
             )
             .await;
-        Ok((usage, cost))
+        Ok((usage, cost, account_identity))
     }
 
     /// Fetch usage information from Codex API.
@@ -112,7 +112,7 @@ impl CodexApi {
     /// only. The app never redeems or decrements credits on observation.
     pub async fn fetch_usage(
         &self,
-    ) -> Result<(UsageSnapshot, Option<CostSnapshot>), ProviderError> {
+    ) -> Result<(UsageSnapshot, Option<CostSnapshot>, Option<String>), ProviderError> {
         let creds = self.load_credentials()?;
         let base_url = self.resolve_base_url();
         let auth_path = self.get_auth_path();
@@ -166,7 +166,7 @@ impl CodexApi {
                                     usage,
                                 )
                                 .await;
-                            return Ok((usage, cost));
+                            return Ok((usage, cost, creds.account_id.clone()));
                         }
                     };
                 let confirmation_inventory =
@@ -205,7 +205,7 @@ impl CodexApi {
                 usage,
             )
             .await;
-        Ok((usage, cost))
+        Ok((usage, cost, creds.account_id.clone()))
     }
 
     /// Subscription metadata is optional enrichment. Usage remains usable when
@@ -383,8 +383,8 @@ impl CodexApi {
             .map(|s| s.to_string());
 
         // Upstream 0.50.1 #2944: an OAuth token set with a refresh_token is an
-        // external (CLI-owned) OAuth source. The `last_refresh` timestamp
-        // (written by the CLI) lets us detect staleness.
+        // external (CLI-owned) OAuth source. The `last_refresh` timestamp is
+        // retained only as provenance for the opt-in safety gate.
         let has_refresh_token = tokens
             .get("refresh_token")
             .and_then(|v| v.as_str())
@@ -406,11 +406,13 @@ impl CodexApi {
     }
 
     /// Upstream 0.50.1 #2944: when `codex_external_oauth_sources_allowed` is
-    /// OFF (the default), stale external OAuth credential files fail closed
-    /// instead of being used silently. An external OAuth source is an
-    /// auth.json `tokens` object with a `refresh_token` (CLI-owned OAuth,
-    /// not an API key). "Stale" means the CLI has not refreshed the token
-    /// recently (no `last_refresh`, or older than the staleness window).
+    /// OFF (the default), external OAuth credential files without refresh
+    /// provenance fail closed instead of being used silently. An external
+    /// OAuth source is an auth.json `tokens` object with a `refresh_token`
+    /// (CLI-owned OAuth, not an API key). Win-CodexBar never refreshes or
+    /// writes this source: the gate only decides whether the read-only usage
+    /// request may use it. When the access token is a JWT, its native expiry
+    /// is the validity authority; opaque tokens are sent to the server.
     fn enforce_external_oauth_gate(credentials: &CodexCredentials) -> Result<(), ProviderError> {
         Self::enforce_external_oauth_gate_at(
             credentials,
@@ -427,13 +429,8 @@ impl CodexApi {
         if !credentials.is_external_oauth {
             return Ok(());
         }
-        if !external_sources_allowed {
-            let is_stale = credentials
-                .last_refresh
-                .is_none_or(|last| now - last > EXTERNAL_OAUTH_STALENESS_WINDOW);
-            if is_stale {
-                return Err(ProviderError::AuthRequired);
-            }
+        if !external_sources_allowed && credentials.last_refresh.is_none() {
+            return Err(ProviderError::AuthRequired);
         }
         if let Some(expires_at) = credentials.access_token_expires_at
             && expires_at - now <= EXTERNAL_OAUTH_REFRESH_WINDOW
@@ -524,7 +521,8 @@ impl CodexApi {
             .map(|s| s.to_string());
 
         // Extract rate limit info - handle multiple possible structures
-        let (primary, secondary, monthly, code_review) = self.extract_rate_limits(json);
+        let (primary, secondary, monthly, code_review, code_review_verified) =
+            self.extract_rate_limits(json);
 
         // Build login method string
         let login_method = plan_type.as_deref().map(format_plan_type);
@@ -539,7 +537,11 @@ impl CodexApi {
             usage = usage.with_tertiary(mo);
         }
         if let Some(cr) = code_review {
-            usage = usage.with_model_specific(cr);
+            usage = if code_review_verified {
+                usage.with_code_review(cr)
+            } else {
+                usage.with_model_specific(cr)
+            };
         }
         for extra in self.extract_additional_rate_limits(json) {
             usage.extra_rate_windows.push(extra);
@@ -554,6 +556,14 @@ impl CodexApi {
         Ok((usage, cost))
     }
 
+    #[cfg(test)]
+    pub(crate) fn build_result_from_json_for_test(
+        &self,
+        json: &serde_json::Value,
+    ) -> Result<(UsageSnapshot, Option<CostSnapshot>), ProviderError> {
+        self.build_result_from_json(json)
+    }
+
     fn extract_rate_limits(
         &self,
         json: &serde_json::Value,
@@ -562,6 +572,7 @@ impl CodexApi {
         Option<RateWindow>,
         Option<RateWindow>,
         Option<RateWindow>,
+        bool,
     ) {
         // Try rate_limit object
         if let Some(rate_limit) = json.get("rate_limit") {
@@ -581,7 +592,8 @@ impl CodexApi {
 
             // F5 (upstream 0.48.0): named windows carry only session/weekly/code_review.
             // Monthly is extracted separately (from array windows) — return None here.
-            return (primary, secondary, None, code_review);
+            let code_review_verified = code_review.is_some();
+            return (primary, secondary, None, code_review, code_review_verified);
         }
 
         // Try rate_limits array
@@ -607,6 +619,7 @@ impl CodexApi {
                 usage.secondary,
                 usage.tertiary,
                 usage.model_specific,
+                false,
             );
         }
 
@@ -614,18 +627,18 @@ impl CodexApi {
         let used_percent = json
             .get("used_percent")
             .or_else(|| json.get("usage_percent"))
-            .and_then(|v| v.as_f64())
-            .unwrap_or(0.0);
+            .and_then(json_f64);
+        let primary = RateWindow::new(used_percent.unwrap_or(0.0))
+            .with_usage_known(valid_used_percent(used_percent));
 
-        (RateWindow::new(used_percent), None, None, None)
+        (primary, None, None, None, false)
     }
 
     fn parse_window(&self, window: &serde_json::Value) -> RateWindow {
         let used_percent = window
             .get("used_percent")
             .or_else(|| window.get("usage_percent"))
-            .and_then(json_f64)
-            .unwrap_or(0.0);
+            .and_then(json_f64);
 
         let window_minutes = window
             .get("limit_window_seconds")
@@ -638,11 +651,12 @@ impl CodexApi {
             .and_then(|ts| Utc.timestamp_opt(ts, 0).single());
 
         RateWindow::with_details(
-            used_percent,
+            used_percent.unwrap_or(0.0),
             window_minutes,
             reset_at,
             format_reset_countdown(reset_at),
         )
+        .with_usage_known(valid_used_percent(used_percent))
     }
 
     fn parse_window_if_present(&self, window: &serde_json::Value) -> Option<RateWindow> {
@@ -783,7 +797,7 @@ impl CodexApi {
             usage = usage.with_secondary(sec);
         }
         if let Some(cr) = code_review {
-            usage = usage.with_model_specific(cr);
+            usage = usage.with_code_review(cr);
         }
         if let Some(method) = login_method {
             usage = usage.with_login_method(method);
@@ -931,14 +945,16 @@ fn normalize_array_windows(
 
 fn rate_window_from_snapshot(window: &WindowSnapshot) -> RateWindow {
     let reset_at = timestamp_to_datetime(window.reset_at);
+    let used_percent = f64::from(window.used_percent);
     RateWindow::with_details(
-        window.used_percent as f64,
+        used_percent,
         window
             .limit_window_seconds
             .and_then(|seconds| u32::try_from(seconds / 60).ok()),
         reset_at,
         format_reset_countdown(reset_at),
     )
+    .with_usage_known(valid_used_percent(Some(used_percent)))
 }
 
 fn format_plan_type(plan_type: &str) -> String {
@@ -973,15 +989,17 @@ struct CodexCredentials {
     access_token: String,
     account_id: Option<String>,
     /// True when the source is an external OAuth token set (has a
-    /// `refresh_token`), as opposed to an `OPENAI_API_KEY`. Used by the
-    /// `codex_external_oauth_sources_allowed` gate (upstream 0.50.1 #2944).
+    /// `refresh_token`), as opposed to an `OPENAI_API_KEY`. The Codex CLI owns
+    /// refresh and persistence for this source; this app only reads it. The
+    /// `codex_external_oauth_sources_allowed` setting gates that read
+    /// (upstream 0.50.1 #2944).
     is_external_oauth: bool,
     /// Native access-token JWT expiry. When available, this is authoritative
-    /// for refresh scheduling; the CLI still owns the refresh lifecycle.
+    /// for validity; the Codex CLI still owns the refresh lifecycle.
     access_token_expires_at: Option<DateTime<Utc>>,
-    /// `last_refresh` timestamp from auth.json, when present. Used to detect
-    /// stale external OAuth tokens that should fail closed when the opt-in
-    /// setting is OFF.
+    /// `last_refresh` timestamp from auth.json, when present. Its presence
+    /// supplies provenance when the external-source opt-in setting is OFF;
+    /// its age is not an access-token expiry signal.
     last_refresh: Option<DateTime<Utc>>,
 }
 
@@ -1135,8 +1153,8 @@ fn timestamp_to_datetime(timestamp: Option<i64>) -> Option<DateTime<Utc>> {
     timestamp.and_then(|ts| Utc.timestamp_opt(ts, 0).single())
 }
 
-/// Parse an ISO-8601 / RFC-3339 timestamp from the `last_refresh` field of
-/// auth.json. Accepts the same formats the Codex CLI writes.
+/// Parse the native `exp` claim from an access-token JWT. Opaque or malformed
+/// tokens return `None` and are handled by the read-only usage request.
 fn parse_access_token_expiry(token: &str) -> Option<DateTime<Utc>> {
     let payload = token.split('.').nth(1)?;
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -1173,6 +1191,10 @@ fn json_i64(value: &serde_json::Value) -> Option<i64> {
     value
         .as_i64()
         .or_else(|| value.as_str()?.trim().parse::<i64>().ok())
+}
+
+fn valid_used_percent(value: Option<f64>) -> bool {
+    value.is_some_and(|value| value.is_finite() && (0.0..=100.0).contains(&value))
 }
 
 fn is_placeholder_window(window: &serde_json::Value) -> bool {
@@ -1562,7 +1584,7 @@ mod tests {
 
         let home = write_codex_home(&server.url());
         let api = CodexApi::new().with_codex_home(home.path());
-        let (usage, _) = api.fetch_usage().await.expect("fetch_usage");
+        let (usage, _, _) = api.fetch_usage().await.expect("fetch_usage");
 
         usage_mock.assert_async().await;
         reset_mock.assert_async().await;
@@ -1615,6 +1637,51 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn old_opaque_external_oauth_reaches_usage_request() {
+        let mut server = mockito::Server::new_async().await;
+        let usage_mock = server
+            .mock("GET", "/wham/usage")
+            .match_header("authorization", "Bearer opaque-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{"plan_type":"plus","rate_limit":{"primary_window":{"used_percent":10,"limit_window_seconds":18000}}}"#,
+            )
+            .create_async()
+            .await;
+        let reset_mock = server
+            .mock("GET", "/wham/rate-limit-reset-credits")
+            .match_header("authorization", "Bearer opaque-token")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(r#"{"available_count":0,"credits":[]}"#)
+            .create_async()
+            .await;
+
+        let creds = CodexApi::parse_credentials_json(
+            r#"{
+                "tokens": {
+                    "access_token": "opaque-token",
+                    "refresh_token": "refresh",
+                    "account_id": "acct_test"
+                },
+                "last_refresh": "2026-01-01T00:00:00Z"
+            }"#,
+        )
+        .expect("credentials");
+        assert!(CodexApi::enforce_external_oauth_gate_at(&creds, false, Utc::now()).is_ok());
+
+        let api = CodexApi::new();
+        let (usage, _, _) = api
+            .fetch_usage_once(&creds, &server.url())
+            .await
+            .expect("opaque OAuth usage request");
+        assert_eq!(usage.primary.used_percent, 10.0);
+        usage_mock.assert_async().await;
+        reset_mock.assert_async().await;
+    }
+
+    #[tokio::test]
     async fn fetch_usage_skips_reset_credits_when_available_count_zero() {
         let mut server = mockito::Server::new_async().await;
 
@@ -1638,7 +1705,7 @@ mod tests {
 
         let home = write_codex_home(&server.url());
         let api = CodexApi::new().with_codex_home(home.path());
-        let (usage, _) = api.fetch_usage().await.expect("fetch_usage");
+        let (usage, _, _) = api.fetch_usage().await.expect("fetch_usage");
 
         usage_mock.assert_async().await;
         reset_mock.assert_async().await;
@@ -1941,7 +2008,7 @@ mod tests {
     }
 
     #[test]
-    fn external_oauth_gate_fails_closed_for_stale_tokens() {
+    fn external_oauth_gate_fails_closed_without_last_refresh() {
         let creds = CodexCredentials {
             access_token: "access".to_string(),
             account_id: None,
@@ -1950,12 +2017,12 @@ mod tests {
             last_refresh: None,
         };
         let err = CodexApi::enforce_external_oauth_gate(&creds)
-            .expect_err("stale external OAuth must fail closed");
+            .expect_err("external OAuth without provenance must fail closed");
         assert!(matches!(err, ProviderError::AuthRequired));
     }
 
     #[test]
-    fn external_oauth_gate_fails_closed_for_old_last_refresh() {
+    fn external_oauth_gate_ignores_old_last_refresh_for_opaque_token() {
         let old = Utc::now() - chrono::Duration::days(10);
         let creds = CodexCredentials {
             access_token: "access".to_string(),
@@ -1964,13 +2031,11 @@ mod tests {
             access_token_expires_at: None,
             last_refresh: Some(old),
         };
-        let err = CodexApi::enforce_external_oauth_gate(&creds)
-            .expect_err("old external OAuth must fail closed");
-        assert!(matches!(err, ProviderError::AuthRequired));
+        assert!(CodexApi::enforce_external_oauth_gate(&creds).is_ok());
     }
 
     #[test]
-    fn external_oauth_gate_passes_fresh_tokens() {
+    fn external_oauth_gate_allows_refresh_provenance() {
         let fresh = Utc::now() - chrono::Duration::hours(1);
         let creds = CodexCredentials {
             access_token: "access".to_string(),
@@ -1983,7 +2048,7 @@ mod tests {
     }
 
     #[test]
-    fn external_oauth_staleness_gate_precedes_future_jwt_expiry() {
+    fn external_oauth_gate_uses_future_jwt_expiry_over_old_last_refresh() {
         let now = Utc::now();
         let future = now + chrono::Duration::hours(2);
         let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
@@ -1994,10 +2059,24 @@ mod tests {
         );
         let creds = CodexApi::parse_credentials_json(&json).expect("credentials");
         assert!(creds.access_token_expires_at.is_some());
-        let err = CodexApi::enforce_external_oauth_gate_at(&creds, false, now)
-            .expect_err("stale external OAuth must not be revived by JWT expiry");
-        assert!(matches!(err, ProviderError::AuthRequired));
+        assert!(CodexApi::enforce_external_oauth_gate_at(&creds, false, now).is_ok());
         assert!(CodexApi::enforce_external_oauth_gate_at(&creds, true, now).is_ok());
+    }
+
+    #[test]
+    fn external_oauth_gate_rejects_expired_jwt() {
+        let expired = Utc::now() - chrono::Duration::minutes(1);
+        let payload = base64::engine::general_purpose::URL_SAFE_NO_PAD
+            .encode(format!(r#"{{"exp":{}}}"#, expired.timestamp()));
+        let token = format!("header.{payload}.signature");
+        let json = format!(
+            r#"{{"tokens":{{"access_token":"{token}","refresh_token":"refresh"}},"last_refresh":"{}"}}"#,
+            Utc::now().to_rfc3339()
+        );
+        let creds = CodexApi::parse_credentials_json(&json).expect("credentials");
+        let err = CodexApi::enforce_external_oauth_gate(&creds)
+            .expect_err("expired native OAuth must be rejected");
+        assert!(matches!(err, ProviderError::AuthRequired));
     }
 
     #[test]
@@ -2017,7 +2096,19 @@ mod tests {
     }
 
     #[test]
-    fn malformed_or_opaque_jwt_falls_back_to_last_refresh() {
+    fn external_oauth_gate_allows_missing_last_refresh_when_opted_in() {
+        let creds = CodexCredentials {
+            access_token: "opaque-token".to_string(),
+            account_id: None,
+            is_external_oauth: true,
+            access_token_expires_at: None,
+            last_refresh: None,
+        };
+        assert!(CodexApi::enforce_external_oauth_gate_at(&creds, true, Utc::now()).is_ok());
+    }
+
+    #[test]
+    fn opaque_token_uses_refresh_provenance_when_no_jwt_expiry_exists() {
         let fresh = Utc::now().to_rfc3339();
         let json = format!(
             r#"{{"tokens":{{"access_token":"opaque-token","refresh_token":"refresh"}},"last_refresh":"{fresh}"}}"#

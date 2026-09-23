@@ -3,6 +3,7 @@
 use std::time::Duration;
 
 mod auto_refresh;
+mod auto_resume;
 mod coding_activity;
 mod commands;
 mod events;
@@ -183,8 +184,16 @@ fn main() {
             commands::claude_account_save_current,
             commands::claude_account_remove,
             commands::claude_account_switch,
+            commands::grok_accounts_list,
+            commands::grok_account_add,
+            commands::grok_account_cancel_login,
+            commands::grok_account_save_current,
+            commands::grok_account_remove,
+            commands::grok_account_switch,
+            commands::grok_account_fetch,
             commands::claude_swap_accounts_list,
             commands::claude_swap_account_switch,
+            commands::claude_swap_account_reauthenticate,
             commands::codex_account_add,
             commands::codex_account_reauthenticate,
             commands::codex_account_remove,
@@ -225,9 +234,12 @@ fn main() {
             commands::reorder_providers,
             commands::set_provider_cookie_source,
             commands::set_provider_usage_source,
+            commands::set_provider_auto_resume_after_quota_reset,
             commands::has_openrouter_management_api_key,
             commands::set_openrouter_management_api_key,
             commands::remove_openrouter_management_api_key,
+            commands::get_provider_azure_api_version,
+            commands::set_provider_azure_api_version,
             commands::get_provider_cookie_source_options,
             commands::set_provider_region,
             commands::get_provider_region_options,

@@ -53,6 +53,7 @@ impl OllamaProvider {
                 is_primary: false,
                 dashboard_url: Some("https://ollama.com/settings"),
                 status_page_url: None,
+                tertiary_label_key: None,
             },
         }
     }
@@ -380,10 +381,12 @@ impl Provider for OllamaProvider {
 
         match ctx.source_mode {
             SourceMode::Auto => {
-                if Self::has_api_key(ctx)
-                    && let Ok(usage) = self.fetch_usage_api(ctx).await
-                {
-                    return Ok(ProviderFetchResult::new(usage, "api"));
+                if Self::has_api_key(ctx) {
+                    match self.fetch_usage_api(ctx).await {
+                        Ok(usage) => return Ok(ProviderFetchResult::new(usage, "api")),
+                        Err(error) if error.is_transport_failure() => return Err(error),
+                        Err(_) => {}
+                    }
                 }
                 let usage = self.fetch_usage_web(ctx).await?;
                 Ok(ProviderFetchResult::new(usage, "web"))
@@ -408,6 +411,10 @@ impl Provider for OllamaProvider {
 
     fn supports_cli(&self) -> bool {
         false
+    }
+
+    fn retains_last_good_on_transport_failure(&self) -> bool {
+        true
     }
 }
 
@@ -564,6 +571,7 @@ fn ollama_api_key_error() -> ProviderError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::core::LastGoodFailurePolicy;
 
     #[tokio::test]
     async fn settings_fetch_follows_same_origin_redirects() {
@@ -837,6 +845,21 @@ mod tests {
         assert_eq!(
             ollama_session_action(true, false, true),
             OllamaSessionAction::ReimportBrowser
+        );
+    }
+
+    #[test]
+    fn transport_policy_replaces_free_form_wrappers() {
+        let provider = OllamaProvider::new();
+        assert_eq!(
+            provider.last_good_failure_policy_for_error(&ProviderError::Timeout),
+            LastGoodFailurePolicy::Preserve
+        );
+        assert_eq!(
+            provider.last_good_failure_policy_for_error(&ProviderError::Other(
+                "Network error: arbitrary wrapper".to_string(),
+            )),
+            LastGoodFailurePolicy::Replace
         );
     }
 }

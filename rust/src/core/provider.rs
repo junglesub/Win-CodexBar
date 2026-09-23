@@ -550,6 +550,10 @@ pub struct ProviderMetadata {
     pub is_primary: bool,
     pub dashboard_url: Option<&'static str>,
     pub status_page_url: Option<&'static str>,
+    /// Locale key shown for the provider's tertiary metric lane in settings
+    /// pickers when the lane carries a semantic identity beyond "Tertiary"
+    /// (upstream F5). `None` renders the generic tertiary label.
+    pub tertiary_label_key: Option<&'static str>,
 }
 
 /// Errors that can occur when fetching provider data
@@ -563,6 +567,9 @@ pub enum ProviderError {
 
     #[error("OAuth error: {0}")]
     OAuth(String),
+
+    #[error("Transient OAuth error: {0}")]
+    OAuthTransient(String),
 
     #[error("OAuth session expired: {0}")]
     OAuthExpired(String),
@@ -589,6 +596,79 @@ pub enum ProviderError {
     Other(String),
 }
 
+impl ProviderError {
+    /// Return true only for transport failures safe for last-good retention.
+    pub fn is_transport_failure(&self) -> bool {
+        match self {
+            ProviderError::Network(error) => matches!(
+                classify_reqwest_error(error),
+                ReqwestFailureClass::Timeout | ReqwestFailureClass::Connect
+            ),
+            ProviderError::Timeout => true,
+            _ => false,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum ReqwestFailureClass {
+    Timeout,
+    Connect,
+    Terminal,
+}
+
+fn classify_reqwest_error(error: &reqwest::Error) -> ReqwestFailureClass {
+    // A response-body failure can also carry the timeout flag when the peer
+    // stalls while the body is being read. It is terminal for the snapshot,
+    // because retaining last-good data would hide a truncated response.
+    if error.is_body() || error.is_decode() {
+        return ReqwestFailureClass::Terminal;
+    }
+    if error.is_timeout() {
+        return ReqwestFailureClass::Timeout;
+    }
+    if !error.is_connect() {
+        return ReqwestFailureClass::Terminal;
+    }
+
+    // A connect classification alone is too broad: it also covers protocol
+    // and TLS-handshake failures. Retain only a typed transient socket error.
+    if has_io_error_kind(error, std::io::ErrorKind::ConnectionRefused) {
+        return ReqwestFailureClass::Connect;
+    }
+
+    ReqwestFailureClass::Terminal
+}
+
+fn has_io_error_kind(error: &reqwest::Error, kind: std::io::ErrorKind) -> bool {
+    fn contains_kind(
+        source: Option<&(dyn std::error::Error + 'static)>,
+        kind: std::io::ErrorKind,
+    ) -> bool {
+        let Some(current) = source else {
+            return false;
+        };
+        if let Some(io_error) = current.downcast_ref::<std::io::Error>() {
+            if io_error.kind() == kind {
+                return true;
+            }
+            let mut nested = io_error.get_ref();
+            while let Some(inner) = nested {
+                let Some(inner_io) = inner.downcast_ref::<std::io::Error>() else {
+                    break;
+                };
+                if inner_io.kind() == kind {
+                    return true;
+                }
+                nested = inner_io.get_ref();
+            }
+        }
+        contains_kind(std::error::Error::source(current), kind)
+    }
+
+    contains_kind(std::error::Error::source(error), kind)
+}
+
 /// Context passed to provider fetch operations
 #[derive(Debug, Clone)]
 pub struct FetchContext {
@@ -612,6 +692,10 @@ pub struct FetchContext {
 
     /// Optional provider workspace/project scope from persisted settings.
     pub workspace_id: Option<String>,
+
+    /// Optional Copilot seat AI-credit allowance supplied by the app settings.
+    /// The provider keeps the credit counter unknown when this is absent.
+    pub seat_credit_entitlement: Option<f64>,
 
     /// Optional provider API/web region from persisted settings.
     pub api_region: Option<String>,
@@ -641,6 +725,7 @@ impl Default for FetchContext {
             manual_cookie_header: None,
             api_key: None,
             workspace_id: None,
+            seat_credit_entitlement: None,
             api_region: None,
             gateway_url: None,
             auto_prefer_web: false,
@@ -705,6 +790,23 @@ pub trait Provider: Send + Sync {
         true
     }
 
+    /// Whether an explicit (non-Automatic) metric preference whose lane is
+    /// unavailable should still fall through to Automatic selection. Providers
+    /// with Automatic-only fallback lanes (seat credits) override this to
+    /// `false` so an explicit choice is never silently replaced by fallback
+    /// progress.
+    fn explicit_preference_falls_through_to_automatic(&self) -> bool {
+        true
+    }
+
+    /// Whether Automatic metric selection is a dead end when the primary lane
+    /// is informational and no secondary lane exists. Providers with
+    /// Automatic-only fallback lanes (seat credits) override this to `false`
+    /// so the fallback lane can still fill in.
+    fn automatic_metric_missing_core_is_terminal(&self) -> bool {
+        true
+    }
+
     /// Whether browser-cookie discovery/recovery is owned by the provider.
     fn owns_browser_cookie_resolution(&self) -> bool {
         false
@@ -713,6 +815,27 @@ pub trait Provider: Send + Sync {
     /// How the shell should treat a failed refresh when a prior good snapshot exists.
     fn last_good_failure_policy(&self, _error: &str) -> LastGoodFailurePolicy {
         LastGoodFailurePolicy::Replace
+    }
+
+    /// Whether this provider can safely retain its last good snapshot on a
+    /// classified transport failure.
+    fn retains_last_good_on_transport_failure(&self) -> bool {
+        false
+    }
+
+    /// Typed variant used before an error is sanitized for the frontend.
+    ///
+    /// Providers that need message-based distinctions can keep overriding the
+    /// string method. Transport retention is selected by the provider
+    /// capability and the typed error classification above.
+    fn last_good_failure_policy_for_error(&self, error: &ProviderError) -> LastGoodFailurePolicy {
+        if matches!(error, ProviderError::OAuthTransient(_)) {
+            return LastGoodFailurePolicy::Preserve;
+        }
+        if self.retains_last_good_on_transport_failure() && error.is_transport_failure() {
+            return LastGoodFailurePolicy::Preserve;
+        }
+        self.last_good_failure_policy(&error.to_string())
     }
 
     /// Presentation-safe availability state for a refresh error. The default
@@ -881,6 +1004,10 @@ pub fn brand_color(id: ProviderId) -> &'static str {
         ProviderId::Meta => "#0467DF",
     }
 }
+
+#[cfg(test)]
+#[path = "provider_transport_tests.rs"]
+mod transport_tests;
 
 #[cfg(test)]
 mod tests {

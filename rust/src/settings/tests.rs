@@ -26,6 +26,8 @@ fn test_settings_default() {
     assert!(!settings.float_bar_follow_provider_order);
     assert!(!settings.predictive_pace_warning_enabled);
     assert!(!settings.float_bar_show_cost);
+    assert!(!settings.tray_panel_always_on_top);
+    assert_eq!(settings.overview_layout, "compact");
     assert!(settings.promote_tray_icon);
     assert!(settings.claude_daily_routines_usage_visible);
     assert!(!settings.claude_allow_reading_claude_code_credentials);
@@ -132,6 +134,44 @@ fn test_float_bar_battery_slots_serde_default_and_round_trip() {
         round_tripped.float_bar_battery_slots,
         ["5h", "fallback", "unknown"]
     );
+}
+
+#[test]
+fn overview_layout_defaults_to_compact_and_round_trips() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing overview layout defaults to compact");
+    assert_eq!(defaulted.overview_layout, "compact");
+
+    let compact = Settings {
+        overview_layout: "compact".to_string(),
+        ..Settings::default()
+    };
+    let json = serde_json::to_string(&compact).expect("serialize overview layout");
+    let loaded: Settings = serde_json::from_str(&json).expect("deserialize overview layout");
+    assert_eq!(loaded.overview_layout, "compact");
+
+    let unknown: Settings =
+        serde_json::from_str(r#"{ "enabled_providers": [], "overview_layout": "unsupported" }"#)
+            .expect("unknown overview layout is accepted and normalized");
+    assert_eq!(unknown.overview_layout, "compact");
+}
+
+#[test]
+fn tray_panel_always_on_top_defaults_off_and_round_trips() {
+    let defaulted: Settings = serde_json::from_str(r#"{ "enabled_providers": [] }"#)
+        .expect("missing tray panel topmost field defaults off");
+    assert!(!defaulted.tray_panel_always_on_top);
+
+    let enabled = Settings {
+        tray_panel_always_on_top: true,
+        ..Settings::default()
+    };
+    let json = serde_json::to_string(&enabled).expect("serialize tray panel topmost setting");
+    assert!(json.contains(r#""tray_panel_always_on_top":true"#));
+
+    let loaded: Settings =
+        serde_json::from_str(&json).expect("deserialize tray panel topmost setting");
+    assert!(loaded.tray_panel_always_on_top);
 }
 
 #[test]
@@ -1050,6 +1090,10 @@ fn test_provider_configs_roundtrip() {
     settings.set_openai_web_extras(ProviderId::Codex, false);
     settings.set_historical_tracking(ProviderId::Codex, true);
     settings.set_avoid_keychain_prompts(ProviderId::Claude, true);
+    settings.set_auto_resume_after_quota_reset(ProviderId::Codex, true);
+    settings
+        .set_seat_credit_entitlement(ProviderId::Copilot, Some(300.0))
+        .expect("valid seat credit entitlement");
 
     let json = serde_json::to_string(&settings).unwrap();
     // The legacy flat fields must NOT appear in serialized output.
@@ -1077,6 +1121,11 @@ fn test_provider_configs_roundtrip() {
     assert!(!loaded.openai_web_extras(ProviderId::Codex));
     assert!(loaded.historical_tracking(ProviderId::Codex));
     assert!(loaded.avoid_keychain_prompts(ProviderId::Claude));
+    assert!(loaded.auto_resume_after_quota_reset(ProviderId::Codex));
+    assert_eq!(
+        loaded.seat_credit_entitlement(ProviderId::Copilot),
+        Some(300.0)
+    );
     assert_eq!(
         loaded.provider_configs.get(&ProviderId::Codex),
         settings.provider_configs.get(&ProviderId::Codex)
@@ -1133,6 +1182,8 @@ fn test_per_provider_defaults_applied() {
     assert!(settings.openai_web_extras(ProviderId::Codex));
     assert!(!settings.historical_tracking(ProviderId::Codex));
     assert!(!settings.avoid_keychain_prompts(ProviderId::Claude));
+    assert!(!settings.auto_resume_after_quota_reset(ProviderId::Codex));
+    assert!(!settings.auto_resume_after_quota_reset(ProviderId::Claude));
 }
 
 #[test]

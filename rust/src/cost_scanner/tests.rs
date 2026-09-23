@@ -1,4 +1,5 @@
 use super::*;
+use crate::core::{CodexSessionLineage, CostUsagePricing};
 use std::io::Write;
 
 #[test]
@@ -73,6 +74,26 @@ fn claude_scan_pricing_resolver_preserves_tiered_and_cache_ttl_pricing() {
         );
         assert!((actual - expected).abs() < f64::EPSILON, "{model}");
     }
+}
+
+#[test]
+fn claude_scan_resolver_applies_gpt_proxy_long_context_boundary() {
+    let snapshot = crate::core::ModelsDevPricingSnapshot::from_catalog_json_for_tests(
+        r#"{
+            "openai": {"models": {"gpt-5.6-sol": {"id": "gpt-5.6-sol", "cost": {
+                "input": 2, "output": 4, "cache_read": 0.25, "cache_write": 3,
+                "context_over_200k": {"input": 7, "output": 11, "cache_read": 0.5, "cache_write": 9}
+            }}}}
+        }"#,
+    )
+    .expect("pricing fixture");
+    let mut resolver = ClaudeScanPricingResolver::with_snapshot(snapshot);
+
+    let short = resolver.cost_usd_with_cache_ttl("gpt-5.6-sol", 262_000, 0, 0, 10_000, 13);
+    let long = resolver.cost_usd_with_cache_ttl("gpt-5.6-sol", 262_001, 0, 0, 10_000, 13);
+
+    assert!((short - 0.526552).abs() < 1e-12);
+    assert!((long - 1.83915).abs() < 1e-12);
 }
 
 #[test]
@@ -263,18 +284,100 @@ fn scans_gpt6_astra_usage_with_cached_and_reasoning_tokens() {
 #[test]
 fn derives_claude_dedup_key_from_message_and_request_ids() {
     assert_eq!(
-        claude_usage_dedup_key(Some("msg_1"), Some("req_1")).as_deref(),
-        Some("msg_1:req_1")
+        claude_usage_dedup_key(Some("msg_1"), Some("req_1"), None),
+        Some(ClaudeUsageDedupKey::Request {
+            message_id: Some("msg_1".to_string()),
+            request_id: "req_1".to_string(),
+        })
     );
     assert_eq!(
-        claude_usage_dedup_key(Some("msg_1"), None).as_deref(),
-        Some("message:msg_1")
+        claude_usage_dedup_key(None, Some(" req_1 "), None),
+        Some(ClaudeUsageDedupKey::Request {
+            message_id: None,
+            request_id: "req_1".to_string(),
+        })
     );
     assert_eq!(
-        claude_usage_dedup_key(None, Some("req_1")).as_deref(),
-        Some("request:req_1")
+        claude_usage_dedup_key(Some("msg_1"), None, Some("session_1")),
+        Some(ClaudeUsageDedupKey::Session {
+            session_id: "session_1".to_string(),
+            message_id: "msg_1".to_string(),
+        })
     );
-    assert_eq!(claude_usage_dedup_key(None, None), None);
+    assert_eq!(claude_usage_dedup_key(Some("msg_1"), None, None), None);
+    assert_eq!(
+        claude_usage_dedup_key(None, Some("req_1"), Some("session_1")),
+        Some(ClaudeUsageDedupKey::Request {
+            message_id: None,
+            request_id: "req_1".to_string(),
+        })
+    );
+    assert_eq!(
+        claude_usage_dedup_key(Some("msg_1"), Some(" "), Some("session_1")),
+        Some(ClaudeUsageDedupKey::Session {
+            session_id: "session_1".to_string(),
+            message_id: "msg_1".to_string(),
+        })
+    );
+    assert_eq!(
+        claude_usage_dedup_key(Some(" "), None, Some("session_1")),
+        None
+    );
+    assert_eq!(claude_usage_dedup_key(Some("msg_1"), None, Some(" ")), None);
+}
+
+#[test]
+fn session_id_falls_back_from_blank_direct_id_to_metadata() {
+    let event: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","sessionId":"  ","metadata":{"session_id":" metadata-session "},"message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(event.session_id(), Some("metadata-session"));
+}
+
+#[test]
+fn session_id_falls_back_from_blank_direct_and_metadata_ids_to_nested_metadata() {
+    let event: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","sessionId":" ","metadata":{"sessionId":"\t","metadata":{"session_id":" nested-session "}},"message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}"#,
+    )
+    .unwrap();
+
+    assert_eq!(event.session_id(), Some("nested-session"));
+}
+
+#[test]
+fn session_aware_claude_dedup_keeps_distinct_sessions_separate() {
+    let first: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","sessionId":"session_a","message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}"#,
+    )
+    .unwrap();
+    let second: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","sessionId":"session_b","message":{"id":"msg_1","model":"claude-sonnet-4-6","usage":{"input_tokens":10}}}"#,
+    )
+    .unwrap();
+    let first_record = claude_usage_record_from_event(&first).expect("first usage record");
+    let second_record = claude_usage_record_from_event(&second).expect("second usage record");
+    let cutoff = DateTime::parse_from_rfc3339("2026-01-01T00:00:00Z")
+        .unwrap()
+        .with_timezone(&Utc);
+    let mut seen = HashSet::new();
+
+    assert!(should_count_claude_record(
+        &first_record,
+        &cutoff,
+        &mut seen
+    ));
+    assert!(should_count_claude_record(
+        &second_record,
+        &cutoff,
+        &mut seen
+    ));
+    assert!(!should_count_claude_record(
+        &first_record,
+        &cutoff,
+        &mut seen
+    ));
 }
 
 #[test]
@@ -329,6 +432,67 @@ fn ignores_claude_events_without_countable_usage() {
     )
     .unwrap();
     assert!(claude_usage_record_from_event(&event).is_none());
+}
+
+#[test]
+fn excludes_preliminary_proxy_estimates_but_keeps_cache_aware_rows() {
+    let preliminary: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","message":{"id":"msg_preliminary","model":"gpt-5.6-sol","stop_reason":null,"usage":{"input_tokens":1000}}}"#,
+    )
+    .unwrap();
+    assert!(claude_usage_record_from_event(&preliminary).is_none());
+
+    let completed: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","message":{"id":"msg_completed","model":"gpt-5.6-sol","stop_reason":"end_turn","usage":{"input_tokens":1000}}}"#,
+    )
+    .unwrap();
+    assert!(claude_usage_record_from_event(&completed).is_some());
+
+    let cache_aware: ClaudeEvent = serde_json::from_str(
+        r#"{"type":"assistant","message":{"id":"msg_cache_aware","model":"gpt-5.6-sol","stop_reason":null,"usage":{"input_tokens":1000,"cache_read_input_tokens":1}}}"#,
+    )
+    .unwrap();
+    assert!(claude_usage_record_from_event(&cache_aware).is_some());
+}
+
+#[test]
+fn malformed_claude_history_stays_unknown_while_valid_empty_history_is_known_zero() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().join("transcript.jsonl");
+    let cutoff = Utc::now() - Duration::days(1);
+
+    std::fs::write(&path, b"\n").unwrap();
+    let mut empty_seen = HashSet::new();
+    let mut empty_pricing = ClaudeScanPricingResolver::default();
+    let empty_result = scan_claude_file_with_pricing(
+        &path,
+        &cutoff,
+        &mut empty_seen,
+        None,
+        &mut empty_pricing,
+        |_| {},
+    );
+    let mut empty_summary = CostSummary::default();
+    finalize_claude_summary(&mut empty_summary, true, empty_result, false);
+    assert!(empty_summary.history_coverage_established);
+    assert!(empty_summary.known_zero);
+
+    std::fs::write(&path, b"{malformed\n").unwrap();
+    let mut malformed_seen = HashSet::new();
+    let mut malformed_pricing = ClaudeScanPricingResolver::default();
+    let malformed_result = scan_claude_file_with_pricing(
+        &path,
+        &cutoff,
+        &mut malformed_seen,
+        None,
+        &mut malformed_pricing,
+        |_| {},
+    );
+    assert_eq!(malformed_result.malformed_lines, 1);
+    let mut malformed_summary = CostSummary::default();
+    finalize_claude_summary(&mut malformed_summary, true, malformed_result, false);
+    assert!(!malformed_summary.history_coverage_established);
+    assert!(!malformed_summary.known_zero);
 }
 
 #[test]
@@ -571,6 +735,7 @@ fn cached_usage_with_packed(day: &str, model: &str, packed: Vec<i64>) -> CostUsa
         codex_last_token_timestamp: None,
         codex_session_id: None,
         codex_forked_from_id: None,
+        codex_lineage: CodexSessionLineage::Root,
         codex_fork_timestamp: None,
         codex_unresolved_fork_parent: false,
     }
@@ -717,16 +882,18 @@ fn reasoning_survives_scan_rebuild_and_cache_reload() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
     let cache_root = root.path().join("cache");
-    let today = Local::now().date_naive();
+    // The event timestamp (now − 1h) decides the parsed day key, so derive the
+    // fixture day from that same instant: at local 00:00–01:00 now − 1h falls
+    // on the previous local day and the row would land there, not on today.
+    let event_time = Utc::now() - Duration::hours(1);
+    let today = event_time.with_timezone(&Local).date_naive();
     let day = today.format("%Y-%m-%d").to_string();
     let day_dir = sessions
         .join(today.format("%Y").to_string())
         .join(today.format("%m").to_string())
         .join(today.format("%d").to_string());
     std::fs::create_dir_all(&day_dir).unwrap();
-    let timestamp = (Utc::now() - Duration::hours(1))
-        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
-        .to_string();
+    let timestamp = event_time.format("%Y-%m-%dT%H:%M:%S%.3fZ").to_string();
     let reasoning_line = serde_json::json!({
         "timestamp": timestamp,
         "type": "event_msg",
@@ -1376,6 +1543,51 @@ fn codex_lazy_history_receipt_reads_only_changed_file_and_matches_fresh_parse() 
 }
 
 #[test]
+fn codex_source_recovery_keeps_appended_duplicate_unpriced_after_cache_reload() {
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let cache_root = root.path().join("cache");
+    let path = write_codex_session_fixture_with_inputs(&sessions, "recovery.jsonl", &[100]);
+    let scanner = CostScanner::new(7)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![sessions.clone()]);
+
+    let (_, _, mut first_cache) = scanner.scan_codex_detailed_with_cache(None);
+    let path_key = path.to_string_lossy().to_string();
+    let source_rows = first_cache
+        .codex_source_rows
+        .get_mut(&path_key)
+        .expect("source rows persisted");
+    assert_eq!(source_rows.rows.len(), 1);
+    source_rows.rows[0].pricing.pricing_mode = Some("priority".to_string());
+    first_cache.last_scan_unix_ms = 1;
+    JsonlScanner::save_cache(ProviderId::Codex, &mut first_cache, Some(&cache_root));
+
+    let timestamp = (Utc::now() - Duration::minutes(30))
+        .format("%Y-%m-%dT%H:%M:%S%.3fZ")
+        .to_string();
+    let appended = format!(
+        r#"{{"timestamp":"{timestamp}","type":"event_msg","payload":{{"type":"token_count","info":{{"model":"gpt-5","total_token_usage":{{"input_tokens":200,"cached_input_tokens":0,"output_tokens":10}}}}}}}}"#
+    ) + "\n";
+    std::fs::OpenOptions::new()
+        .append(true)
+        .open(&path)
+        .unwrap()
+        .write_all(appended.as_bytes())
+        .unwrap();
+
+    let (_, _, second_cache) = scanner.scan_codex_detailed_with_cache(None);
+    let usage = second_cache.files.get(&path_key).expect("file cache");
+    let day = Local::now().format("%Y-%m-%d").to_string();
+    assert_eq!(usage.days[&day]["gpt-5-priority"], vec![100, 0, 5]);
+    assert_eq!(
+        usage.days[&day][CostUsagePricing::CODEX_UNATTRIBUTED_MODEL],
+        vec![100, 0, 5]
+    );
+}
+
+#[test]
 fn codex_file_identity_invalidates_same_path_cache_without_eager_history_read() {
     let root = tempfile::tempdir().unwrap();
     let sessions = root.path().join("sessions");
@@ -1436,6 +1648,7 @@ fn cancelled_fresh_cache_hit_is_not_authoritative() {
                 codex_last_token_timestamp: None,
                 codex_session_id: None,
                 codex_forked_from_id: None,
+                codex_lineage: CodexSessionLineage::Root,
                 codex_fork_timestamp: None,
                 codex_unresolved_fork_parent: false,
             },
@@ -1641,6 +1854,115 @@ fn cost_scan_resumes_appended_bytes() {
         .expect("resumed file cache entry");
     assert_eq!(cached_file.codex_token_timestamps_monotonic, Some(true));
     assert!(cached_file.codex_last_token_timestamp.is_some());
+}
+
+#[test]
+fn codex_partial_rescan_replaces_changed_session_after_cache_reopen() {
+    // Windows parity for upstream 0.60.2 cost persistence: a rewritten
+    // session must replace the cached file aggregate even when the first
+    // refresh only consumes a bounded prefix and the next refresh reloads the
+    // cache from disk.
+    let root = tempfile::tempdir().unwrap();
+    let sessions = root.path().join("sessions");
+    let cache_root = root.path().join("cache");
+    let path = write_codex_session_fixture_with_inputs(&sessions, "changed.jsonl", &[100, 200]);
+    let old_metadata = std::fs::metadata(&path).unwrap();
+    let old_size = old_metadata.len();
+    let old_mtime = old_metadata.modified().unwrap();
+
+    let initial_scanner = CostScanner::new(7)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![sessions.clone()]);
+    let (initial, initial_stats) = initial_scanner.scan_codex_detailed(None);
+    assert_eq!(initial_stats.files_parsed, 1);
+    assert_eq!(initial.input_tokens, 200);
+    assert!(initial.history_coverage_established);
+
+    // Keep the path, identity, and byte length stable while changing both
+    // token snapshots. The mtime change proves that the cached aggregate is
+    // invalidated before the bounded rescan begins.
+    write_codex_session_fixture_with_inputs(&sessions, "changed.jsonl", &[300, 400]);
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&path)
+        .unwrap()
+        .set_modified(old_mtime + std::time::Duration::from_secs(2))
+        .unwrap();
+    let rewritten_metadata = std::fs::metadata(&path).unwrap();
+    assert_eq!(rewritten_metadata.len(), old_size);
+    assert_ne!(rewritten_metadata.modified().unwrap(), old_mtime);
+
+    let first_line_bytes = i64::try_from(
+        std::fs::read(&path)
+            .unwrap()
+            .split(|byte| *byte == b'\n')
+            .next()
+            .unwrap()
+            .len(),
+    )
+    .expect("fixture line length fits i64")
+        + 1;
+    let mut bounded_options = CostScanOptions::app_driven();
+    bounded_options.codex_max_session_file_bytes = first_line_bytes;
+    bounded_options.codex_max_scan_bytes_per_refresh = first_line_bytes;
+
+    let bounded_scanner = CostScanner::new(7)
+        .with_options(bounded_options)
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![sessions.clone()]);
+    let (partial, partial_stats, partial_cache) =
+        bounded_scanner.scan_codex_detailed_with_cache(None);
+    assert!(partial_stats.files_parsed >= 1);
+    assert!(partial_cache.codex_scan_incomplete);
+    assert!(!partial.history_coverage_established);
+    assert_eq!(
+        partial_cache
+            .previous_report
+            .as_ref()
+            .map(|report| report.input_tokens),
+        Some(200),
+        "the last validated report remains visible during catch-up"
+    );
+    let partial_file = partial_cache
+        .files
+        .get(&path.to_string_lossy().to_string())
+        .expect("partially rescanned file cache entry");
+    assert_eq!(partial_file.parsed_bytes, Some(first_line_bytes));
+
+    // A new scanner instance models a process/cache reopen. The persisted
+    // cursor must resume the rewritten file and finish at the new total.
+    let reopened_scanner = CostScanner::new(7)
+        .with_options(bounded_options)
+        .with_cache_root(&cache_root)
+        .with_sessions_dirs(vec![sessions.clone()]);
+    let (resumed, resumed_stats, resumed_cache) =
+        reopened_scanner.scan_codex_detailed_with_cache(None);
+    assert_eq!(resumed_stats.files_resumed, 1);
+    assert_eq!(resumed_stats.files_parsed, 0);
+    assert!(!resumed_cache.codex_scan_incomplete);
+    assert!(resumed.history_coverage_established);
+    assert_eq!(resumed.input_tokens, 400);
+
+    // Resumption may change the amount of work, but it must publish the same
+    // cost aggregate as a clean full parse of the rewritten session.
+    let fresh_scanner = CostScanner::new(7)
+        .with_options(CostScanOptions::app_driven())
+        .with_cache_root(root.path().join("fresh-cache"))
+        .with_sessions_dirs(vec![sessions]);
+    let (fresh, fresh_stats) = fresh_scanner.scan_codex_detailed(None);
+    assert_eq!(fresh_stats.files_parsed, 1);
+    assert_eq!(resumed.input_tokens, fresh.input_tokens);
+    assert_eq!(resumed.cached_tokens, fresh.cached_tokens);
+    assert_eq!(resumed.output_tokens, fresh.output_tokens);
+    assert_eq!(resumed.sessions_count, fresh.sessions_count);
+    assert_eq!(resumed.by_model_tokens, fresh.by_model_tokens);
+    assert_eq!(resumed.by_model.len(), fresh.by_model.len());
+    for (model, resumed_cost) in &resumed.by_model {
+        let fresh_cost = fresh.by_model.get(model).copied().expect("fresh model row");
+        assert!((resumed_cost - fresh_cost).abs() < 1e-12);
+    }
+    assert!((resumed.total_cost_usd - fresh.total_cost_usd).abs() < 1e-12);
 }
 
 #[test]
@@ -2711,3 +3033,7 @@ fn incomplete_or_buffered_empty_codex_fragment_is_not_marked_complete() {
     assert!(buffered_cache.codex_scan_incomplete);
     assert!(buffered_cache.codex_pending_paths.contains(&buffered_key));
 }
+
+#[cfg(test)]
+#[path = "tests/paginated.rs"]
+mod paginated;

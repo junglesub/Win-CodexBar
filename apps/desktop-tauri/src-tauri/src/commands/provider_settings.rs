@@ -96,6 +96,42 @@ pub fn set_provider_usage_source(provider_id: String, source: String) -> Result<
     settings.save().map_err(|e| e.to_string())
 }
 
+fn auto_resume_provider(provider_id: &str) -> Result<ProviderId, String> {
+    let id = parse_provider_arg(provider_id)?;
+    if crate::auto_resume::supports_auto_resume(id) {
+        Ok(id)
+    } else {
+        Err(format!(
+            "Provider '{provider_id}' does not support automatic session resume"
+        ))
+    }
+}
+
+/// Persist the explicit Codex/Claude opt-in for reopening an exact CLI session
+/// after its quota becomes available again.
+#[tauri::command]
+pub fn set_provider_auto_resume_after_quota_reset(
+    app: tauri::AppHandle,
+    provider_id: String,
+    enabled: bool,
+) -> Result<(), String> {
+    let id = auto_resume_provider(&provider_id)?;
+    if enabled && !super::provider_detail::auto_resume_supported(id) {
+        return Err(
+            "Automatic session resume is unavailable while a managed token account is active"
+                .to_string(),
+        );
+    }
+    let mut settings = Settings::load();
+    settings.set_auto_resume_after_quota_reset(id, enabled);
+    settings.save().map_err(|e| e.to_string())?;
+    if !enabled {
+        crate::auto_resume::clear(&app, id);
+    }
+    crate::events::emit_settings_changed(&app);
+    Ok(())
+}
+
 // ── OpenRouter Management API key ────────────────────────────────────
 
 #[tauri::command]
@@ -122,6 +158,44 @@ pub fn remove_openrouter_management_api_key() -> Result<(), String> {
     let mut settings = Settings::load();
     settings.set_management_api_token(ProviderId::OpenRouter, None);
     settings.save().map_err(|error| error.to_string())
+}
+
+// ── Azure OpenAI API version ─────────────────────────────────────────
+
+fn azure_openai_provider(provider_id: &str) -> Result<codexbar::core::ProviderId, String> {
+    let id = parse_provider_arg(provider_id)?;
+    if id != codexbar::core::ProviderId::AzureOpenAI {
+        return Err(format!(
+            "Provider '{provider_id}' does not expose an Azure OpenAI API-version picker"
+        ));
+    }
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn get_provider_azure_api_version(provider_id: String) -> Result<Option<String>, String> {
+    let id = azure_openai_provider(&provider_id)?;
+    Ok(ApiKeys::load()
+        .api_version(id.cli_name())
+        .map(ToOwned::to_owned))
+}
+
+#[tauri::command]
+pub fn set_provider_azure_api_version(
+    provider_id: String,
+    api_version: String,
+) -> Result<(), String> {
+    let id = azure_openai_provider(&provider_id)?;
+    let value = api_version.trim();
+    if value.len() > 128 || value.chars().any(char::is_control) {
+        return Err("Azure OpenAI API version is invalid".to_string());
+    }
+    let mut keys = ApiKeys::load();
+    keys.set_api_version(
+        id.cli_name(),
+        (!value.is_empty()).then_some(value.to_string()),
+    );
+    keys.save().map_err(|error| error.to_string())
 }
 
 // ── Per-provider cookie source + region ───────────────────────────────

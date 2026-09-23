@@ -164,6 +164,10 @@ pub struct Settings {
     /// Menu bar display mode: "minimal", "compact", or "detailed"
     pub menu_bar_display_mode: String,
 
+    /// Overview card layout: "detailed" or "compact".
+    #[serde(default = "default_overview_layout")]
+    pub overview_layout: String,
+
     /// Show all token accounts in provider menus instead of collapsing behind switchers
     #[serde(default)]
     pub show_all_token_accounts_in_menu: bool,
@@ -257,6 +261,11 @@ pub struct Settings {
     /// 100 % is normal size; higher values enlarge the flyout content.
     #[serde(default = "default_tray_scale_percent")]
     pub tray_scale_percent: u16,
+
+    /// Keep the tray flyout above other windows after it loses focus.
+    /// Disabled by default so the flyout retains normal z-order behavior.
+    #[serde(default)]
+    pub tray_panel_always_on_top: bool,
 
     /// Enable the local PowerToys Command Palette status pipe.
     #[serde(default)]
@@ -408,11 +417,11 @@ pub struct Settings {
     #[serde(default = "default_alibaba_token_plan_region")]
     pub alibaba_token_plan_region: String,
 
-    /// Opt-in: allow Codex usage reads from external (non-CLI-owned) OAuth
-    /// credential sources. Default OFF — when disabled, stale external OAuth
-    /// credential files fail closed instead of being used silently (upstream
-    /// 0.50.1 #2944). The CLI-owned `auth.json` is always read read-only; this
-    /// gate only controls whether stale external OAuth tokens are trusted.
+    /// Opt-in: allow read-only Codex usage reads from the CLI-owned OAuth
+    /// credential source. Win-CodexBar never refreshes or writes `auth.json`.
+    /// Default OFF — when disabled, the source must contain refresh
+    /// provenance; JWT expiry is checked when available (upstream 0.50.1
+    /// #2944).
     #[serde(default)]
     pub codex_external_oauth_sources_allowed: bool,
 
@@ -636,6 +645,7 @@ impl Default for Settings {
             predictive_pace_warning_enabled: false,
             show_pace: true,
             menu_bar_display_mode: "detailed".to_string(), // Detailed mode by default
+            overview_layout: default_overview_layout(),
             show_all_token_accounts_in_menu: false,
             provider_configs: HashMap::new(),
             disable_keychain_access: false,
@@ -658,6 +668,7 @@ impl Default for Settings {
             theme: ThemePreference::default(), // Auto (follows prefers-color-scheme)
             window_scale_percent: default_window_scale_percent(),
             tray_scale_percent: default_tray_scale_percent(),
+            tray_panel_always_on_top: false,
             powertoys_status_pipe_enabled: false,
             float_bar_enabled: false,
             float_bar_opacity: default_float_bar_opacity(),
@@ -691,6 +702,18 @@ impl Default for Settings {
             open_codex_usage_logs_enabled: false,
             hide_native_codex_cost_when_open_codex_present: false,
         }
+    }
+}
+
+fn default_overview_layout() -> String {
+    "compact".to_string()
+}
+
+pub fn normalize_overview_layout(value: &str) -> String {
+    match value.trim().to_ascii_lowercase().as_str() {
+        "compact" => "compact".to_string(),
+        "detailed" => "detailed".to_string(),
+        _ => default_overview_layout(),
     }
 }
 
@@ -1079,6 +1102,39 @@ impl Settings {
         self.provider_config_mut(id).workspace_id = Some(value.into());
     }
 
+    /// Optional user-entered allowance for Copilot seat AI credits.
+    ///
+    /// GitHub reports the absolute `credits_used` counter but does not expose
+    /// a documented included-credit ceiling, so callers must keep an absent
+    /// or non-positive value as unknown rather than inventing a denominator.
+    ///
+    /// This setter is the single owner of the positive-finite invariant:
+    /// invalid values are rejected instead of silently dropped, while the
+    /// getter keeps defensively filtering values persisted by older builds.
+    pub fn seat_credit_entitlement(&self, id: ProviderId) -> Option<f64> {
+        self.provider_configs
+            .get(&id)
+            .and_then(|config| config.seat_credit_entitlement)
+            .filter(|value| value.is_finite() && *value > 0.0)
+    }
+
+    pub fn set_seat_credit_entitlement(
+        &mut self,
+        id: ProviderId,
+        value: Option<f64>,
+    ) -> Result<(), String> {
+        if let Some(value) = value
+            && (!value.is_finite() || value <= 0.0)
+        {
+            return Err(
+                "Copilot seat AI-credit allowance must be a finite number greater than zero"
+                    .to_string(),
+            );
+        }
+        self.provider_config_mut(id).seat_credit_entitlement = value;
+        Ok(())
+    }
+
     /// Wayfinder gateway URL, defaulting to the local loopback gateway.
     pub fn gateway_url(&self, id: ProviderId) -> &str {
         self.provider_configs
@@ -1155,6 +1211,19 @@ impl Settings {
 
     pub fn set_avoid_keychain_prompts(&mut self, id: ProviderId, value: bool) {
         self.provider_config_mut(id).avoid_keychain_prompts = value;
+    }
+
+    /// Whether the desktop shell may reopen a captured CLI session after its
+    /// provider quota becomes available again. This is intentionally opt-in.
+    pub fn auto_resume_after_quota_reset(&self, id: ProviderId) -> bool {
+        self.provider_configs
+            .get(&id)
+            .map(|config| config.auto_resume_after_quota_reset)
+            .unwrap_or(false)
+    }
+
+    pub fn set_auto_resume_after_quota_reset(&mut self, id: ProviderId, value: bool) {
+        self.provider_config_mut(id).auto_resume_after_quota_reset = value;
     }
 
     // ── Legacy field-name aliases ────────────────────────────────────

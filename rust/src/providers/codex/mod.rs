@@ -38,6 +38,7 @@ impl CodexProvider {
                 is_primary: true,
                 dashboard_url: Some("https://chatgpt.com/codex/settings/usage"),
                 status_page_url: Some("https://status.openai.com"),
+                tertiary_label_key: None,
             },
             api: CodexApi::new(),
         }
@@ -48,6 +49,7 @@ fn fetch_result(
     usage: crate::core::UsageSnapshot,
     cost: Option<crate::core::CostSnapshot>,
     source: &str,
+    account_identity: Option<String>,
 ) -> ProviderFetchResult {
     let account_email = usage.account_email.clone();
     let mut result = ProviderFetchResult::new(usage, source);
@@ -61,6 +63,9 @@ fn fetch_result(
         }
     }) {
         result = result.with_cost(cost);
+    }
+    if let Some(account_identity) = account_identity {
+        result = result.with_account_identity(account_identity);
     }
     result
 }
@@ -106,6 +111,10 @@ impl Provider for CodexProvider {
         &self.metadata
     }
 
+    fn retains_last_good_on_transport_failure(&self) -> bool {
+        true
+    }
+
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
         tracing::debug!("Fetching Codex usage");
 
@@ -116,7 +125,9 @@ impl Provider for CodexProvider {
         if ctx.source_mode == SourceMode::Auto && self.api.has_pat_credentials() {
             let version = detect_codex_version();
             match self.api.fetch_usage_pat(version.as_deref()).await {
-                Ok((usage, cost)) => return Ok(fetch_result(usage, cost, "pat")),
+                Ok((usage, cost, account_identity)) => {
+                    return Ok(fetch_result(usage, cost, "pat", account_identity));
+                }
                 Err(error) if pat_allows_auto_fallback(&error) => {
                     tracing::debug!("Codex PAT unavailable in Auto; trying OAuth: {error}");
                 }
@@ -125,7 +136,9 @@ impl Provider for CodexProvider {
         }
 
         match self.api.fetch_usage().await {
-            Ok((usage, cost)) => Ok(fetch_result(usage, cost, "oauth")),
+            Ok((usage, cost, account_identity)) => {
+                Ok(fetch_result(usage, cost, "oauth", account_identity))
+            }
             Err(error) => {
                 tracing::warn!("Codex API fetch failed: {error}");
                 Err(error)
@@ -175,6 +188,7 @@ fn detect_codex_version() -> Option<String> {
 #[cfg(test)]
 mod pat_strategy_tests {
     use super::*;
+    use crate::core::LastGoodFailurePolicy;
 
     #[test]
     fn pat_auto_fallback_is_narrow() {
@@ -188,5 +202,18 @@ mod pat_strategy_tests {
         assert!(!pat_allows_auto_fallback(&ProviderError::Other(
             "server".into()
         )));
+    }
+
+    #[test]
+    fn transport_failures_retain_but_authentication_failures_replace() {
+        let provider = CodexProvider::new();
+        assert_eq!(
+            provider.last_good_failure_policy_for_error(&ProviderError::Timeout),
+            LastGoodFailurePolicy::Preserve
+        );
+        assert_eq!(
+            provider.last_good_failure_policy_for_error(&ProviderError::AuthRequired),
+            LastGoodFailurePolicy::Replace
+        );
     }
 }

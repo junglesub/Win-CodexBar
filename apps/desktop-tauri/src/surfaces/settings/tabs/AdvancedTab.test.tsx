@@ -43,6 +43,7 @@ const settings: SettingsSnapshot = {
   resetTimeRelative: true,
   showResetWhenExhausted: false,
   menuBarDisplayMode: "compact",
+  overviewLayout: "detailed",
   notificationSoundPaths: {
     predictiveWarning: null,
     highUsage: null,
@@ -62,6 +63,7 @@ const settings: SettingsSnapshot = {
   theme: "dark",
   windowScalePercent: 125,
   trayScalePercent: 100,
+  trayPanelAlwaysOnTop: false,
   powertoysStatusPipeEnabled: false,
   claudeAvoidKeychainPrompts: true,
   codexSparkUsageVisible: true,

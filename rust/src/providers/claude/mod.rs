@@ -110,6 +110,12 @@ pub(crate) fn claude_code_consent() -> bool {
     crate::settings::Settings::load().claude_allow_reading_claude_code_credentials
 }
 
+/// Return the identity of the credential that can authorize a Claude CLI
+/// resume. The OAuth module applies the same consent boundary as its fetcher.
+pub fn auto_resume_identity() -> Option<String> {
+    oauth::auto_resume_identity()
+}
+
 /// Claude provider implementation
 pub struct ClaudeProvider {
     metadata: ProviderMetadata,
@@ -132,6 +138,7 @@ impl ClaudeProvider {
                 is_primary: true,
                 dashboard_url: Some("https://claude.ai/settings/usage"),
                 status_page_url: Some("https://status.claude.com/"),
+                tertiary_label_key: None,
             },
             web_fetcher: ClaudeWebApiFetcher::new(),
             oauth_fetcher: ClaudeOAuthFetcher::new(),
@@ -220,6 +227,8 @@ fn claude_probe_launch_args(session_id: &str) -> Vec<String> {
         "user".to_string(),
         "--allowed-tools".to_string(),
         String::new(),
+        "--settings".to_string(),
+        r#"{"remoteControlAtStartup":false}"#.to_string(),
         "--session-id".to_string(),
         session_id.to_string(),
     ]
@@ -276,7 +285,7 @@ async fn run_claude_trust_preflight(
 }
 
 fn resolve_claude_cli_path() -> Result<std::path::PathBuf, ProviderError> {
-    which_claude().ok_or_else(|| {
+    locate_claude_binary().ok_or_else(|| {
         ProviderError::NotInstalled(
             "Claude CLI not found. Install from https://docs.claude.ai/claude-code".to_string(),
         )
@@ -426,9 +435,6 @@ fn last_good_failure_policy_for_error(error: &str) -> LastGoodFailurePolicy {
         || lower.contains("treated /usage as a normal prompt")
         || lower.contains("local activity stats")
         || lower.contains("could not parse")
-        || lower.contains("rate limit")
-        || lower.contains("rate_limit")
-        || lower.contains("ratelimited")
         || error.eq_ignore_ascii_case("timeout")
         || lower.contains("timed out")
     {
@@ -459,6 +465,10 @@ impl Provider for ClaudeProvider {
 
     fn metadata(&self) -> &ProviderMetadata {
         &self.metadata
+    }
+
+    fn retains_last_good_on_transport_failure(&self) -> bool {
+        true
     }
 
     async fn fetch_usage(&self, ctx: &FetchContext) -> Result<ProviderFetchResult, ProviderError> {
@@ -535,12 +545,12 @@ impl ClaudeProvider {
     ) -> Result<ProviderFetchResult, ProviderError> {
         let mut failures = Vec::new();
 
-        if let Some(result) = self.try_auto_admin_api(ctx, &mut failures).await {
+        if let Some(result) = self.try_auto_admin_api(ctx, &mut failures).await? {
             return Ok(result);
         }
 
         if let Some(result) =
-            record_auto_source(&mut failures, "Web", self.fetch_via_web(ctx).await)
+            record_auto_source(&mut failures, "Web", self.fetch_via_web(ctx).await)?
         {
             return Ok(result);
         }
@@ -551,7 +561,7 @@ impl ClaudeProvider {
             .as_ref()
             .err()
             .is_some_and(is_oauth_revoked_error);
-        if let Some(result) = record_auto_source(&mut failures, "OAuth", oauth_result) {
+        if let Some(result) = record_auto_source(&mut failures, "OAuth", oauth_result)? {
             return Ok(result);
         }
 
@@ -563,7 +573,7 @@ impl ClaudeProvider {
         }
 
         if let Some(mut result) =
-            record_auto_source(&mut failures, "CLI", self.fetch_via_cli(ctx).await)
+            record_auto_source(&mut failures, "CLI", self.fetch_via_cli(ctx).await)?
         {
             // Without consent for reading Claude Code credentials, label the
             // CLI fallback as reduced fidelity.
@@ -592,13 +602,11 @@ impl ClaudeProvider {
         &self,
         ctx: &FetchContext,
         failures: &mut Vec<(&'static str, ProviderError)>,
-    ) -> Option<ProviderFetchResult> {
-        self.admin_fetcher
-            .has_credentials(ctx)
-            .then_some(async { self.fetch_via_admin_api(ctx).await })?
-            .await
-            .map_err(|error| failures.push(("Admin API", error)))
-            .ok()
+    ) -> Result<Option<ProviderFetchResult>, ProviderError> {
+        if !self.admin_fetcher.has_credentials(ctx) {
+            return Ok(None);
+        }
+        record_auto_source(failures, "Admin API", self.fetch_via_admin_api(ctx).await)
     }
 
     async fn fetch_via_oauth(
@@ -656,9 +664,11 @@ impl ClaudeProvider {
             return Err(error);
         }
 
-        Ok(mark_live_claude_cli_result(
-            self.parse_cli_output(&combined)?,
-        ))
+        let mut result = self.parse_cli_output(&combined)?;
+        if let Some(identity) = auto_resume_identity() {
+            result = result.with_account_identity(identity);
+        }
+        Ok(mark_live_claude_cli_result(result))
     }
 
     /// Parse Claude CLI /usage output
@@ -800,8 +810,15 @@ fn record_auto_source(
     failures: &mut Vec<(&'static str, ProviderError)>,
     source: &'static str,
     result: Result<ProviderFetchResult, ProviderError>,
-) -> Option<ProviderFetchResult> {
-    result.map_err(|error| failures.push((source, error))).ok()
+) -> Result<Option<ProviderFetchResult>, ProviderError> {
+    match result {
+        Ok(result) => Ok(Some(result)),
+        Err(error) if error.is_transport_failure() => Err(error),
+        Err(error) => {
+            failures.push((source, error));
+            Ok(None)
+        }
+    }
 }
 
 fn claude_auto_fetch_error(failures: Vec<(&'static str, ProviderError)>) -> ProviderError {
@@ -832,8 +849,15 @@ fn should_fallback_from_claude_cli_error(error: &ProviderError) -> bool {
     }
 }
 
-/// Try to find the claude CLI binary
-fn which_claude() -> Option<std::path::PathBuf> {
+/// Locate the Claude CLI for shell integrations that need to reopen a session.
+pub fn locate_claude_binary() -> Option<std::path::PathBuf> {
+    if let Some(path) = std::env::var_os("CLAUDE_BINARY")
+        .map(std::path::PathBuf::from)
+        .filter(|path| path.is_file())
+    {
+        return Some(path);
+    }
+
     #[cfg(windows)]
     {
         let candidates = [
@@ -917,7 +941,7 @@ fn find_windows_claude_in_path() -> Option<std::path::PathBuf> {
 
 /// Detect the version of the claude CLI
 fn detect_claude_version() -> Option<String> {
-    let claude_path = which_claude()?;
+    let claude_path = locate_claude_binary()?;
 
     #[cfg(windows)]
     const CREATE_NO_WINDOW: u32 = 0x08000000;
@@ -1175,13 +1199,18 @@ mod tests {
         assert_eq!(first, second);
         assert!(uuid::Uuid::parse_str(&first).is_ok());
         let args = claude_probe_launch_args(&first);
-        assert!(
-            args.windows(2)
-                .any(|w| w[0] == "--session-id" && w[1] == first)
-        );
-        assert!(
-            args.windows(2)
-                .any(|w| w[0] == "--allowed-tools" && w[1].is_empty())
+        assert_eq!(
+            args,
+            vec![
+                "--setting-sources".to_string(),
+                "user".to_string(),
+                "--allowed-tools".to_string(),
+                String::new(),
+                "--settings".to_string(),
+                r#"{"remoteControlAtStartup":false}"#.to_string(),
+                "--session-id".to_string(),
+                first,
+            ]
         );
     }
 
@@ -1524,6 +1553,21 @@ Resets Dec 24 at 3:59pm (Europe/Paris)
     }
 
     #[test]
+    fn transient_transport_failure_stops_auto_fallback_and_preserves_last_good() {
+        let provider = ClaudeProvider::new();
+        assert!(provider.retains_last_good_on_transport_failure());
+        assert_eq!(
+            provider.last_good_failure_policy_for_error(&ProviderError::Timeout),
+            LastGoodFailurePolicy::Preserve
+        );
+
+        let mut failures = Vec::new();
+        let result = record_auto_source(&mut failures, "Web", Err(ProviderError::Timeout));
+        assert!(matches!(result, Err(ProviderError::Timeout)));
+        assert!(failures.is_empty());
+    }
+
+    #[test]
     fn rejects_claude_2_1_non_interactive_slash_response() {
         let provider = ClaudeProvider::new();
         let output = r#"
@@ -1629,7 +1673,7 @@ Active days: 2/10              Longest streak: 1 day
     }
 
     #[test]
-    fn live_identity_less_cli_quota_proves_account_action() {
+    fn cli_quota_without_credential_identity_cannot_prove_account_action() {
         let provider = ClaudeProvider::new();
         let result = provider
             .parse_cli_output("Current session\n25% used\nCurrent week (all models)\n40% used")
@@ -1658,6 +1702,66 @@ Active days: 2/10              Longest streak: 1 day
         assert_eq!(
             ClaudeProvider::new().error_state_kind(&ProviderError::AuthRequired),
             crate::core::ProviderStateKind::NeedsAuthentication
+        );
+    }
+
+    #[test]
+    fn oauth_rate_limit_is_not_sign_in_required() {
+        let error = ProviderError::OAuthTransient(
+            "OAuth error: Claude OAuth usage endpoint is rate limited. Retrying in about 1s; credentials were preserved."
+                .to_string(),
+        );
+        assert_eq!(
+            ClaudeProvider::new().error_state_kind(&error),
+            crate::core::ProviderStateKind::Unknown
+        );
+        assert_eq!(
+            ClaudeProvider::new().last_good_failure_policy_for_error(&error),
+            LastGoodFailurePolicy::Preserve
+        );
+    }
+
+    #[test]
+    fn oauth_refresh_cooldown_is_not_sign_in_required() {
+        let error = ProviderError::OAuthTransient(
+            "Claude OAuth token expired and token refresh is cooling down after a failed attempt. Please retry shortly, or run `claude login`."
+                .to_string(),
+        );
+        assert_eq!(
+            ClaudeProvider::new().error_state_kind(&error),
+            crate::core::ProviderStateKind::Unknown
+        );
+        assert_eq!(
+            ClaudeProvider::new().last_good_failure_policy_for_error(&error),
+            LastGoodFailurePolicy::Preserve
+        );
+    }
+
+    #[test]
+    fn missing_oauth_credentials_still_require_sign_in() {
+        let error = ProviderError::OAuth(
+            "Claude OAuth credentials not found. Run `claude` to authenticate.".to_string(),
+        );
+        assert_eq!(
+            ClaudeProvider::new().error_state_kind(&error),
+            crate::core::ProviderStateKind::NeedsAuthentication
+        );
+        assert_eq!(
+            last_good_failure_policy_for_error(&error.to_string()),
+            LastGoodFailurePolicy::Replace
+        );
+    }
+
+    #[test]
+    fn untyped_oauth_rate_limit_text_is_not_transient() {
+        let error = ProviderError::OAuth("OAuth API returned rate limited".to_string());
+        assert_eq!(
+            ClaudeProvider::new().error_state_kind(&error),
+            crate::core::ProviderStateKind::NeedsAuthentication
+        );
+        assert_eq!(
+            ClaudeProvider::new().last_good_failure_policy_for_error(&error),
+            LastGoodFailurePolicy::Replace
         );
     }
 }

@@ -9,6 +9,8 @@ pub struct ProviderDetail {
     pub id: String,
     pub display_name: String,
     pub enabled: bool,
+    pub auto_resume_after_quota_reset: bool,
+    pub auto_resume_supported: bool,
 
     // Identity
     pub email: Option<String>,
@@ -23,7 +25,11 @@ pub struct ProviderDetail {
     pub weekly: Option<RateWindowSnapshot>,
     pub model_specific: Option<RateWindowSnapshot>,
     pub tertiary: Option<RateWindowSnapshot>,
+    /// Locale key naming the tertiary lane when it carries a semantic label
+    /// beyond "Tertiary" (upstream F5). Drives the settings metric picker.
+    pub tertiary_label_key: Option<&'static str>,
     pub extra_rate_windows: Vec<NamedRateWindowSnapshot>,
+    pub inventory: Vec<ProviderInventoryItemSnapshot>,
     /// Personal-only: lane labels backing the per-lane pace section.
     pub session_label: Option<String>,
     pub weekly_label: Option<String>,
@@ -69,6 +75,7 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
 
     let provider = instantiate_provider(id);
     let metadata = provider.metadata();
+    let resume_supported = auto_resume_supported(id);
     let dashboard_url = if id == codexbar::core::ProviderId::MiniMax {
         Some(
             codexbar::providers::MiniMaxProvider::dashboard_url_for_region(Some(
@@ -83,6 +90,8 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
         id: id.cli_name().to_string(),
         display_name: id.display_name().to_string(),
         enabled,
+        auto_resume_after_quota_reset: settings.auto_resume_after_quota_reset(id),
+        auto_resume_supported: resume_supported,
         email: None,
         plan: None,
         auth_type: None,
@@ -93,10 +102,12 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
         weekly: None,
         model_specific: None,
         tertiary: None,
+        tertiary_label_key: metadata.tertiary_label_key,
         session_label: None,
         weekly_label: None,
         tertiary_label: None,
         extra_rate_windows: Vec::new(),
+        inventory: Vec::new(),
         cost: None,
         pace: None,
         secondary_pace: None,
@@ -117,6 +128,14 @@ pub(crate) fn build_provider_detail(provider_id: &str) -> Result<ProviderDetail,
         cookie_source: provider_cookie_source_lookup(&settings, id.cli_name()),
         region: provider_region_lookup(&settings, id.cli_name()),
     })
+}
+
+/// Return whether the exact-session resume control can safely be offered for
+/// the currently selected credential lane. Managed token-account lanes cannot
+/// be correlated with local process discovery, so the UI and command both fail
+/// closed while one is active (or when its store cannot be read).
+pub(crate) fn auto_resume_supported(id: ProviderId) -> bool {
+    crate::auto_resume::supports_auto_resume(id) && crate::auto_resume::is_auto_resume_available(id)
 }
 
 #[tauri::command]
@@ -157,6 +176,7 @@ pub fn get_provider_detail(
             detail.weekly_label = snapshot.secondary_label.clone();
             detail.tertiary_label = snapshot.tertiary_label.clone();
             detail.extra_rate_windows = snapshot.extra_rate_windows.clone();
+            detail.inventory = snapshot.inventory.clone();
             detail.cost = snapshot.cost.clone();
             detail.pace = snapshot.pace.clone();
             detail.secondary_pace = snapshot.secondary_pace.clone();
@@ -171,12 +191,16 @@ pub fn get_provider_detail(
 }
 
 #[tauri::command]
-pub fn revoke_provider_credentials(provider_id: String) -> Result<(), String> {
+pub fn revoke_provider_credentials(
+    app: tauri::AppHandle,
+    provider_id: String,
+) -> Result<(), String> {
     // Best-effort: drop every app-managed credential for this provider so the
     // caller can follow up with a fresh login or import. Missing entries are
     // silently ignored; only I/O errors propagate.
     let id = parse_provider_arg(&provider_id)?;
     let provider_id = id.cli_name();
+    crate::auto_resume::clear(&app, id);
 
     let mut keys = ApiKeys::load();
     keys.remove(provider_id);

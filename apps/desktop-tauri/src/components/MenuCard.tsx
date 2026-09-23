@@ -12,6 +12,7 @@ import { providerSupportsChartData } from "../lib/providerCharts";
 import MenuCardDetails, { describeCard, type MetricEntry } from "./MenuCardDetails";
 import CodexAccountsMenu from "./CodexAccountsMenu";
 import ClaudeAccountsMenu from "./ClaudeAccountsMenu";
+import GrokAccountsMenu from "./GrokAccountsMenu";
 import { DEEPSEEK_PRICING_EVENT } from "../hooks/useDeepSeekPricingStatus";
 import { getDeepSeekPricingStatus } from "../lib/tauri";
 import type { DeepSeekPricingStatus } from "../types/bridge";
@@ -49,7 +50,11 @@ export interface MenuCardDisplayOptions {
   showResetWhenExhausted?: boolean;
   showPace?: boolean;
   showAsUsed?: boolean;
-  compactMetrics?: boolean;
+  /**
+   * Compact Overview layout: slice to the first two quota rows and omit
+   * supplemental content (wayfinder, cost, charts, extra texts).
+   */
+  compactOverview?: boolean;
   costSummaryDisplayStyle?: CostSummaryDisplayStyle;
 }
 
@@ -141,7 +146,7 @@ export default function MenuCard({
     showResetWhenExhausted = false,
     showPace = true,
     showAsUsed = false,
-    compactMetrics = false,
+    compactOverview = false,
     costSummaryDisplayStyle,
   } = display;
   const { t, language } = useLocale();
@@ -232,7 +237,7 @@ export default function MenuCard({
       resetFormatMode: extra.id === "reset-credits" ? "expires" : "reset",
     });
   }
-  const visibleMetrics = compactMetrics ? metrics.slice(0, 2) : metrics;
+  const visibleMetrics = compactOverview ? metrics.slice(0, 2) : metrics;
 
   const presence = describeCard(
     provider,
@@ -240,6 +245,7 @@ export default function MenuCard({
     visibleMetrics,
     costSummaryDisplayStyle,
     showPace,
+    compactOverview,
   );
   const { hasDetails } = presence;
   const cardClassName = [
@@ -293,6 +299,13 @@ export default function MenuCard({
       {provider.providerId === "claude" && (
         <ClaudeAccountsMenu hideEmail={hideEmail} onLayoutChange={onLayoutChange} />
       )}
+      {provider.providerId === "grok" && (
+        <GrokAccountsMenu
+          hideEmail={hideEmail}
+          resetTimeRelative={resetTimeRelative}
+          onLayoutChange={onLayoutChange}
+        />
+      )}
 
       {hasDetails && <div className="menu-card__divider" />}
 
@@ -304,6 +317,7 @@ export default function MenuCard({
             showResetWhenExhausted,
             showPace,
             showAsUsed,
+            compactOverview,
             costSummaryDisplayStyle,
           }}
           metrics={visibleMetrics}

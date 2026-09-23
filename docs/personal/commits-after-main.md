@@ -49,6 +49,57 @@ interaction guard, GitHub templates/dependabot configuration, and localized
 READMEs remain intentional. `main` added no new files in those removed
 categories in this sync range.
 
+## Sync resolution record — 2026-09-23
+
+PR `junglesub/Win-CodexBar#5` merges `sync/upstream` into `personal` with
+normal merge ancestry. The reviewed inputs were:
+
+| Ref | SHA |
+| --- | --- |
+| Merge base | `c65fd783bc3f1a4b50a8b2b45856ae60c9113872` |
+| `junglesub/main` / `junglesub/sync/upstream` | `fe179dc44acbbbd447e28b8df743c1282fb14fb1` |
+| `junglesub/personal` | `4e2b50cc35bee6aac31695b38a2741e658ce3fd9` |
+
+Developer-confirmed collision decisions:
+
+- **Scripts/CI-2 (standing rule):** scripts and CI always keep the personal
+  version. The personal branch is never merged back to `main`, so upstream
+  release-script refactors are dropped unless they also matter for the
+  personal gate. `scripts/release-pipeline.tests.ps1` returned to personal
+  (reversing the 2026-09-18 `Scripts-1` decision),
+  `docs/release/ci-cd.md` / `docs/CODE_SIGNING.md` / ADR 0004 stay personal,
+  and upstream's new `.signpath` workflow assertions are not adopted.
+- **Desktop-restart-1:** keep the personal deletion of the Windows-only
+  `codex_desktop.rs` restart tests. The 2026-09-18 flaky-test deletion
+  (`0ab67da6`) also covers the replacement test `main` added in this range;
+  main's taskkill `ErrorActionPreference` fix in the restart script body was
+  still taken, and no other production code in the file changed.
+- **FloatBar-2:** `FloatBar.tsx` / `FloatBar.test.tsx` stay personal. `main`'s
+  relative `inlineResetTime` improvement is already superseded by the personal
+  `compactResetTime` / relative countdown path, and `main`'s four new tests
+  target the single-metric pill path personal does not have.
+- **UsageCli-1:** `rust/src/cli/usage.rs` takes `main`'s module split
+  (`usage/claude_swap.rs` + `usage/render.rs` + `usage/fetch_helpers.rs` +
+  `usage_tests.rs`), and the personal monthly/tertiary pace feature was ported
+  into `usage/render.rs` plus two pace tests in `usage_tests.rs`. This is a
+  behavior-preserving integration fix required to combine both sides.
+- **ProviderDetail-1:** keep both sides in the detail bridge — `main`'s
+  `inventory` + `tertiaryLabelKey` and personal's `sessionLabel` /
+  `weeklyLabel` / `tertiaryLabel` per-lane pace labels.
+- **Deletions-2:** `main` added `docs/locales/` localized README links and
+  `.github/CI.md`; localized `README.*.md` files stay deleted (Docs-1), and
+  the CircleCI / publisher / interaction-guard categories remain removed
+  (`.circleci/config.yml`, `scripts/{circleci-release-build,publish-github-release,release-preflight}.ps1`,
+  `.github/CI.md`, `.github/scripts/interaction-guard*` deleted in the merge
+  result).
+- **Accepted from main (non-colliding):** Codex Desktop restart script
+  hardening, the CLI `usage` renderer module split, the settings provider
+  detail inventory bridge, Grok accounts documentation and backend, SignPath
+  release/signpath-test workflow refresh, the worktree storage policy in
+  `AGENTS.md`, `worktree-env.ps1` / `worktree-storage.ps1`, oxlint + anti-slop
+  frontend tooling steps, DeepSeek peak/off-peak and other provider updates,
+  dependency/lockfile bumps, and version `0.60.3`.
+
 ## Sync resolution record — 2026-09-18
 
 PR `junglesub/Win-CodexBar#4` merges `sync/upstream` into `personal` with

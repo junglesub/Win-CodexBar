@@ -139,6 +139,10 @@ pub struct NamedRateWindowSnapshot {
     pub id: String,
     pub title: String,
     pub window: RateWindowSnapshot,
+    /// Whether this lane is a provider-declared fallback that only fills in
+    /// when the provider reports no real core quota window.
+    #[serde(default)]
+    pub fallback_lane: bool,
 }
 
 /// Pace prediction snapshot for tray/bridge display.
@@ -184,6 +188,17 @@ pub struct SubscriptionMetadataSnapshot {
     pub renews_at: Option<String>,
 }
 
+/// Display-only provider inventory. Redemption identifiers never cross the
+/// bridge.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ProviderInventoryItemSnapshot {
+    pub id: String,
+    pub title: String,
+    pub available_count: u32,
+    pub next_expires_at: Option<String>,
+}
+
 /// A frontend-friendly snapshot of one provider's usage data.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -206,6 +221,8 @@ pub struct ProviderUsageSnapshot {
     pub tertiary: Option<RateWindowSnapshot>,
     #[serde(default)]
     pub extra_rate_windows: Vec<NamedRateWindowSnapshot>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub inventory: Vec<ProviderInventoryItemSnapshot>,
     #[serde(default)]
     pub cost: Option<CostSnapshotBridge>,
     #[serde(default)]
@@ -426,6 +443,17 @@ impl ProviderUsageSnapshot {
                     id: extra.id.clone(),
                     title: extra.title.clone(),
                     window: RateWindowSnapshot::from_rate_window(&extra.window),
+                    fallback_lane: extra.fallback_lane,
+                })
+                .collect(),
+            inventory: result
+                .inventory
+                .iter()
+                .map(|item| ProviderInventoryItemSnapshot {
+                    id: item.id.clone(),
+                    title: item.title.clone(),
+                    available_count: item.available_count,
+                    next_expires_at: item.next_expires_at.map(|date| date.to_rfc3339()),
                 })
                 .collect(),
             cost: result.cost.as_ref().map(|c| CostSnapshotBridge {
@@ -507,6 +535,7 @@ impl ProviderUsageSnapshot {
             tertiary: None,
             tertiary_label: None,
             extra_rate_windows: Vec::new(),
+            inventory: Vec::new(),
             cost: None,
             plan_name: None,
             account_email: None,
@@ -651,6 +680,7 @@ pub struct SettingsSnapshot {
     reset_time_relative: bool,
     show_reset_when_exhausted: bool,
     menu_bar_display_mode: String,
+    overview_layout: String,
     hide_personal_info: bool,
     update_channel: &'static str,
     auto_download_updates: bool,
@@ -668,6 +698,7 @@ pub struct SettingsSnapshot {
     theme: &'static str,
     window_scale_percent: u16,
     tray_scale_percent: u16,
+    tray_panel_always_on_top: bool,
     powertoys_status_pipe_enabled: bool,
     claude_avoid_keychain_prompts: bool,
     claude_swap_enabled: bool,
@@ -702,6 +733,7 @@ pub struct SettingsSnapshot {
     claude_daily_routines_usage_visible: bool,
     claude_allow_reading_claude_code_credentials: bool,
     alibaba_token_plan_region: String,
+    copilot_seat_credit_entitlement: Option<f64>,
     weekly_progress_work_days: Option<u8>,
     cost_summary_display_style: &'static str,
     open_codex_usage_logs_enabled: bool,
@@ -744,6 +776,8 @@ impl From<Settings> for SettingsSnapshot {
             .cloned()
             .collect();
 
+        let copilot_seat_credit_entitlement = settings.seat_credit_entitlement(ProviderId::Copilot);
+
         let provider_metrics = settings
             .provider_metrics
             .into_iter()
@@ -780,6 +814,7 @@ impl From<Settings> for SettingsSnapshot {
             reset_time_relative: settings.reset_time_relative,
             show_reset_when_exhausted: settings.show_reset_when_exhausted,
             menu_bar_display_mode: settings.menu_bar_display_mode,
+            overview_layout: settings.overview_layout,
             hide_personal_info: settings.hide_personal_info,
             update_channel: update_channel_label(settings.update_channel),
             auto_download_updates: settings.auto_download_updates,
@@ -797,6 +832,7 @@ impl From<Settings> for SettingsSnapshot {
             theme: theme_label(settings.theme),
             window_scale_percent: settings.window_scale_percent,
             tray_scale_percent: settings.tray_scale_percent,
+            tray_panel_always_on_top: settings.tray_panel_always_on_top,
             powertoys_status_pipe_enabled: settings.powertoys_status_pipe_enabled,
             claude_avoid_keychain_prompts: avoid_keychain_prompts,
             claude_swap_enabled,
@@ -832,6 +868,7 @@ impl From<Settings> for SettingsSnapshot {
             claude_allow_reading_claude_code_credentials: settings
                 .claude_allow_reading_claude_code_credentials,
             alibaba_token_plan_region: settings.alibaba_token_plan_region,
+            copilot_seat_credit_entitlement,
             weekly_progress_work_days: settings.weekly_progress_work_days,
             cost_summary_display_style: cost_summary_display_style_label(
                 settings.cost_summary_display_style,
