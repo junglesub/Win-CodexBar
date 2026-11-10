@@ -865,3 +865,42 @@ fn provider_metric_changes_notify_the_float_bar() {
         assert!(update.notifies_float_bar());
     }
 }
+
+#[test]
+fn settings_snapshot_carries_every_personal_float_bar_field() {
+    // The Float Bar settings UI reads these keys straight off the snapshot, so
+    // a dropped field renders as `undefined` (for example "(undefined%)" in
+    // the background-opacity label) instead of the persisted value.
+    let mut settings = Settings::default();
+    settings.float_bar_background_color = "#123456".to_string();
+    settings.float_bar_background_opacity = 37;
+    settings.float_bar_hide_percent_when_exhausted = true;
+    settings.float_bar_exhausted_clock_time = true;
+    settings.float_bar_exhausted_weekday_time = true;
+    settings.float_bar_battery_style = true;
+    settings.float_bar_battery_slots = vec!["weekly".to_string(), "fallback".to_string()];
+    settings.float_bar_battery_low_percent = 25;
+    settings.float_bar_pace_text_color = true;
+    settings.float_bar_pace_time_delta = true;
+    settings.float_bar_show_remaining = true;
+    settings.float_bar_follow_provider_order = true;
+
+    let snapshot = serde_json::to_value(crate::commands::bridge::SettingsSnapshot::from(settings))
+        .expect("snapshot serializes");
+
+    assert_eq!(snapshot["floatBarBackgroundColor"], "#123456");
+    assert_eq!(snapshot["floatBarBackgroundOpacity"], 37);
+    assert_eq!(snapshot["floatBarHidePercentWhenExhausted"], true);
+    assert_eq!(snapshot["floatBarExhaustedClockTime"], true);
+    assert_eq!(snapshot["floatBarExhaustedWeekdayTime"], true);
+    assert_eq!(snapshot["floatBarBatteryStyle"], true);
+    assert_eq!(
+        snapshot["floatBarBatterySlots"],
+        serde_json::json!(["weekly", "fallback"])
+    );
+    assert_eq!(snapshot["floatBarBatteryLowPercent"], 25);
+    assert_eq!(snapshot["floatBarPaceTextColor"], true);
+    assert_eq!(snapshot["floatBarPaceTimeDelta"], true);
+    assert_eq!(snapshot["floatBarShowRemaining"], true);
+    assert_eq!(snapshot["floatBarFollowProviderOrder"], true);
+}

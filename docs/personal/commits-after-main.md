@@ -48,6 +48,10 @@ Developer-confirmed collision decisions:
 - **Codex Spark filter:** `filter_hidden_codex_spark_rows` stays in the shell
   event path (`events.rs`) so hidden Spark rows are still dropped after the
   upstream event refactor.
+- **Settings snapshot:** upstream's rebuilt `SettingsSnapshot` dropped the
+  eleven personal Float Bar fields, which made the running settings UI render
+  `(undefined%)` for the background opacity. They are restored on the snapshot
+  and covered by `settings_snapshot_carries_every_personal_float_bar_field`.
 - **Settings portability:** the eleven personal Float Bar fields
   (`float_bar_background_color` / `_opacity`, `hide_percent_when_exhausted`,
   `exhausted_clock_time`, `exhausted_weekday_time`, `battery_style`,
