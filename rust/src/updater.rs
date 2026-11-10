@@ -4,10 +4,48 @@
 use crate::settings::UpdateChannel;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::sync::watch;
 
-const GITHUB_REPO: &str = "nesszer/Win-CodexBar";
+const GITHUB_API_URL: &str = "https://api.github.com";
+const GITHUB_REPO: &str = "junglesub/Win-CodexBar";
+const PERSONAL_LATEST_TAG: &str = "personal-latest";
 const CURRENT_VERSION: &str = env!("CARGO_PKG_VERSION");
+const COMPILED_BUILD_SHA: Option<&str> = option_env!("CODEXBAR_BUILD_SHA");
+
+/// Returns the compile-time injected build SHA, if set.
+fn current_build_sha() -> Option<&'static str> {
+    COMPILED_BUILD_SHA.map(str::trim).filter(|s| !s.is_empty())
+}
+
+/// Check if a local build ID matches the remote Git commit SHA.
+fn is_same_build_id(current_sha: &str, remote_sha: &str) -> bool {
+    let current = current_sha.trim();
+    let remote = remote_sha.trim();
+    if current.is_empty() || remote.is_empty() {
+        return false;
+    }
+    if current.eq_ignore_ascii_case(remote) {
+        return true;
+    }
+    if current.len() >= 7 && remote.len() >= 7 {
+        if current.len() < remote.len()
+            && remote
+                .to_ascii_lowercase()
+                .starts_with(&current.to_ascii_lowercase())
+        {
+            return true;
+        }
+        if remote.len() < current.len()
+            && current
+                .to_ascii_lowercase()
+                .starts_with(&remote.to_ascii_lowercase())
+        {
+            return true;
+        }
+    }
+    false
+}
 
 /// State of the update download process
 #[derive(Debug, Clone, PartialEq, Default)]
@@ -36,7 +74,12 @@ pub struct UpdateInfo {
     pub version: String,
     pub download_url: String,
     pub expected_sha256: Option<String>,
+    #[allow(dead_code, reason = "read by the desktop shell through UpdateInfo")]
     pub release_url: String,
+    #[allow(
+        dead_code,
+        reason = "retained in public update metadata for downstream clients"
+    )]
     pub release_notes: String,
     pub delivery: UpdateDelivery,
 }
@@ -49,6 +92,16 @@ impl UpdateInfo {
     pub fn supports_auto_download(&self) -> bool {
         self.delivery == UpdateDelivery::Installer && self.expected_sha256.is_some()
     }
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTagRef {
+    object: GitHubTagObject,
+}
+
+#[derive(Debug, Deserialize)]
+struct GitHubTagObject {
+    sha: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -69,41 +122,78 @@ struct GitHubAsset {
     digest: Option<String>,
 }
 
-/// Check for updates from GitHub releases
+/// Check for updates from GitHub releases.
 ///
-/// When `channel` is `UpdateChannel::Beta`, includes pre-release versions.
-/// When `channel` is `UpdateChannel::Stable`, only considers stable releases.
+/// For personal rolling releases (`personal-latest`), checks the tag ref
+/// commit SHA against the current compile-time build ID.
+/// If no build ID is set (local dev build), does not check for updates.
 pub async fn check_for_updates() -> Option<UpdateInfo> {
-    check_for_updates_with_channel(UpdateChannel::Stable).await
+    check_for_personal_update(current_build_sha()).await
 }
 
-/// Check for updates from GitHub releases with a specific channel
+/// Check for updates with a channel preference.
 ///
-/// When `channel` is `UpdateChannel::Beta`, includes pre-release versions.
-/// When `channel` is `UpdateChannel::Stable`, only considers stable releases.
-pub async fn check_for_updates_with_channel(channel: UpdateChannel) -> Option<UpdateInfo> {
-    let client = update_client()?;
-    let response = client.get(release_url(channel)).send().await.ok()?;
-    let release = parse_release_response(response, channel).await?;
-    let remote_version = remote_version_from_tag(&release.tag_name);
-
-    if is_newer_version(remote_version, CURRENT_VERSION) {
-        select_release_target(&release)
-    } else {
-        None
-    }
+/// Win-CodexBar personal builds roll under `personal-latest`, so the channel
+/// setting is accepted for interface compatibility but both channels check
+/// the `personal-latest` rolling prerelease.
+pub async fn check_for_updates_with_channel(_channel: UpdateChannel) -> Option<UpdateInfo> {
+    check_for_personal_update(current_build_sha()).await
 }
 
-fn release_url(channel: UpdateChannel) -> String {
-    match channel {
-        UpdateChannel::Beta => format!("https://api.github.com/repos/{}/releases", GITHUB_REPO),
-        UpdateChannel::Stable => {
-            format!(
-                "https://api.github.com/repos/{}/releases/latest",
-                GITHUB_REPO
-            )
-        }
+async fn check_for_personal_update(build_sha: Option<&str>) -> Option<UpdateInfo> {
+    let build_sha = build_sha?;
+    let client = update_client()?;
+    check_for_personal_update_at(
+        &client,
+        build_sha,
+        GITHUB_API_URL,
+        GITHUB_REPO,
+        PERSONAL_LATEST_TAG,
+    )
+    .await
+}
+
+async fn check_for_personal_update_at(
+    client: &reqwest::Client,
+    build_sha: &str,
+    api_url: &str,
+    repo: &str,
+    tag: &str,
+) -> Option<UpdateInfo> {
+    let tag_ref_url = format!("{api_url}/repos/{repo}/git/ref/tags/{tag}");
+    let tag_response = client.get(&tag_ref_url).send().await.ok()?;
+    if !tag_response.status().is_success() {
+        tracing::debug!(
+            "GitHub tag ref API returned status: {}",
+            tag_response.status()
+        );
+        return None;
     }
+    let tag_ref: GitHubTagRef = tag_response.json().await.ok()?;
+    let remote_sha = tag_ref.object.sha.trim();
+
+    if is_same_build_id(build_sha, remote_sha) {
+        tracing::debug!(
+            "Current build SHA {build_sha} matches remote {tag} SHA {remote_sha}; up to date"
+        );
+        return None;
+    }
+
+    let release_url = format!("{api_url}/repos/{repo}/releases/tags/{tag}");
+    let release_response = client.get(&release_url).send().await.ok()?;
+    if !release_response.status().is_success() {
+        tracing::debug!(
+            "GitHub release API returned status: {}",
+            release_response.status()
+        );
+        return None;
+    }
+    let release: GitHubRelease = release_response.json().await.ok()?;
+    if release.draft {
+        return None;
+    }
+
+    select_release_target(&release, Some(remote_sha))
 }
 
 fn update_client() -> Option<reqwest::Client> {
@@ -113,33 +203,7 @@ fn update_client() -> Option<reqwest::Client> {
         .ok()
 }
 
-async fn parse_release_response(
-    response: reqwest::Response,
-    channel: UpdateChannel,
-) -> Option<GitHubRelease> {
-    if !response.status().is_success() {
-        tracing::debug!("GitHub API returned status: {}", response.status());
-        return None;
-    }
-
-    match channel {
-        UpdateChannel::Beta => {
-            let releases: Vec<GitHubRelease> = response.json().await.ok()?;
-            releases.into_iter().find(|r| !r.draft)
-        }
-        UpdateChannel::Stable => response.json().await.ok(),
-    }
-}
-
-fn remote_version_from_tag(tag_name: &str) -> &str {
-    tag_name
-        .trim_start_matches('v')
-        .split('-')
-        .next()
-        .unwrap_or(tag_name)
-}
-
-fn select_release_target(release: &GitHubRelease) -> Option<UpdateInfo> {
+fn select_release_target(release: &GitHubRelease, remote_sha: Option<&str>) -> Option<UpdateInfo> {
     let installer = release
         .assets
         .iter()
@@ -159,8 +223,15 @@ fn select_release_target(release: &GitHubRelease) -> Option<UpdateInfo> {
         (release.html_url.clone(), UpdateDelivery::Manual, None)
     };
 
+    let version = if let Some(sha) = remote_sha.filter(|s| !s.is_empty()) {
+        let short_sha = sha.chars().take(7).collect::<String>();
+        format!("{}-{}", release.tag_name, short_sha)
+    } else {
+        release.tag_name.clone()
+    };
+
     Some(UpdateInfo {
-        version: release.tag_name.clone(),
+        version,
         download_url,
         expected_sha256,
         release_url: release.html_url.clone(),
@@ -183,6 +254,31 @@ fn parse_version_triplet(v: &str) -> (u32, u32, u32) {
     )
 }
 
+fn installer_version_from_name(name: &str) -> Option<(u32, u32, u32)> {
+    let lower = name.to_ascii_lowercase();
+    let stem = lower
+        .strip_suffix("-setup.exe")
+        .or_else(|| lower.strip_suffix(".msi"))?;
+
+    let version_candidate = stem.split_once('-').map(|(_, rest)| rest).unwrap_or(stem);
+    let version_text: String = version_candidate
+        .chars()
+        .skip_while(|ch| !ch.is_ascii_digit())
+        .take_while(|ch| ch.is_ascii_digit() || *ch == '.')
+        .collect();
+
+    if version_text.is_empty() {
+        return None;
+    }
+
+    let version = parse_version_triplet(&version_text);
+    if version == (0, 0, 0) {
+        return None;
+    }
+
+    Some(version)
+}
+
 fn parse_sha256_digest(digest: &str) -> Option<&str> {
     let (algo, hex) = digest.split_once(':')?;
     if !algo.eq_ignore_ascii_case("sha256") {
@@ -197,12 +293,10 @@ fn parse_sha256_digest(digest: &str) -> Option<&str> {
     }
 }
 
-/// Compare semantic versions, returns true if remote is newer
-fn is_newer_version(remote: &str, current: &str) -> bool {
-    let remote_v = parse_version_triplet(remote);
-    let current_v = parse_version_triplet(current);
-
-    remote_v > current_v
+/// Get the current version
+#[allow(dead_code, reason = "public updater API for downstream clients")]
+pub fn current_version() -> &'static str {
+    CURRENT_VERSION
 }
 
 /// Get the download directory for updates
@@ -225,8 +319,8 @@ pub async fn download_update(
     write_download_response(response, &file_path, &progress_tx).await?;
     verify_download_hash(&file_path, expected_update_sha256(update_info)?).await?;
 
-    // Signal download complete; the receiver may be gone, which is fine.
-    let _ready_signal = progress_tx.send(UpdateState::Ready(file_path.clone()));
+    // Signal download complete
+    drop(progress_tx.send(UpdateState::Ready(file_path.clone())));
 
     Ok(file_path)
 }
@@ -329,16 +423,14 @@ fn send_download_progress(
         0.0
     };
 
-    // Best-effort progress update; a dropped receiver is fine.
-    let _progress_update = progress_tx.send(UpdateState::Downloading(progress));
+    drop(progress_tx.send(UpdateState::Downloading(progress)));
 }
 
 /// Verify the SHA256 hash of a downloaded file against release metadata.
 async fn verify_download_hash(file_path: &PathBuf, expected_hash: &str) -> Result<(), String> {
     let actual = sha256_file_async(file_path).await?;
     if let Err(e) = verify_sha256_hex(&actual, expected_hash) {
-        // Best-effort cleanup of the corrupt download; the hash error is returned regardless.
-        let _removed = std::fs::remove_file(file_path);
+        drop(std::fs::remove_file(file_path));
         return Err(e);
     }
 
@@ -386,6 +478,36 @@ fn sha256_file(file_path: &Path) -> Result<String, String> {
     let mut hasher = Sha256::new();
     hasher.update(&file_bytes);
     Ok(format!("{:x}", hasher.finalize()))
+}
+
+/// Start background download of an update
+///
+/// Returns a receiver that can be polled for progress updates.
+#[allow(dead_code, reason = "public updater API for downstream clients")]
+pub fn start_background_download(
+    update_info: UpdateInfo,
+) -> (
+    Arc<watch::Receiver<UpdateState>>,
+    std::thread::JoinHandle<()>,
+) {
+    let (tx, rx) = watch::channel(UpdateState::Available);
+    let rx = Arc::new(rx);
+
+    let handle = std::thread::spawn(move || {
+        let rt = tokio::runtime::Runtime::new().unwrap();
+        rt.block_on(async {
+            match download_update(&update_info, tx.clone()).await {
+                Ok(_path) => {
+                    // UpdateState::Ready is already sent by download_update
+                }
+                Err(e) => {
+                    drop(tx.send(UpdateState::Failed(e)));
+                }
+            }
+        });
+    });
+
+    (rx, handle)
 }
 
 /// Apply a downloaded update by spawning the installer and exiting
@@ -451,30 +573,22 @@ fn windows_update_relaunch_path(current_exe: &Path) -> PathBuf {
 
 #[cfg(target_os = "windows")]
 fn spawn_windows_installer(installer_path: &Path, relaunch_path: &Path) -> Result<(), String> {
+    use std::process::Command;
+
     let plan = windows_installer_launch_plan(installer_path)?;
-    windows_installer_command(&plan, std::process::id(), relaunch_path)
+    Command::new(windows_powershell_path())
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-WindowStyle",
+            "Hidden",
+            "-Command",
+            &windows_installer_apply_script(&plan, std::process::id(), relaunch_path),
+        ])
         .spawn()
         .map_err(|e| format!("Failed to launch installer: {}", e))?;
     Ok(())
-}
-
-#[cfg(target_os = "windows")]
-fn windows_installer_command(
-    plan: &WindowsInstallerLaunchPlan,
-    current_pid: u32,
-    relaunch_path: &Path,
-) -> std::process::Command {
-    let mut command = std::process::Command::new(windows_powershell_path());
-    // インラインコマンドなので、実行ポリシーを上書きする必要はない。
-    command.args([
-        "-NoProfile",
-        "-NonInteractive",
-        "-WindowStyle",
-        "Hidden",
-        "-Command",
-        &windows_installer_apply_script(plan, current_pid, relaunch_path),
-    ]);
-    command
 }
 
 #[cfg(target_os = "windows")]
@@ -567,25 +681,65 @@ fn windows_powershell_path() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("powershell.exe"))
 }
 
+/// Check if there's a pending update ready to install
+#[allow(dead_code, reason = "public updater API for downstream clients")]
+pub fn get_pending_update() -> Option<PathBuf> {
+    let download_dir = get_download_dir()?;
+
+    if !download_dir.exists() {
+        return None;
+    }
+
+    find_pending_installer_in_dir(&download_dir)
+}
+
+fn find_pending_installer_in_dir(download_dir: &Path) -> Option<PathBuf> {
+    let current_version = parse_version_triplet(CURRENT_VERSION);
+
+    // Only treat newer installer assets as pending updates, and prefer the highest
+    // installer version when multiple cached installers are present.
+    std::fs::read_dir(download_dir)
+        .ok()?
+        .filter_map(|entry| entry.ok())
+        .filter_map(|entry| {
+            let path = entry.path();
+            let file_name = path.file_name()?.to_str()?;
+            let installer_version = installer_version_from_name(file_name)?;
+            if installer_version <= current_version {
+                return None;
+            }
+
+            let modified = entry
+                .metadata()
+                .ok()
+                .and_then(|meta| meta.modified().ok())
+                .and_then(|time| time.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| duration.as_secs())
+                .unwrap_or(0);
+
+            Some(((installer_version, modified), path))
+        })
+        .max_by_key(|(sort_key, _)| *sort_key)
+        .map(|(_, path)| path)
+}
+
+/// Clean up downloaded updates
+#[allow(dead_code, reason = "public updater API for downstream clients")]
+pub fn cleanup_downloads() {
+    if let Some(download_dir) = get_download_dir() {
+        drop(std::fs::remove_dir_all(&download_dir));
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
     #[test]
-    fn test_version_comparison() {
-        assert!(is_newer_version("1.0.1", "1.0.0"));
-        assert!(is_newer_version("1.1.0", "1.0.0"));
-        assert!(is_newer_version("2.0.0", "1.0.0"));
-        assert!(!is_newer_version("1.0.0", "1.0.0"));
-        assert!(!is_newer_version("0.9.0", "1.0.0"));
-        assert!(is_newer_version("1.0.0", "0.1.0"));
-    }
-
-    #[test]
     fn prefers_installer_asset_for_auto_update() {
         let release = GitHubRelease {
             tag_name: "v1.2.6".to_string(),
-            html_url: "https://github.com/nesszer/Win-CodexBar/releases/tag/v1.2.6".to_string(),
+            html_url: "https://github.com/junglesub/Win-CodexBar/releases/tag/v1.2.6".to_string(),
             body: None,
             assets: vec![
                 GitHubAsset {
@@ -606,7 +760,7 @@ mod tests {
             draft: false,
         };
 
-        let update = select_release_target(&release).expect("update target");
+        let update = select_release_target(&release, None).expect("update target");
 
         assert_eq!(
             update.download_url,
@@ -620,7 +774,7 @@ mod tests {
     fn falls_back_to_manual_release_when_only_portable_exe_exists() {
         let release = GitHubRelease {
             tag_name: "v1.2.6".to_string(),
-            html_url: "https://github.com/nesszer/Win-CodexBar/releases/tag/v1.2.6".to_string(),
+            html_url: "https://github.com/junglesub/Win-CodexBar/releases/tag/v1.2.6".to_string(),
             body: None,
             assets: vec![GitHubAsset {
                 name: "codexbar.exe".to_string(),
@@ -630,13 +784,71 @@ mod tests {
             draft: false,
         };
 
-        let update = select_release_target(&release).expect("update target");
+        let update = select_release_target(&release, None).expect("update target");
 
         assert_eq!(
             update.download_url,
-            "https://github.com/nesszer/Win-CodexBar/releases/tag/v1.2.6"
+            "https://github.com/junglesub/Win-CodexBar/releases/tag/v1.2.6"
         );
         assert!(!update.supports_auto_apply());
+    }
+
+    #[test]
+    fn finds_newest_pending_installer_and_ignores_portable_exe() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (major, minor, patch) = parse_version_triplet(CURRENT_VERSION);
+        let portable = temp.path().join("codexbar.exe");
+        let older = temp
+            .path()
+            .join(format!("CodexBar-{}.{}.{}-Setup.exe", major, minor, patch));
+        let newer = temp.path().join(format!(
+            "CodexBar-{}.{}.{}-Setup.exe",
+            major,
+            minor,
+            patch + 1
+        ));
+
+        std::fs::write(&portable, b"portable").expect("write portable");
+        std::fs::write(&older, b"older installer").expect("write older installer");
+        std::fs::write(&newer, b"newer installer").expect("write newer installer");
+
+        let pending = find_pending_installer_in_dir(temp.path()).expect("pending installer");
+
+        assert_eq!(pending, newer);
+    }
+
+    #[test]
+    fn ignores_cached_installers_for_current_or_older_versions() {
+        let temp = tempfile::tempdir().expect("temp dir");
+        let (major, minor, patch) = parse_version_triplet(CURRENT_VERSION);
+        let current = temp
+            .path()
+            .join(format!("CodexBar-{}.{}.{}-Setup.exe", major, minor, patch));
+        let older = temp.path().join(format!(
+            "CodexBar-{}.{}.{}-Setup.exe",
+            major,
+            minor,
+            patch.saturating_sub(1)
+        ));
+
+        std::fs::write(&current, b"current installer").expect("write current installer");
+        std::fs::write(&older, b"older installer").expect("write older installer");
+
+        assert!(find_pending_installer_in_dir(temp.path()).is_none());
+    }
+
+    #[test]
+    fn parses_prerelease_installer_names_for_beta_updates() {
+        let (major, minor, patch) = parse_version_triplet(CURRENT_VERSION);
+        assert_eq!(
+            installer_version_from_name(&format!(
+                "CodexBar-{}.{}.{}-beta.1-Setup.exe",
+                major,
+                minor,
+                patch + 1
+            )),
+            Some((major, minor, patch + 1))
+        );
     }
 
     #[test]
@@ -699,74 +911,6 @@ mod tests {
 
     #[cfg(target_os = "windows")]
     #[test]
-    fn windows_installer_helper_preserves_restricted_execution_policy() {
-        use std::os::windows::process::CommandExt;
-
-        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
-        let temp = tempfile::tempdir().expect("temp dir");
-        let plan = WindowsInstallerLaunchPlan {
-            program: windows_powershell_path(),
-            args: [
-                "-NoProfile",
-                "-NonInteractive",
-                "-WindowStyle",
-                "Hidden",
-                "-Command",
-                "exit 0",
-            ]
-            .map(std::ffi::OsString::from)
-            .to_vec(),
-        };
-        let mut previous_process = std::process::Command::new(windows_powershell_path())
-            .args(["-NoProfile", "-NonInteractive", "-Command", "exit 0"])
-            .creation_flags(CREATE_NO_WINDOW)
-            .spawn()
-            .expect("previous process");
-        let command = windows_installer_command(
-            &plan,
-            previous_process.id(),
-            &temp.path().join("absent-desktop.exe"),
-        );
-        let mut args: Vec<_> = command.get_args().map(std::ffi::OsString::from).collect();
-        assert!(
-            !args.iter().any(|arg| arg
-                .to_string_lossy()
-                .eq_ignore_ascii_case("-ExecutionPolicy")),
-            "update helper must not override the inherited execution policy"
-        );
-        let script = args.pop().expect("inline update command");
-        args.push(
-            format!(
-                "{}; Write-Output $p.ExitCode; Get-ExecutionPolicy",
-                script.to_string_lossy()
-            )
-            .into(),
-        );
-        let output = std::process::Command::new(command.get_program())
-            .args(args)
-            .env("PSExecutionPolicyPreference", "Restricted")
-            // PowerShell 7 のモジュール検索先を Windows PowerShell に引き継がせない。
-            .env_remove("PSModulePath")
-            .creation_flags(CREATE_NO_WINDOW)
-            .output()
-            .expect("update helper");
-        previous_process.wait().expect("reap previous process");
-
-        assert!(
-            output.status.success(),
-            "update helper failed: {}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        assert_eq!(
-            String::from_utf8_lossy(&output.stdout)
-                .trim()
-                .replace("\r\n", "\n"),
-            "0\nRestricted"
-        );
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
     fn windows_update_relaunch_path_prefers_primary_desktop_exe_from_legacy_alias() {
         let temp = tempfile::tempdir().expect("temp dir");
         let desktop_path = temp.path().join("codexbar.exe");
@@ -806,5 +950,180 @@ mod tests {
             powershell_single_quoted(r"C:\Temp\CodexBar's Setup.exe"),
             r"'C:\Temp\CodexBar''s Setup.exe'"
         );
+    }
+
+    #[test]
+    fn test_is_same_build_id() {
+        // Exact match
+        assert!(is_same_build_id(
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3",
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3"
+        ));
+        // Case insensitive
+        assert!(is_same_build_id(
+            "1EBB612FD2A15552EE910B4ABD8429D7BC4C14A3",
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3"
+        ));
+        // Short prefix (>=7 chars) vs full SHA
+        assert!(is_same_build_id(
+            "1ebb612",
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3"
+        ));
+        assert!(is_same_build_id(
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3",
+            "1ebb612"
+        ));
+        // Different commit SHAs
+        assert!(!is_same_build_id(
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3",
+            "5b11cfcb571064e5e46e5d5ea0c4faab986c7157"
+        ));
+        assert!(!is_same_build_id("1ebb612", "5b11cfc"));
+        // Empty or whitespace strings
+        assert!(!is_same_build_id("", "1ebb612"));
+        assert!(!is_same_build_id("1ebb612", "   "));
+        assert!(!is_same_build_id("", ""));
+        // Short strings under 7 chars that aren't identical
+        assert!(!is_same_build_id(
+            "1ebb6",
+            "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3"
+        ));
+    }
+
+    #[tokio::test]
+    async fn local_dev_build_without_sha_does_not_check_updates() {
+        assert!(check_for_personal_update(None).await.is_none());
+    }
+
+    #[tokio::test]
+    async fn different_personal_tag_commit_fetches_the_rolling_release() {
+        let mut server = mockito::Server::new_async().await;
+        let tag_ref = server
+            .mock("GET", "/repos/owner/repo/git/ref/tags/personal-latest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "ref":"refs/tags/personal-latest",
+                    "object":{
+                        "sha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+                        "type":"commit"
+                    }
+                }"#,
+            )
+            .create_async()
+            .await;
+        let release = server
+            .mock("GET", "/repos/owner/repo/releases/tags/personal-latest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(
+                r#"{
+                    "tag_name":"personal-latest",
+                    "html_url":"https://example.test/release",
+                    "body":"rolling build",
+                    "assets":[{
+                        "name":"CodexBar-0.55.0-Setup.exe",
+                        "browser_download_url":"https://example.test/setup.exe",
+                        "digest":"sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+                    }],
+                    "draft":false,
+                    "prerelease":true
+                }"#,
+            )
+            .create_async()
+            .await;
+
+        let update = check_for_personal_update_at(
+            &reqwest::Client::new(),
+            "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+            &server.url(),
+            "owner/repo",
+            "personal-latest",
+        )
+        .await
+        .expect("different build should update");
+
+        assert_eq!(update.version, "personal-latest-bbbbbbb");
+        assert_eq!(update.download_url, "https://example.test/setup.exe");
+        tag_ref.assert_async().await;
+        release.assert_async().await;
+    }
+
+    #[tokio::test]
+    async fn matching_personal_tag_commit_skips_the_rolling_release() {
+        let mut server = mockito::Server::new_async().await;
+        let sha = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+        let tag_ref = server
+            .mock("GET", "/repos/owner/repo/git/ref/tags/personal-latest")
+            .with_status(200)
+            .with_header("content-type", "application/json")
+            .with_body(format!(
+                r#"{{
+                    "ref":"refs/tags/personal-latest",
+                    "object":{{
+                        "sha":"{sha}",
+                        "type":"commit"
+                    }}
+                }}"#
+            ))
+            .create_async()
+            .await;
+        let release = server
+            .mock("GET", "/repos/owner/repo/releases/tags/personal-latest")
+            .with_status(200)
+            .expect(0)
+            .create_async()
+            .await;
+
+        let update = check_for_personal_update_at(
+            &reqwest::Client::new(),
+            sha,
+            &server.url(),
+            "owner/repo",
+            "personal-latest",
+        )
+        .await;
+
+        assert!(update.is_none());
+        tag_ref.assert_async().await;
+        release.assert_async().await;
+    }
+
+    #[test]
+    fn personal_latest_non_semver_target_selection() {
+        let release = GitHubRelease {
+            tag_name: "personal-latest".to_string(),
+            html_url: "https://github.com/junglesub/Win-CodexBar/releases/tag/personal-latest".to_string(),
+            body: Some("Automated build of personal branch".to_string()),
+            assets: vec![
+                GitHubAsset {
+                    name: "CodexBar-0.55.0-Setup.exe".to_string(),
+                    browser_download_url: "https://github.com/junglesub/Win-CodexBar/releases/download/personal-latest/CodexBar-0.55.0-Setup.exe".to_string(),
+                    digest: Some("sha256:1c87abba6f0c71c32ebb39fc51f2dc2d921c23e5a8f70a6ba8f9e19fbc72eba6".to_string()),
+                },
+                GitHubAsset {
+                    name: "CodexBar-0.55.0-portable.exe".to_string(),
+                    browser_download_url: "https://github.com/junglesub/Win-CodexBar/releases/download/personal-latest/CodexBar-0.55.0-portable.exe".to_string(),
+                    digest: None,
+                },
+            ],
+            draft: false,
+        };
+
+        let remote_sha = "1ebb612fd2a15552ee910b4abd8429d7bc4c14a3";
+        let update = select_release_target(&release, Some(remote_sha)).expect("update info");
+
+        assert_eq!(update.version, "personal-latest-1ebb612");
+        assert_eq!(
+            update.download_url,
+            "https://github.com/junglesub/Win-CodexBar/releases/download/personal-latest/CodexBar-0.55.0-Setup.exe"
+        );
+        assert_eq!(
+            update.expected_sha256,
+            Some("1c87abba6f0c71c32ebb39fc51f2dc2d921c23e5a8f70a6ba8f9e19fbc72eba6".to_string())
+        );
+        assert!(update.supports_auto_apply());
+        assert!(update.supports_auto_download());
     }
 }

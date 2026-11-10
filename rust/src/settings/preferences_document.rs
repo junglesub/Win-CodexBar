@@ -142,6 +142,18 @@ const ALLOWED_PREFERENCES: &[(&str, Validator)] = &[
     ("float_bar_show_reset_inline", typed::<bool>),
     ("float_bar_show_cost", typed::<bool>),
     ("float_bar_show_weekly", typed::<bool>),
+    ("float_bar_background_color", background_color),
+    ("float_bar_background_opacity", uint_in::<0, 100>),
+    ("float_bar_hide_percent_when_exhausted", typed::<bool>),
+    ("float_bar_exhausted_clock_time", typed::<bool>),
+    ("float_bar_exhausted_weekday_time", typed::<bool>),
+    ("float_bar_battery_style", typed::<bool>),
+    ("float_bar_battery_slots", battery_slots),
+    ("float_bar_battery_low_percent", battery_low_percent),
+    ("float_bar_pace_text_color", typed::<bool>),
+    ("float_bar_pace_time_delta", typed::<bool>),
+    ("float_bar_show_remaining", typed::<bool>),
+    ("float_bar_follow_provider_order", typed::<bool>),
     ("cost_reporting_period", cost_reporting_period),
     ("cost_usage_enabled", typed::<bool>),
     ("spend_dashboard_period", cost_reporting_period),
@@ -242,6 +254,31 @@ fn refresh_interval_secs(value: &Value) -> bool {
     value
         .as_u64()
         .is_some_and(|secs| secs == 0 || (60..=86_400).contains(&secs))
+}
+
+/// `#RRGGBB`, as normalized by `normalize_float_bar_background_color`.
+fn background_color(value: &Value) -> bool {
+    value.as_str().is_some_and(|raw| {
+        raw.len() == 7
+            && raw.starts_with('#')
+            && raw[1..].bytes().all(|byte| byte.is_ascii_hexdigit())
+    })
+}
+
+/// Float Bar slots that use battery cells; empty means every slot.
+fn battery_slots(value: &Value) -> bool {
+    value.as_array().is_some_and(|items| {
+        items
+            .iter()
+            .all(|item| one_of(item, &["5h", "weekly", "monthly", "fallback"]))
+    })
+}
+
+/// `-1` disables the low-quota percentage fallback; otherwise `0..=100`.
+fn battery_low_percent(value: &Value) -> bool {
+    value
+        .as_i64()
+        .is_some_and(|percent| percent == -1 || (0..=100).contains(&percent))
 }
 
 fn percent(value: &Value) -> bool {

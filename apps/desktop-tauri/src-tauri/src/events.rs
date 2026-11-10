@@ -84,8 +84,12 @@ pub fn emit_surface_mode_changed(
 
 pub fn emit_provider_updated(app: &AppHandle, snapshot: &ProviderUsageSnapshot) {
     let settings = codexbar::settings::Settings::load();
-    let presentation =
-        crate::commands::ProviderUsagePresentationSnapshot::new(snapshot.clone(), &settings);
+    let mut snapshot = snapshot.clone();
+    crate::commands::filter_hidden_codex_spark_rows(
+        &mut snapshot,
+        settings.codex_spark_usage_visible(),
+    );
+    let presentation = crate::commands::ProviderUsagePresentationSnapshot::new(snapshot, &settings);
     let _emit_provider = app.emit(PROVIDER_UPDATED, presentation);
 }
 

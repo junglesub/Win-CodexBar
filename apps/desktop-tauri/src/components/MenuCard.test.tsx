@@ -162,6 +162,13 @@ describe("MenuCard", () => {
         AtlasCloudAvailableBalance: "Available balance",
         AtlasCloudBalance: "Atlas Cloud balance",
         DetailPaceRunsOutIn: "Runs out in",
+        DetailPaceElapsed: "{} elapsed",
+        DetailPaceResetRemaining: "{} reset remaining",
+        DetailPaceTitle: "Pace",
+        DetailPaceOnTrack: "On track",
+        DetailPaceAhead: "Ahead",
+        DetailPaceBehind: "Behind",
+        DetailPaceWillLastToReset: "Will last to reset",
         PanelEstimatedFromLocalLogs: "Estimated from local logs",
         PanelLeftSuffix: "left",
         PanelNow: "now",
@@ -1172,23 +1179,6 @@ describe("MenuCard", () => {
     expect(screen.queryByText(/On-pace budget/)).not.toBeInTheDocument();
     expect(screen.queryByText("now 20%")).not.toBeInTheDocument();
     expect(screen.queryByRole("img", { name: /PaceChartAriaLabel/i })).not.toBeInTheDocument();
-  });
-
-  it("does not show pace budgets for a five-hour session window", async () => {
-    const resetAt = new Date(Date.now() + 4 * 60 * 60 * 1000);
-    const snapshot = provider(null, 31);
-    snapshot.primary = rateWindow(31, {
-      windowMinutes: 5 * 60,
-      resetsAt: resetAt.toISOString(),
-    });
-
-    renderCard(snapshot);
-
-    expect(await screen.findByText("69% left")).toBeInTheDocument();
-    expect(screen.queryByText("On-pace budget")).not.toBeInTheDocument();
-    expect(
-      screen.queryByRole("img", { name: /PaceChartAriaLabel/i }),
-    ).not.toBeInTheDocument();
   });
 
   it("puts the percent under the bar with the reset at the end of the same line", async () => {

@@ -1916,3 +1916,36 @@ AcknowledgementsAuthor = Autor
 AcknowledgementsAuthors = Autores
 AcknowledgementsLicense = Licença
 AcknowledgementsStandardText = Texto padrão da licença. O pacote não inclui arquivo de licença.
+
+FloatBarThirtyDayShort = 30d
+
+FloatBarHidePercentWhenExhausted = Ocultar porcentagem quando esgotado
+FloatBarHidePercentWhenExhaustedHelper = Quando uma cota se esgota, mostra apenas o tempo restante em vez de 100%.
+FloatBarExhaustedClockTime = Mostrar redefinição como horário
+FloatBarExhaustedClockTimeHelper = Mostra a redefinição como M/D HH:MM (HH:MM no mesmo dia) em vez da contagem regressiva restante.
+FloatBarExhaustedWeekdayTime = Mostrar dia da semana em vez da data
+FloatBarExhaustedWeekdayTimeHelper = Mostra seg, ter, qua em vez da data quando a redefinição cai na próxima semana.
+
+DetailPaceElapsed = { "{}" } decorrido
+DetailPaceResetRemaining = { "{}" } para redefinir
+DetailPaceRestToTrack = { "{}" } de descanso para voltar ao ritmo
+FloatBarAgyRunNeeded = Iniciar agy
+FloatBarBatteryStyleLabel = Estilo de bateria
+FloatBarBatteryStyleHelper = Mostra o uso na Float Bar como células de bateria em vez de números percentuais.
+FloatBarBatterySlotsLabel = Slots de bateria
+FloatBarBatterySlotsHelper = Escolha quais slots da Float Bar usam células de bateria; vários slots podem ser selecionados. O padrão usa todos os slots.
+FloatBarBatterySlotMonthly = Mensal
+FloatBarBatterySlotFallback = Reserva
+FloatBarBatteryLowPercentLabel = Mostrar porcentagem quando baixo
+FloatBarBatteryLowPercentHelper = Quando a cota restante cair abaixo desta porcentagem, mostra um número percentual em vez da célula de bateria. -1 desativa.
+FloatBarPaceTextColorLabel = Cor do texto de ritmo
+FloatBarPaceTextColorHelper = Colore a contagem regressiva de redefinição da Float Bar com a cor do ritmo (lento/estável/acelerado/crítico). As células de bateria e os números percentuais mantêm o tom do limite de uso.
+FloatBarPaceTimeDeltaLabel = Diferença de tempo do ritmo
+FloatBarPaceTimeDeltaHelper = Mostra as diferenças de ritmo ao passar o mouse na Float Bar como tempo à frente ou atrás (ex.: +24m) em vez de pontos percentuais.
+FloatBarShowRemainingLabel = Mostrar restante
+FloatBarShowRemainingHelper = Mostra o uso na Float Bar como cota restante em vez de cota usada.
+FloatBarFollowProviderOrderLabel = Usar ordem personalizada de provedores
+FloatBarFollowProviderOrderHelper = Mostra os provedores na Float Bar na sua ordem personalizada em vez da ordem por uso. Desative para voltar à ordem por uso.
+FloatBarBackgroundColor = Cor de fundo
+FloatBarBackgroundOpacity = Opacidade do fundo
+FloatBarResetBackground = Redefinir fundo

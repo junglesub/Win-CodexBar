@@ -476,11 +476,21 @@ mod tests {
             .stdout(Stdio::piped()).stderr(Stdio::piped()).spawn().unwrap();
         let pid_file = dir.path().join("child.pid");
         let deadline = Instant::now() + Duration::from_secs(10);
-        while !pid_file.exists() {
-            assert!(Instant::now() < deadline);
+        // The helper creates the pid file before writing it, so poll the
+        // parsed value instead of `exists()`; reading mid-write can be empty.
+        let pid = loop {
+            if let Some(pid) = std::fs::read_to_string(&pid_file)
+                .ok()
+                .and_then(|raw| raw.trim().parse::<u32>().ok())
+            {
+                break pid;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "helper never reported its child pid"
+            );
             std::thread::sleep(Duration::from_millis(20));
-        }
-        let pid = std::fs::read_to_string(pid_file).unwrap().parse().unwrap();
+        };
         // SAFETY: the helper reported its live child; this owned wait-only handle prevents PID reuse ambiguity.
         let process = unsafe {
             OwnedHandle::from_raw_handle(OpenProcess(PROCESS_SYNCHRONIZE, false, pid).unwrap().0)

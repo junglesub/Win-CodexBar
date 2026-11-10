@@ -1,4 +1,5 @@
 import {
+  Fragment,
   useCallback,
   useEffect,
   useMemo,
@@ -7,10 +8,9 @@ import {
   type CSSProperties,
   type MouseEvent,
 } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { useFormattedResetTime } from "../hooks/useFormattedResetTime";
-import { useTauriEvent } from "../hooks/useTauriEvent";
-import { useCurrency } from "../hooks/CurrencyProvider";
 import { useLocale } from "../hooks/useLocale";
 import { useProviders } from "../hooks/useProviders";
 import {
@@ -18,110 +18,298 @@ import {
   getSettingsSnapshot,
   refreshProvidersIfStale,
 } from "../lib/tauri";
+import { formatRelativeUpdated } from "../lib/relativeTime";
+import { formatDuration, formatEta } from "../lib/formatEta";
+import { orderProviderSnapshots } from "../lib/providerOrder";
+import { providerAllowsPace } from "../lib/providerPace";
+import { paceCategory, type PaceCategory } from "../surfaces/tray/paceCategory";
+import type { LocaleKey } from "../i18n/keys";
 import { ProviderIcon } from "../components/providers/ProviderIcon";
-import { brandColorOnDark, getProviderIcon } from "../components/providers/providerIcons";
-import { costPeriodShortLabel } from "../lib/costPeriod";
-import { describeProviderState } from "../lib/providerState";
-import { resetDescriptionFallback, windowDetailText } from "../lib/usageWindows";
-import { localizeProviderText } from "../lib/providerText";
-import {
-  type MetricLane,
-  quotaWarningWindowForLane,
-  SESSION_MINUTES,
-  WEEK_MINUTES,
-} from "../lib/metricRowModel";
-import { type QuotaWarningSettings, resolveQuotaWarning } from "../lib/quotaWarnings";
+import { getProviderIcon } from "../components/providers/providerIcons";
 import type {
   BootstrapState,
+  MetricPreference,
+  PaceSnapshot,
   ProviderLocalUsageSummary,
   ProviderUsageSnapshot,
   RateWindowSnapshot,
-  SettingsSnapshot,
 } from "../types/bridge";
 import { FLOAT_BAR_CONFIG_CHANGED_EVENT, resizeFloatBar } from "./api";
 import "./FloatBar.css";
 
-function sameWindow(a: RateWindowSnapshot, b: RateWindowSnapshot): boolean {
+/**
+ * Cadence classification for the three fixed Float Bar usage positions.
+ *
+ * A known `windowMinutes` always wins; label fallback is used only when the
+ * duration is absent, because labels are not a reliable source of truth.
+ */
+type UsageCadence = "5h" | "weekly" | "monthly";
+type FloatBarBatterySlot = UsageCadence | "fallback";
+type UsageSlots = Record<UsageCadence, RateWindowSnapshot | null>;
+
+const USAGE_CADENCES: readonly UsageCadence[] = ["5h", "weekly", "monthly"];
+
+/**
+ * Stable fallback for an absent custom provider order. Shared module constant
+ * so the `visible` memo dependencies keep referential identity across renders
+ * (a fresh `[] ?? []` allocation per render would retrigger downstream
+ * memo/effect chains on every paint).
+ */
+const EMPTY_PROVIDER_ORDER: readonly string[] = [];
+
+function isBatterySlotEnabled(
+  selectedSlots: readonly string[] | undefined,
+  slot: FloatBarBatterySlot,
+): boolean {
+  const selected = selectedSlots ?? [];
+  // An empty persisted list is the backwards-compatible "all slots" default.
+  // A non-empty list with no recognized values therefore selects none, while
+  // unknown values alongside known ones are harmlessly ignored.
+  return selected.length === 0 || selected.includes(slot);
+}
+
+/** Personal: pace stage to its localized label (mirrors MenuCardDetails). */
+function paceStageKey(stage: PaceSnapshot["stage"]): LocaleKey {
+  switch (stage) {
+    case "on_track":
+      return "DetailPaceOnTrack";
+    case "slightly_ahead":
+      return "DetailPaceSlightlyAhead";
+    case "ahead":
+      return "DetailPaceAhead";
+    case "far_ahead":
+      return "DetailPaceFarAhead";
+    case "slightly_behind":
+      return "DetailPaceSlightlyBehind";
+    case "behind":
+      return "DetailPaceBehind";
+    case "far_behind":
+      return "DetailPaceFarBehind";
+    default:
+      return "DetailPaceOnTrack";
+  }
+}
+
+function cadenceFromMinutes(minutes: number): UsageCadence | null {
+  if (minutes === 300) return "5h";
+  // Actual Gregorian months run 28-31 days (40,320-44,640 minutes); anything
+  // above that range is unsupported rather than weekly or monthly.
+  if (minutes >= 40_320 && minutes <= 44_640) return "monthly";
+  if (minutes >= 10_080 && minutes < 40_320) return "weekly";
+  return null;
+}
+
+function cadenceFromLabel(label: string | undefined): UsageCadence | null {
+  const normalized = label?.trim().toLowerCase() ?? "";
+  if (/(^|[^a-z0-9])5\s*(?:-|\s)?(?:h|hour)(?:s)?([^a-z0-9]|$)/.test(normalized)) return "5h";
+  if (/(^|[^a-z0-9])(?:weekly|7[ -]?day)([^a-z0-9]|$)/.test(normalized)) return "weekly";
+  if (/(^|[^a-z0-9])monthly([^a-z0-9]|$)/.test(normalized)) return "monthly";
+  return null;
+}
+
+function selectFloatBarUsageSlots(provider: ProviderUsageSnapshot): UsageSlots {
+  const slots: UsageSlots = { "5h": null, weekly: null, monthly: null };
+  const candidates = [
+    [provider.primary, provider.primaryLabel],
+    [provider.secondary, provider.secondaryLabel],
+    [provider.tertiary, provider.tertiaryLabel],
+  ] as const;
+
+  for (const [window, label] of candidates) {
+    if (!window || window.isInformational) continue;
+    const cadence =
+      window.windowMinutes == null
+        ? cadenceFromLabel(label)
+        : cadenceFromMinutes(window.windowMinutes);
+    if (cadence && !slots[cadence]) slots[cadence] = window;
+  }
+  return slots;
+}
+
+function maxFloatBarUsedPercent(
+  provider: ProviderUsageSnapshot,
+  preference?: MetricPreference | undefined,
+): number {
+  const slots = Object.values(selectFloatBarUsageSlots(provider)).filter(
+    (window): window is RateWindowSnapshot => window !== null,
+  );
+  if (slots.length > 0) {
+    return Math.max(
+      0,
+      ...slots.map((window) => Math.max(0, Math.min(100, window.usedPercent))),
+    );
+  }
+  const fallback = fallbackFor(provider, preference);
+  if (!fallback) return 0;
+  return Math.max(0, Math.min(100, fallback.window.usedPercent));
+}
+
+/**
+ * Detect the known Antigravity-not-running error so the pill can show a
+ * compact, non-identity overlay message next to the Antigravity icon.
+ */
+function isAntigravityNotRunningError(provider: ProviderUsageSnapshot): boolean {
   return (
-    a.usedPercent === b.usedPercent &&
-    a.windowMinutes === b.windowMinutes &&
-    a.resetsAt === b.resetsAt &&
-    a.resetDescription === b.resetDescription &&
-    a.isExhausted === b.isExhausted &&
-    a.isInformational === b.isInformational
+    provider.providerId === "antigravity" &&
+    /antigravity language server not running/i.test(provider.error ?? "")
   );
 }
 
 /**
- * The card lane the selected metric came from, so the pill tone follows the
- * same quota warning window as the card markers and the toasts (primary is
- * Session, secondary and tertiary are Weekly). `null` for a window that is not
- * one of the three lanes, such as an icon fallback extra window.
+ * A single fallback metric for providers whose canonical windows carry no
+ * recognizable cadence. The visible label prefers the provider's own window
+ * label (primaryLabel/secondaryLabel/tertiaryLabel) and only falls back to a
+ * generic localized identity when the provider did not supply one.
+ * Model-specific has no bridge label, so it always uses the generic key.
  */
-function selectedMetricLane(provider: ProviderUsageSnapshot): MetricLane | null {
-  const selected = provider.selectedMetric;
-  if (sameWindow(selected, provider.primary)) return "primary";
-  if (provider.secondary && sameWindow(selected, provider.secondary)) return "secondary";
-  if (provider.tertiary && sameWindow(selected, provider.tertiary)) return "tertiary";
+type FallbackMetric = {
+  window: RateWindowSnapshot;
+  providerLabel: string | null;
+  labelKey: LocaleKey;
+};
+
+/** One canonical window candidate with its provider label and generic key. */
+type FallbackCandidate = {
+  window: RateWindowSnapshot | null;
+  providerLabel: string | null;
+  labelKey: LocaleKey;
+};
+
+function fallbackFor(
+  provider: ProviderUsageSnapshot,
+  preference: MetricPreference | undefined,
+): FallbackMetric | null {
+  const candidates: FallbackCandidate[] = [
+    {
+      window: provider.modelSpecific,
+      providerLabel: null,
+      labelKey: "DetailWindowModelSpecific",
+    },
+    {
+      window: provider.primary,
+      providerLabel: provider.primaryLabel ?? null,
+      labelKey: "ProviderSessionLabel",
+    },
+    {
+      window: provider.secondary,
+      providerLabel: provider.secondaryLabel ?? null,
+      labelKey: "ProviderWeeklyLabel",
+    },
+    {
+      window: provider.tertiary,
+      providerLabel: provider.tertiaryLabel ?? null,
+      labelKey: "DetailWindowTertiary",
+    },
+  ];
+
+  // Explicit preference -> the matching window, when present and not
+  // informational. Anything else (automatic, unsupported, absent,
+  // informational) falls through to the automatic order:
+  // modelSpecific -> primary -> secondary -> tertiary.
+  const preferredIndex =
+    preference === "session"
+      ? 1
+      : preference === "weekly"
+        ? 2
+        : preference === "model"
+          ? 0
+          : preference === "tertiary"
+            ? 3
+            : -1;
+  const preferred = preferredIndex >= 0 ? candidates[preferredIndex] : null;
+  if (preferred?.window && !preferred.window.isInformational) {
+    return {
+      window: preferred.window,
+      providerLabel: preferred.providerLabel,
+      labelKey: preferred.labelKey,
+    };
+  }
+
+  for (const candidate of candidates) {
+    if (candidate.window && !candidate.window.isInformational) {
+      return {
+        window: candidate.window,
+        providerLabel: candidate.providerLabel,
+        labelKey: candidate.labelKey,
+      };
+    }
+  }
   return null;
 }
 
-function ResetIcon({ size }: { size: number }) {
-  return (
-    <svg
-      className="floatbar__reset-icon-svg"
-      width={size}
-      height={size}
-      viewBox="0 0 16 16"
-      fill="none"
-      aria-hidden="true"
-    >
-      <path
-        d="M12.9 7.1a5 5 0 1 0-1.2 3.9"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-      />
-      <path
-        d="M12.9 3.8v3.3H9.6"
-        stroke="currentColor"
-        strokeWidth="1.6"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+/**
+ * Locale-independent compact countdown for the visible Float Bar slot value.
+ * Never derives from localized prose, so it stays compact in every language.
+ */
+function compactResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return "now";
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  if (totalMinutes >= 1440) return `${Math.floor(totalMinutes / 1440)}d`;
+  return `${Math.floor(totalMinutes / 60)}h`;
 }
 
-function inlineResetTime(
-  resetText: string,
-  resetsAt: string | null,
-  relative: boolean,
-): string {
-  if (relative && resetsAt) {
-    const target = Date.parse(resetsAt);
-    if (!Number.isNaN(target)) {
-      const diffMs = target - Date.now();
-      if (diffMs <= 0) return "now";
-
-      const totalMinutes = Math.max(1, Math.floor(diffMs / 60_000));
-      const days = Math.floor(totalMinutes / 1440);
-      const hours = Math.floor((totalMinutes % 1440) / 60);
-      const minutes = totalMinutes % 60;
-      if (days > 0) return `${days}d ${hours}h`;
-      if (hours > 0) return `${hours}h ${minutes}m`;
-      return `${minutes}m`;
-    }
+/**
+ * Detailed two-unit countdown used only by the exhausted hide-percent mode.
+ * Floor semantics, locale-independent: under an hour renders `Xm`, under a
+ * day renders `Xh Ym` (`Y` omitted when zero), otherwise `Xd Xh` (`X` omitted
+ * when zero). Returns null for missing/invalid/expired timestamps.
+ */
+function compactDetailedResetTime(resetsAt: string): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  const diffMs = target - Date.now();
+  if (diffMs <= 0) return null;
+  const totalMinutes = Math.floor(diffMs / 60_000);
+  if (totalMinutes < 60) return `${totalMinutes}m`;
+  if (totalMinutes < 1440) {
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    return minutes > 0 ? `${hours}h ${minutes}m` : `${hours}h`;
   }
+  const days = Math.floor(totalMinutes / 1440);
+  const hours = Math.floor((totalMinutes % 1440) / 60);
+  return hours > 0 ? `${days}d ${hours}h` : `${days}d`;
+}
 
-  const normalized = resetText.trim();
-  if (/^reset(?:s|ting)?(?:\s+due)?\s*(?:now)?$/i.test(normalized)) {
-    return "now";
+const WEEKDAYS_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function startOfLocalDayMillis(date: Date): number {
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
+}
+
+/**
+ * Absolute local clock rendering for the exhausted hide-percent mode.
+ * Same calendar day renders `HH:MM` (zero-padded 24-hour); any other day
+ * renders `M/D HH:MM`. When `useWeekday` is set and the reset falls within
+ * the coming week (1..=6 local calendar days ahead — never the same weekday
+ * twice), the date is replaced by its weekday abbreviation (`Mon HH:MM`).
+ * Returns null for missing/invalid/expired timestamps.
+ */
+function clockResetTime(resetsAt: string, useWeekday: boolean): string | null {
+  const target = Date.parse(resetsAt);
+  if (Number.isNaN(target)) return null;
+  if (target <= Date.now()) return null;
+  const date = new Date(target);
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const hh = String(date.getHours()).padStart(2, "0");
+  const mm = String(date.getMinutes()).padStart(2, "0");
+  const clock = `${hh}:${mm}`;
+  if (sameDay) return clock;
+  const dayDiff = Math.round(
+    (startOfLocalDayMillis(date) - startOfLocalDayMillis(now)) / 86_400_000,
+  );
+  if (useWeekday && dayDiff >= 1 && dayDiff <= 6) {
+    return `${WEEKDAYS_SHORT[date.getDay()]} ${clock}`;
   }
-  return normalized
-    .replace(/^resets?\s+in\s+/i, "")
-    .replace(/^resets?\s+/i, "")
-    .trim();
+  return `${date.getMonth() + 1}/${date.getDate()} ${clock}`;
 }
 
 type FloatBarCostSummary = {
@@ -129,10 +317,7 @@ type FloatBarCostSummary = {
   providerId: string;
   displayName: string;
   todayCost: number | null;
-  /** Cost over the selected History window. */
-  periodCost: number | null;
-  /** Raw History window `periodCost` covers. */
-  period: string;
+  thirtyDayCost: number | null;
 };
 
 type FloatBarCostTarget = {
@@ -146,30 +331,32 @@ function providerCostKey(provider: ProviderUsageSnapshot): string {
 }
 
 function hasLocalCost(summary: ProviderLocalUsageSummary | null): summary is ProviderLocalUsageSummary {
-  return summary?.todayCost != null || summary?.periodCost != null;
+  return summary?.todayCost != null || summary?.thirtyDayCost != null;
+}
+
+function formatUsd(value: number | null): string | null {
+  if (value == null || !Number.isFinite(value)) return null;
+  return `$${value.toFixed(2)}`;
 }
 
 function CostPill({
   summary,
   scale,
   todayLabel,
-  periodLabel,
-  estimateLabel,
+  thirtyDayLabel,
 }: {
   summary: FloatBarCostSummary;
   scale: number;
   todayLabel: string;
-  periodLabel: string;
-  estimateLabel: string;
+  thirtyDayLabel: string;
 }) {
-  const { format } = useCurrency();
-  const today = summary.todayCost == null ? null : format(summary.todayCost, "USD");
-  const periodCost = summary.periodCost == null ? null : format(summary.periodCost, "USD");
+  const today = formatUsd(summary.todayCost);
+  const thirtyDay = formatUsd(summary.thirtyDayCost);
   const iconSize = Math.round(10 * scale);
   const brand = getProviderIcon(summary.providerId).brandColor;
   const title = [
     today ? `${todayLabel} ${today}` : null,
-    periodCost ? `${periodLabel} ${periodCost}` : null,
+    thirtyDay ? `${thirtyDayLabel} ${thirtyDay}` : null,
   ]
     .filter(Boolean)
     .join(" / ");
@@ -177,9 +364,9 @@ function CostPill({
   return (
     <div
       className="floatbar__cost-pill"
-      title={`${summary.displayName}: ${title} (${estimateLabel})`}
+      title={`${summary.displayName}: ${title}`}
       data-tauri-drag-region
-      style={brandStyle(brand)}
+      style={{ "--brand": brand } as CSSProperties}
     >
       <span className="floatbar__provider-icon" data-tauri-drag-region>
         <ProviderIcon providerId={summary.providerId} size={iconSize} />
@@ -195,162 +382,192 @@ function CostPill({
             </span>
           </span>
         )}
-        {periodCost && (
+        {thirtyDay && (
           <span className="floatbar__cost-item" data-tauri-drag-region>
             <span className="floatbar__cost-label" data-tauri-drag-region>
-              {periodLabel}
+              {thirtyDayLabel}
             </span>
             <span className="floatbar__cost-value" data-tauri-drag-region>
-              {periodCost}
+              {thirtyDay}
             </span>
           </span>
         )}
       </span>
-      <span className="floatbar__cost-estimate" data-tauri-drag-region>
-        {estimateLabel}
-      </span>
     </div>
   );
 }
-/** Pill border variables: the brand, plus a lifted tint for near-black brands on the dark glass. */
-function brandStyle(brand: string): CSSProperties {
-  const onDark = brandColorOnDark(brand);
-  return { "--brand": brand, ...(onDark ? { "--brand-dark": onDark } : {}) } as CSSProperties;
-}
-
-type PillTone = "ok" | "warn" | "crit";
-
-const TONE_RANK: Record<PillTone, number> = { ok: 0, warn: 1, crit: 2 };
-
-/** One metric shown inside a pill, with the card lane it came from. */
-type PillMetric = { window: RateWindowSnapshot; lane: MetricLane | null };
-
 /**
- * The metrics a pill shows. With "Show Session and Weekly" on, a real 5-hour
- * primary lane and a real 7-day secondary lane, that is the session lane
- * followed by the weekly lane. Neither slot is guaranteed to carry those
- * windows (some providers put a daily, credit, monthly or account quota
- * there), so any other shape keeps the single menu bar metric.
+ * One fixed quota slot in the Float Bar provider pill.
+ *
+ * Renders only the compact visible value. The pill itself carries the full
+ * cadence/used/reset detail on its title and accessible name, because pill
+ * children intentionally have `pointer-events: none`. Each metric colors
+ * itself from its own used or remaining percentage; battery metrics always
+ * use remaining quota. Red marks the critical threshold (or provider error /
+ * exhaustion), amber marks the high-usage threshold, otherwise neutral.
  */
-function pillMetrics(provider: ProviderUsageSnapshot, showWeekly: boolean): PillMetric[] {
-  const { primary, secondary } = provider;
-  if (
-    showWeekly &&
-    !primary.isInformational &&
-    primary.windowMinutes === SESSION_MINUTES &&
-    secondary &&
-    !secondary.isInformational &&
-    secondary.windowMinutes === WEEK_MINUTES
-  ) {
-    return [
-      { window: primary, lane: "primary" },
-      { window: secondary, lane: "secondary" },
-    ];
-  }
-  return [{ window: provider.selectedMetric, lane: selectedMetricLane(provider) }];
-}
-
-function metricTone(
-  metric: PillMetric,
-  providerId: string,
-  thresholds: QuotaWarningSettings,
-): PillTone {
-  const rateWindow = metric.window;
-  if (rateWindow.isInformational === true) return "ok";
-  // Tone follows this provider's quota warning thresholds for the shown lane;
-  // a window outside the lanes keeps the global thresholds.
-  const warningWindow = metric.lane ? quotaWarningWindowForLane(metric.lane) : null;
-  const warning = warningWindow
-    ? resolveQuotaWarning(thresholds, providerId, warningWindow)
-    : {
-        enabled: true,
-        high: thresholds.highUsageThreshold,
-        critical: thresholds.criticalUsageThreshold,
-      };
-  // A window set to Off keeps only the exhausted tone.
-  const highRemaining = warning.enabled ? 100 - warning.high : -1;
-  const critRemaining = warning.enabled ? 100 - warning.critical : -1;
-  const remaining = Math.max(0, Math.min(100, rateWindow.remainingPercent));
-  if (rateWindow.isExhausted || remaining <= critRemaining) return "crit";
-  if (remaining <= highRemaining) return "warn";
-  return "ok";
-}
-
-/** Percentage, or the informational text, for one window. */
-function metricLabel(
-  rateWindow: RateWindowSnapshot,
-  showAsUsed: boolean,
-  t: ReturnType<typeof useLocale>["t"],
-): string {
-  if (rateWindow.isInformational === true) {
-    return localizeProviderText(rateWindow.resetDescription?.trim(), t) || "—";
-  }
-  const percent = showAsUsed ? rateWindow.usedPercent : rateWindow.remainingPercent;
-  return `${Math.round(Math.max(0, Math.min(100, percent)))}%`;
-}
-
-/** Reset text for a window, or null; informational text is never reset wording. */
-function useWindowResetText(
-  rateWindow: RateWindowSnapshot | null,
-  relative: boolean,
-): string | null {
-  const informational = rateWindow?.isInformational === true;
-  return useFormattedResetTime(
-    rateWindow?.resetsAt ?? null,
-    rateWindow && !informational ? resetDescriptionFallback(rateWindow) : null,
-    relative,
-  );
-}
-
-/** The percentage and optional inline reset for one metric. */
-function MetricSegment({
-  label,
-  rateWindow,
-  resetText,
-  resetRelative,
+function UsageMetric({
+  window: rateWindow,
+  providerError,
   showResetInline,
-  resetIconSize,
-  problemLabel,
+  hidePercentWhenExhausted,
+  exhaustedClockTime,
+  exhaustedWeekdayTime,
+  highUsage,
+  critUsage,
+  label,
+  batteryEnabled = false,
+  batteryLowPercent = -1,
+  paceBucket = null,
+  paceTextColor = false,
+  showRemaining = false,
+  remainingSuffix,
 }: {
-  label: string;
-  rateWindow: RateWindowSnapshot;
-  resetText: string | null;
-  resetRelative: boolean;
+  window: RateWindowSnapshot | null;
+  providerError: boolean;
   showResetInline: boolean;
-  resetIconSize: number;
-  /** Set while the provider is in an error state; replaces the percentage. */
-  problemLabel: string | null;
+  hidePercentWhenExhausted: boolean;
+  exhaustedClockTime: boolean;
+  exhaustedWeekdayTime: boolean;
+  highUsage: number;
+  critUsage: number;
+  label?: string;
+  batteryEnabled?: boolean;
+  /** Remaining % below which battery cells fall back to numbers. -1 disables. */
+  batteryLowPercent?: number;
+  /** Personal: pace bucket tinting the number when enabled and not a battery. */
+  paceBucket?: PaceCategory | null;
+  /** Personal: use the pace bucket color instead of the threshold tone. */
+  paceTextColor?: boolean;
+  showRemaining?: boolean;
+  /** Suffix appended to the battery meter's accessible name. */
+  remainingSuffix?: string;
 }) {
-  // Only percentages size the warning placeholder; informational text would
-  // widen the pill after an error.
-  const lastPercentageLabel = useRef("0%");
-  if (!problemLabel && rateWindow.isInformational !== true) lastPercentageLabel.current = label;
-  const inlineReset = resetText
-    ? inlineResetTime(resetText, rateWindow.resetsAt, resetRelative)
-    : null;
+  const used = rateWindow ? Math.max(0, Math.min(100, rateWindow.usedPercent)) : null;
+  const remaining = used === null ? null : Math.max(0, Math.min(100, 100 - used));
+  const displayValue = showRemaining ? remaining : used;
+  const target = rateWindow?.resetsAt ? Date.parse(rateWindow.resetsAt) : Number.NaN;
+  const hasFutureReset = Number.isFinite(target) && target > Date.now();
+  const compactReset =
+    hasFutureReset && rateWindow?.resetsAt ? compactResetTime(rateWindow.resetsAt) : null;
+  const detailedReset =
+    hasFutureReset && rateWindow?.resetsAt ? compactDetailedResetTime(rateWindow.resetsAt) : null;
+  const clockReset =
+    hasFutureReset && rateWindow?.resetsAt
+      ? clockResetTime(rateWindow.resetsAt, exhaustedWeekdayTime)
+      : null;
+  // Hide-percent mode: exhausted slots with a live reset show only the
+  // remaining time — a relative two-unit countdown (`4d 12h`) or, when the
+  // clock-style option is on, a local absolute time (`9/18 17:30`, `17:30`
+  // on the same day). Without a usable reset the percentage is kept so the
+  // slot never goes blank.
+  const hidePercent =
+    hidePercentWhenExhausted &&
+    Boolean(rateWindow?.isExhausted) &&
+    !providerError &&
+    detailedReset != null;
+  const hiddenTime = exhaustedClockTime ? (clockReset ?? detailedReset) : detailedReset;
+  const batteryValue = remaining;
+  const lowRemaining =
+    batteryLowPercent != null &&
+    batteryLowPercent >= 0 &&
+    batteryValue != null &&
+    batteryValue < batteryLowPercent;
+  const isBattery =
+    batteryEnabled && batteryValue != null && !providerError && !hidePercent && !lowRemaining;
+  const percentText =
+    displayValue == null || providerError ? "—" : `${Math.round(displayValue)}%`;
+  const inlineReset =
+    !hidePercent &&
+    showResetInline &&
+    compactReset &&
+    displayValue != null &&
+    !providerError
+      ? compactReset
+      : null;
+
+  // Battery tones always describe remaining quota. Percentage text keeps the
+  // existing used/remaining semantics controlled by showRemaining.
+  const toneValue = isBattery ? batteryValue : displayValue;
+  const toneUsesRemaining = isBattery || showRemaining;
+  const tone =
+    providerError ||
+    rateWindow?.isExhausted ||
+    (toneValue != null &&
+      (toneUsesRemaining ? toneValue <= 100 - critUsage : toneValue >= critUsage))
+      ? "crit"
+      : toneValue != null &&
+          (toneUsesRemaining ? toneValue <= 100 - highUsage : toneValue >= highUsage)
+        ? "warn"
+        : "ok";
+
+  // Personal: only the reset-date text takes the pace bucket color.
+  // Battery cells and percentage numbers keep the usage-threshold tone.
+  const paceClassName =
+    paceTextColor && paceBucket != null && !providerError
+      ? `floatbar__metric--pace-${paceBucket}`
+      : "";
 
   return (
-    <span className="floatbar__text" data-tauri-drag-region>
-      <span className="floatbar__pct" aria-label={problemLabel ?? undefined} data-tauri-drag-region>
-        {problemLabel ? (
-          <>
-            <span aria-hidden="true" style={{ visibility: "hidden" }}>{lastPercentageLabel.current}</span>
-            <span className="floatbar__warning" aria-hidden="true">!</span>
-          </>
-        ) : label}
-      </span>
-      {!problemLabel && showResetInline && resetText && inlineReset && (
-        <span
-          className="floatbar__reset"
-          title={resetText}
-          aria-label={resetText}
-          data-tauri-drag-region
-        >
-          <ResetIcon size={resetIconSize} />
-          <span className="floatbar__reset-time" data-tauri-drag-region>
-            {inlineReset}
+    <span
+      className={
+        tone === "ok"
+          ? `floatbar__metric${isBattery ? " floatbar__metric--battery" : ""}`
+          : `floatbar__metric floatbar__metric--${tone}${isBattery ? " floatbar__metric--battery" : ""}`
+      }
+      data-tauri-drag-region
+    >
+      {label ? <span className="floatbar__metric-label">{label} </span> : null}
+      {isBattery ? (
+        <>
+          <span
+            className="floatbar__battery"
+            role="meter"
+            aria-valuenow={Math.round(batteryValue!)}
+            aria-valuemin={0}
+            aria-valuemax={100}
+            aria-label={`${Math.round(batteryValue!)}%${remainingSuffix ? ` ${remainingSuffix}` : ""}`}
+            data-tauri-drag-region
+          >
+            <span className="floatbar__battery-cell" data-tauri-drag-region>
+              <span
+                className="floatbar__battery-fill"
+                style={{ width: `${batteryValue!}%` }}
+                data-tauri-drag-region
+              />
+            </span>
+            <span className="floatbar__battery-nub" aria-hidden="true" data-tauri-drag-region />
           </span>
-        </span>
+          {showResetInline && compactReset ? (
+            <span
+              className={`floatbar__battery-reset${paceClassName ? ` ${paceClassName}` : ""}`}
+              data-tauri-drag-region
+            >
+              {compactReset}
+            </span>
+          ) : null}
+        </>
+      ) : hidePercent ? (
+        hiddenTime != null ? (
+          <span className={paceClassName || undefined} data-tauri-drag-region>
+            {hiddenTime}
+          </span>
+        ) : (
+          percentText
+        )
+      ) : (
+        <>
+          {percentText}
+          {inlineReset != null ? (
+            <span
+              className={`floatbar__metric-reset${paceClassName ? ` ${paceClassName}` : ""}`}
+              data-tauri-drag-region
+            >
+              {" "}
+              {inlineReset}
+            </span>
+          ) : null}
+        </>
       )}
     </span>
   );
@@ -359,100 +576,248 @@ function MetricSegment({
 /**
  * The capacity pill shown for a single provider.
  *
- * Color follows usage: green default, amber when remaining drops below the
- * high-usage threshold, red when remaining is below the critical threshold
- * or the provider is exhausted. With two metrics shown, the worse one wins.
- *
- * An informational metric (no budget set, a balance line, no active session)
- * has no quota percentage. Like the tray card and the tray tooltip, the pill
- * shows its text instead, keeps the neutral tone, and never turns that text
- * into reset wording.
+ * Renders fixed 5-hour / weekly / monthly usage slots (or the cadence-less
+ * fallback metric). The pill, icon, and container stay visually neutral;
+ * each usage metric colors itself from its own used/remaining percentage,
+ * while battery metrics always use remaining quota. The
+ * full per-slot detail (cadence, used percentage, localized reset) lives on
+ * the pill `title` and `aria-label` so it stays hoverable/accessible.
  */
 function ProviderPill({
   provider,
-  thresholds,
-  showAsUsed,
+  highUsage,
+  critUsage,
   scale,
   showResetInline,
-  showWeekly,
+  hidePercentWhenExhausted,
+  exhaustedClockTime,
+  exhaustedWeekdayTime,
   resetRelative,
   usedSuffix,
   remainingSuffix,
-  stateLabel,
+  showRemaining,
+  batterySlots,
+  batteryLowPercent = -1,
+  paceTextColor = false,
+  paceTimeDelta = false,
+  preference,
+  now,
+  t,
+  batteryStyle = false,
 }: {
   provider: ProviderUsageSnapshot;
-  thresholds: QuotaWarningSettings;
-  showAsUsed: boolean;
+  highUsage: number;
+  critUsage: number;
   scale: number;
   showResetInline: boolean;
-  showWeekly: boolean;
+  hidePercentWhenExhausted: boolean;
+  exhaustedClockTime: boolean;
+  exhaustedWeekdayTime: boolean;
   resetRelative: boolean;
   usedSuffix: string;
   remainingSuffix: string;
-  stateLabel: string;
+  /** When true, every percentage this pill reports is remaining quota. */
+  showRemaining: boolean;
+  /** Selected battery slots; empty means all slots. */
+  batterySlots?: readonly string[];
+  /** Remaining % below which battery cells fall back to numbers. -1 disables. */
+  batteryLowPercent?: number;
+  /** Personal: tint non-battery numbers with the pace bucket color. */
+  paceTextColor?: boolean;
+  /** Personal: show hover pace deltas as time ahead/behind. */
+  paceTimeDelta?: boolean;
+  preference: MetricPreference | undefined;
+  now: number;
+  t: (key: LocaleKey) => string;
+  batteryStyle?: boolean;
 }) {
-  const { t } = useLocale();
-  const state = describeProviderState(provider.errorState);
-  // An error collapses the pill to its first metric with a warning mark.
-  const metrics = pillMetrics(provider, showWeekly && !state.isProblem);
-  const resetTexts = [
-    useWindowResetText(metrics[0].window, resetRelative),
-    useWindowResetText(metrics[1]?.window ?? null, resetRelative),
-  ];
+  const slots = selectFloatBarUsageSlots(provider);
+  const fallback = Object.values(slots).some((window) => window !== null)
+    ? null
+    : fallbackFor(provider, preference);
+  const hasError = Boolean(provider.error);
+  const batteryEnabledFor = (slot: FloatBarBatterySlot) =>
+    batteryStyle && isBatterySlotEnabled(batterySlots, slot);
+  // Personal: only lanes with quota render (with separators between them).
+  const presentCadences = USAGE_CADENCES.filter(
+    (cadence): cadence is UsageCadence => slots[cadence] !== null,
+  );
+  // Personal: lane pace for the window actually shown in a slot, matched by
+  // identity against the provider lanes (slots are picked from those lanes).
+  const paceAllows = providerAllowsPace(provider.providerId, provider.sourceLabel);
+  const paceForWindow = (window: RateWindowSnapshot | null): PaceSnapshot | null => {
+    if (!paceAllows || !window) return null;
+    if (window === provider.primary) return provider.pace;
+    if (window === provider.secondary) return provider.secondaryPace ?? null;
+    if (window === provider.tertiary) return provider.tertiaryPace ?? null;
+    return null;
+  };
+  const paceBucketFor = (window: RateWindowSnapshot | null): PaceCategory | null => {
+    const pace = paceForWindow(window);
+    return pace ? paceCategory(pace.stage) : null;
+  };
+  // "Show remaining" flips every percentage this pill reports — the metric
+  // values and the cadence/fallback detail lines — to remaining quota.
+  const shownPercent = (percent: number) => {
+    const clamped = Math.max(0, Math.min(100, percent));
+    return Math.round(showRemaining ? 100 - clamped : clamped);
+  };
+  const agyOverlay = isAntigravityNotRunningError(provider)
+    ? t("FloatBarAgyRunNeeded")
+    : null;
 
-  let tone: PillTone = "ok";
-  if (state.isProblem) tone = "crit";
-  else {
-    for (const metric of metrics) {
-      const next = metricTone(metric, provider.providerId, thresholds);
-      if (TONE_RANK[next] > TONE_RANK[tone]) tone = next;
+  // One reset hook per fixed slot plus one for the fallback, all called
+  // unconditionally in stable order.
+  const reset5h = useFormattedResetTime(slots["5h"]?.resetsAt ?? null, null, resetRelative);
+  const resetWeekly = useFormattedResetTime(slots.weekly?.resetsAt ?? null, null, resetRelative);
+  const resetMonthly = useFormattedResetTime(slots.monthly?.resetsAt ?? null, null, resetRelative);
+  const resetFallback = useFormattedResetTime(
+    fallback?.window.resetsAt ?? null,
+    null,
+    resetRelative,
+  );
+  const resetTexts = [reset5h, resetWeekly, resetMonthly];
+
+  const slotDetails = USAGE_CADENCES.flatMap((cadence, index) => {
+    const window = slots[cadence];
+    // Personal: lanes without quota are dropped entirely (no "—" slot),
+    // so a plan without monthly shows just `5h / wk`.
+    if (!window) return [];
+    const used = shownPercent(window.usedPercent);
+    const reset = resetTexts[index];
+    return [`${cadence}: ${used}% ${usedSuffix}${reset ? `\n${reset}` : ""}`];
+  });
+  let pillDetail: string;
+  const fallbackLabel =
+    hasError || !fallback ? "" : (fallback.providerLabel ?? t(fallback.labelKey));
+  if (provider.error) {
+    pillDetail = `${provider.displayName}: ${provider.error}`;
+  } else if (fallback) {
+    const used = shownPercent(fallback.window.usedPercent);
+    pillDetail = `${provider.displayName}: ${fallbackLabel}: ${used}% ${usedSuffix}${resetFallback ? `\n${resetFallback}` : ""}`;
+  } else {
+    pillDetail = `${provider.displayName}: ${slotDetails.join("\n")}`;
+  }
+  // Relative last-refresh line for the hover/accessibility detail. A single
+  // shared 30-second clock at the FloatBar surface re-renders all pills, so
+  // the text advances even when no slot has a future reset timestamp. An
+  // unparseable `updatedAt` keeps its raw value after the localized label.
+  const updatedAtMs = Date.parse(provider.updatedAt);
+  const updatedDetail = Number.isNaN(updatedAtMs)
+    ? `${t("LastUpdated")}: ${provider.updatedAt}`
+    : `${t("LastUpdated")}: ${formatRelativeUpdated(updatedAtMs, t, now)}`;
+  // Personal: per-lane pace summary in the hover/accessibility detail, one
+  // line per shown slot (fallback included).
+  const paceLines: string[] = [];
+  if (!hasError && paceAllows) {
+    const pushLane = (label: string, pace: PaceSnapshot | null, windowMinutes?: number | null) => {
+      if (!pace) return;
+      // Personal: with the time-delta option, show how far ahead or behind
+      // the lane is in time units (`+24m`) instead of percentage points.
+      let delta = `${pace.deltaPercent >= 0 ? "+" : ""}${pace.deltaPercent.toFixed(1)}%`;
+      if (
+        paceTimeDelta &&
+        Number.isFinite(pace.deltaPercent) &&
+        windowMinutes != null &&
+        Number.isFinite(windowMinutes) &&
+        windowMinutes > 0
+      ) {
+        const secs = (pace.deltaPercent / 100) * windowMinutes * 60;
+        const text = formatDuration(Math.abs(secs));
+        if (text != null) delta = `${secs >= 0 ? "+" : "-"}${text}`;
+      }
+      // Personal: only lanes running short show timing, as `ETA/resets`.
+      const resets = formatDuration(pace.resetsInSeconds);
+      const short =
+        pace.etaSeconds != null && !pace.willLastToReset && resets != null
+          ? `, ${formatEta(pace.etaSeconds)}/${resets}`
+          : "";
+      paceLines.push(`${label}: ${t(paceStageKey(pace.stage))} (${delta})${short}`);
+    };
+    if (fallback) {
+      pushLane(
+        fallbackLabel || t(fallback.labelKey),
+        paceForWindow(fallback.window),
+        fallback.window.windowMinutes,
+      );
+    } else {
+      const laneLabels: Record<UsageCadence, string> = {
+        "5h": t("PanelFiveHours"),
+        weekly: t("ProviderWeeklyLabel"),
+        monthly: t("FloatBarBatterySlotMonthly"),
+      };
+      for (const cadence of USAGE_CADENCES) {
+        pushLane(laneLabels[cadence], paceForWindow(slots[cadence]), slots[cadence]?.windowMinutes);
+      }
     }
   }
-
-  const displaySuffix = showAsUsed ? usedSuffix : remainingSuffix;
-  const labels = metrics.map((metric) => metricLabel(metric.window, showAsUsed, t));
-  const title = state.isProblem
-    ? `${provider.displayName}: ${stateLabel}`
-    : metrics
-        .map((metric, index) => {
-          const resetText = resetTexts[index];
-          const detailText = localizeProviderText(windowDetailText(metric.window), t) || null;
-          const head =
-            metric.window.isInformational === true
-              ? `${provider.displayName}: ${labels[index]}`
-              : `${provider.displayName}: ${labels[index]} ${displaySuffix}`;
-          return [head, resetText, detailText].filter(Boolean).join("\n");
-        })
-        .join("\n");
+  pillDetail = [pillDetail, ...paceLines, updatedDetail].join("\n");
 
   const brand = getProviderIcon(provider.providerId).brandColor;
   const iconSize = Math.round(11 * scale);
-  const resetIconSize = Math.round(10 * scale);
 
   return (
     <div
-      className={`floatbar__pill floatbar__pill--${tone}`}
-      title={title}
+      role="group"
+      className="floatbar__pill"
+      title={pillDetail}
+      aria-label={pillDetail}
       data-tauri-drag-region
-      style={brandStyle(brand)}
+      style={{ "--brand": brand } as CSSProperties}
     >
       <span className="floatbar__provider-icon" data-tauri-drag-region>
         <ProviderIcon providerId={provider.providerId} size={iconSize} />
       </span>
-      {metrics.map((metric, index) => (
-        <span key={metric.lane ?? index} className="floatbar__segment" data-tauri-drag-region>
-          {index > 0 && <span className="floatbar__divider" aria-hidden="true" data-tauri-drag-region />}
-          <MetricSegment
-            label={labels[index]}
-            rateWindow={metric.window}
-            resetText={resetTexts[index]}
-            resetRelative={resetRelative}
+      <span className="floatbar__metrics" data-tauri-drag-region>
+        {agyOverlay ? (
+          <span
+            className="floatbar__metric floatbar__metric--crit floatbar__agy-overlay"
+            data-tauri-drag-region
+          >
+            {agyOverlay}
+          </span>
+        ) : fallback ? (
+          <UsageMetric
+            window={fallback.window}
+            providerError={hasError}
             showResetInline={showResetInline}
-            resetIconSize={resetIconSize}
-            problemLabel={state.isProblem ? stateLabel : null}
+            hidePercentWhenExhausted={hidePercentWhenExhausted}
+            exhaustedClockTime={exhaustedClockTime}
+            exhaustedWeekdayTime={exhaustedWeekdayTime}
+            highUsage={highUsage}
+            critUsage={critUsage}
+            label={fallbackLabel}
+            batteryEnabled={batteryEnabledFor("fallback")}
+            batteryLowPercent={batteryLowPercent}
+            paceBucket={paceBucketFor(fallback.window)}
+            paceTextColor={paceTextColor}
+            showRemaining={showRemaining}
+            remainingSuffix={remainingSuffix}
           />
-        </span>
-      ))}
+        ) : (
+          presentCadences.map((cadence, index) => (
+            <Fragment key={cadence}>
+              {index > 0 && <span className="floatbar__metric-separator">/</span>}
+              <UsageMetric
+                window={slots[cadence]}
+                providerError={hasError}
+                showResetInline={showResetInline}
+                hidePercentWhenExhausted={hidePercentWhenExhausted}
+                exhaustedClockTime={exhaustedClockTime}
+                exhaustedWeekdayTime={exhaustedWeekdayTime}
+                highUsage={highUsage}
+                critUsage={critUsage}
+                batteryEnabled={batteryEnabledFor(cadence)}
+                batteryLowPercent={batteryLowPercent}
+                paceBucket={paceBucketFor(slots[cadence])}
+                paceTextColor={paceTextColor}
+                showRemaining={showRemaining}
+                remainingSuffix={remainingSuffix}
+              />
+            </Fragment>
+          ))
+        )}
+      </span>
     </div>
   );
 }
@@ -493,6 +858,14 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   }
   const [localCosts, setLocalCosts] = useState<Record<string, FloatBarCostSummary>>({});
 
+  // Single shared 30-second clock so relative "updated N ago" hover text
+  // advances for every provider without a per-pill timer.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const id = window.setInterval(() => setNow(Date.now()), 30_000);
+    return () => window.clearInterval(id);
+  }, []);
+
   // The detached floatbar should keep usage fresh, but it must not open or
   // focus any other surface. Refresh data only; provider-updated events feed
   // this window when the backend completes. Respect Low Power Mode's 30-min
@@ -510,8 +883,13 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     return () => clearInterval(id);
   }, [settings.refreshIntervalSecs, settings.lowPowerMode]);
 
-  useTauriEvent(FLOAT_BAR_CONFIG_CHANGED_EVENT, () => {
-    void getSettingsSnapshot().then(setSettings).catch(() => {});
+  useEffect(() => {
+    const unlisten = listen(FLOAT_BAR_CONFIG_CHANGED_EVENT, () => {
+      void getSettingsSnapshot().then(setSettings).catch(() => {});
+    });
+    return () => {
+      void unlisten.then((fn) => fn());
+    };
   }, []);
 
   // Orientation flips re-lay-out the bar without recreating the window.
@@ -521,8 +899,21 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
   const filterIds = settings.floatBarProviderIds;
   const scale = Math.max(0.75, Math.min(2, settings.floatBarScale / 100));
   const showResetInline = settings.floatBarShowResetInline;
-  const showWeekly = settings.floatBarShowWeekly;
+  const hidePercentWhenExhausted = settings.floatBarHidePercentWhenExhausted;
+  const exhaustedClockTime = settings.floatBarExhaustedClockTime;
+  const exhaustedWeekdayTime = settings.floatBarExhaustedWeekdayTime;
   const showCost = settings.floatBarShowCost;
+  // "Show remaining" flips both the rendered percentage and the word beside it
+  // in each pill's hover/accessible detail (used ↔ remaining).
+  const showRemaining = settings.floatBarShowRemaining;
+  const usedSuffix = t(showRemaining ? "FloatBarRemainingSuffix" : "PanelUsedSuffix");
+  const remainingSuffix = t("FloatBarRemainingSuffix");
+  const batterySlots = settings.floatBarBatterySlots ?? [];
+  const batteryLowPercent = settings.floatBarBatteryLowPercent ?? -1;
+  const paceTextColor = settings.floatBarPaceTextColor ?? false;
+  const paceTimeDelta = settings.floatBarPaceTimeDelta ?? false;
+  const followProviderOrder = settings.floatBarFollowProviderOrder;
+  const providerOrder = settings.providerOrder ?? EMPTY_PROVIDER_ORDER;
   const visible = useMemo(() => {
     const enabled = new Set(settings.enabledProviders);
     let list = providers.filter((p) => enabled.has(p.providerId));
@@ -530,11 +921,31 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
       const wanted = new Set(filterIds);
       list = list.filter((p) => wanted.has(p.providerId));
     }
+    // Custom drag-reorder sequence wins only when the option is on AND the
+    // user actually has a persisted order; an empty order keeps the existing
+    // usage-descending sort (which is also the default when the option is off).
+    if (followProviderOrder && providerOrder.length > 0) {
+      return orderProviderSnapshots(
+        list,
+        state.providers,
+        settings.enabledProviders,
+        [...providerOrder],
+      );
+    }
     return [...list].sort(
       (a, b) =>
-        b.selectedMetric.usedPercent - a.selectedMetric.usedPercent,
+        maxFloatBarUsedPercent(b, settings.providerMetrics[b.providerId]) -
+        maxFloatBarUsedPercent(a, settings.providerMetrics[a.providerId]),
     );
-  }, [providers, settings.enabledProviders, filterIds]);
+  }, [
+    providers,
+    settings.enabledProviders,
+    settings.providerMetrics,
+    state.providers,
+    filterIds,
+    followProviderOrder,
+    providerOrder,
+  ]);
 
   const visibleCostTargets = useMemo<FloatBarCostTarget[]>(
     () =>
@@ -568,8 +979,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
           providerId: target.providerId,
           displayName: target.displayName,
           todayCost: localUsage.todayCost,
-          periodCost: localUsage.periodCost,
-          period: localUsage.reportingPeriod,
+          thirtyDayCost: localUsage.thirtyDayCost,
         } satisfies FloatBarCostSummary;
       }),
     )
@@ -590,14 +1000,13 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     return () => {
       cancelled = true;
     };
-    // A History window or "Track costs" change re-reads the local usage summaries.
-  }, [visibleCostTargets, settings.costReportingPeriod, settings.costUsageEnabled]);
+  }, [visibleCostTargets]);
 
   const visibleCosts = visible
     .map((provider) => localCosts[providerCostKey(provider)])
     .filter((summary): summary is FloatBarCostSummary => Boolean(summary));
   const visibleCostValuesKey = visibleCosts
-    .map((summary) => `${summary.key}:${summary.todayCost ?? ""}:${summary.period ?? ""}:${summary.periodCost ?? ""}`)
+    .map((summary) => `${summary.key}:${summary.todayCost ?? ""}:${summary.thirtyDayCost ?? ""}`)
     .join("|");
   // Keep the native floatbar window fitted when late data/fonts/icons change layout.
   const lastResizeRef = useRef<{ w: number; h: number } | null>(null);
@@ -637,8 +1046,14 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
     style,
     scale,
     showResetInline,
-    showWeekly,
+    hidePercentWhenExhausted,
+    exhaustedClockTime,
+    exhaustedWeekdayTime,
+    settings.floatBarBatteryStyle,
+    batterySlots,
+    batteryLowPercent,
     settings.resetTimeRelative,
+    showRemaining,
   ]);
 
   useEffect(() => {
@@ -668,7 +1083,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
 
   return (
     <div
-      role="button"
+      role="group"
       tabIndex={-1}
       aria-label={t("AppName")}
       className={`floatbar floatbar--${orientation} floatbar--${style}${settings.floatBarDarkText ? " floatbar--light-bg" : ""}`}
@@ -678,6 +1093,11 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
         {
           opacity: opacityFraction,
           "--floatbar-scale": scale,
+          "--floatbar-background-color": settings.floatBarBackgroundColor,
+          "--floatbar-background-opacity": `${Math.max(
+            0,
+            Math.min(100, settings.floatBarBackgroundOpacity),
+          )}%`,
         } as CSSProperties
       }
     >
@@ -692,15 +1112,25 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
             <ProviderPill
               key={providerCostKey(p)}
               provider={p}
-              thresholds={settings}
-              showAsUsed={settings.showAsUsed}
+              highUsage={settings.highUsageThreshold}
+              critUsage={settings.criticalUsageThreshold}
               scale={scale}
               showResetInline={showResetInline}
-              showWeekly={showWeekly}
+              hidePercentWhenExhausted={hidePercentWhenExhausted}
+              exhaustedClockTime={exhaustedClockTime}
+              exhaustedWeekdayTime={exhaustedWeekdayTime}
               resetRelative={settings.resetTimeRelative}
-              usedSuffix={t("PanelUsedSuffix")}
-              remainingSuffix={t("FloatBarRemainingSuffix")}
-              stateLabel={t(describeProviderState(p.errorState).labelKey)}
+              usedSuffix={usedSuffix}
+              remainingSuffix={remainingSuffix}
+              showRemaining={showRemaining}
+              batterySlots={batterySlots}
+              batteryLowPercent={batteryLowPercent}
+              paceTextColor={paceTextColor}
+              paceTimeDelta={paceTimeDelta}
+              preference={settings.providerMetrics[p.providerId]}
+              now={now}
+              t={t}
+              batteryStyle={settings.floatBarBatteryStyle}
             />
           ))}
           {visibleCosts.map((summary) => (
@@ -709,8 +1139,7 @@ export default function FloatBar({ state }: { state: BootstrapState }) {
               summary={summary}
               scale={scale}
               todayLabel={t("PanelToday")}
-              periodLabel={costPeriodShortLabel(summary.period, t)}
-              estimateLabel={t("OverviewSpendEstimate")}
+              thirtyDayLabel={t("FloatBarThirtyDayShort")}
             />
           ))}
         </>

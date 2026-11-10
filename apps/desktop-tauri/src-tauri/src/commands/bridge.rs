@@ -254,6 +254,12 @@ pub struct PaceSnapshot {
     pub expected_used_percent: f64,
     #[serde(default)]
     pub actual_used_percent: f64,
+    /// Personal: seconds elapsed since the window started.
+    #[serde(default)]
+    pub elapsed_seconds: f64,
+    /// Personal: seconds remaining until the window resets.
+    #[serde(default)]
+    pub resets_in_seconds: f64,
     /// Block of the window this pace comes from (upstream hides its pace).
     #[serde(default)]
     pub monthly_limit_block: Option<MonthlyLimitBlockSnapshot>,
@@ -408,6 +414,13 @@ pub struct ProviderUsageSnapshot {
     /// `dataConfidence == .estimated`); percent surfaces prefix them with `~`.
     #[serde(default, skip_serializing_if = "std::ops::Not::not")]
     pub quota_estimated: bool,
+    /// Personal-only: per-lane pace for the weekly (secondary) lane so the
+    /// menu card can show 5h / weekly / monthly pace side by side.
+    #[serde(default)]
+    pub secondary_pace: Option<PaceSnapshot>,
+    /// Personal-only: per-lane pace for the monthly (tertiary) lane.
+    #[serde(default)]
+    pub tertiary_pace: Option<PaceSnapshot>,
     #[serde(default)]
     pub account_organization: Option<String>,
     #[serde(default)]
@@ -446,6 +459,8 @@ impl Default for ProviderUsageSnapshot {
             extra_rate_windows: Vec::new(),
             inventory: Vec::new(),
             display_details: Vec::new(),
+            secondary_pace: None,
+            tertiary_pace: None,
             cost: None,
             plan_name: None,
             account_email: None,
@@ -521,6 +536,42 @@ impl ProviderUsagePresentationSnapshot {
     }
 }
 
+pub(crate) fn filter_hidden_codex_spark_rows(
+    snapshot: &mut ProviderUsageSnapshot,
+    spark_usage_visible: bool,
+) {
+    if snapshot.provider_id == "codex" && !spark_usage_visible {
+        snapshot
+            .extra_rate_windows
+            .retain(|extra| !matches!(extra.id.as_str(), "codex-spark" | "codex-spark-weekly"));
+    }
+}
+
+/// Build a [`PaceSnapshot`] from a computed [`UsagePace`].
+fn pace_snapshot(pace: &codexbar::core::UsagePace) -> PaceSnapshot {
+    PaceSnapshot {
+        stage: pace::stage_str(pace.stage).to_string(),
+        delta_percent: pace.delta_percent,
+        will_last_to_reset: pace.will_last_to_reset,
+        eta_seconds: pace.eta_seconds,
+        expected_used_percent: pace.expected_used_percent,
+        actual_used_percent: pace.actual_used_percent,
+        elapsed_seconds: pace.elapsed_seconds,
+        resets_in_seconds: pace.resets_in_seconds,
+        monthly_limit_block: None,
+    }
+}
+
+/// Build a [`PaceSnapshot`] for one rate window, or `None` when the window
+/// has no usable timing (no future reset, zero-length window, …).
+fn lane_pace_snapshot(
+    window: Option<&codexbar::core::RateWindow>,
+    default_minutes: u32,
+) -> Option<PaceSnapshot> {
+    let pace = codexbar::core::UsagePace::weekly(window?, None, default_minutes, None)?;
+    Some(pace_snapshot(&pace))
+}
+
 impl ProviderUsageSnapshot {
     pub(super) fn from_fetch_result(
         id: ProviderId,
@@ -581,6 +632,8 @@ impl ProviderUsageSnapshot {
             eta_seconds: p.eta_seconds,
             expected_used_percent: p.expected_used_percent,
             actual_used_percent: p.actual_used_percent,
+            elapsed_seconds: p.elapsed_seconds,
+            resets_in_seconds: p.resets_in_seconds,
             monthly_limit_block: MonthlyLimitBlockSnapshot::for_pace(usage, &blocked),
         });
 
@@ -599,6 +652,20 @@ impl ProviderUsageSnapshot {
             })
         });
         let secondary_pace = secondary_pace.flatten();
+        // Personal-only: per-lane pace snapshots so the menu card and the
+        // Settings detail pane can show 5h / weekly / monthly pace side by
+        // side instead of the primary lane only.
+        let secondary_pace_snapshot = allows_pace
+            .then(|| lane_pace_snapshot(usage.secondary.as_ref(), 10080))
+            .flatten();
+        let tertiary_pace_snapshot = allows_pace
+            .then(|| {
+                lane_pace_snapshot(
+                    usage.tertiary.as_ref(),
+                    codexbar::core::MONTHLY_WINDOW_MINUTES,
+                )
+            })
+            .flatten();
 
         let lane = |window: &RateWindow,
                     is_blocked: bool,
@@ -799,6 +866,8 @@ impl ProviderUsageSnapshot {
             pace,
             pace_authoritative: allows_pace,
             quota_estimated: result.quota_estimated,
+            secondary_pace: secondary_pace_snapshot,
+            tertiary_pace: tertiary_pace_snapshot,
             account_organization: usage.account_organization.clone(),
             tray_status_label: None,
             fetch_duration_ms: None,

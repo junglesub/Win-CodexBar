@@ -116,6 +116,8 @@ pub struct SettingsUpdate {
     pub provider_hidden_usage_item_ids: Option<std::collections::HashMap<String, Vec<String>>>,
     pub float_bar_enabled: Option<bool>,
     pub float_bar_opacity: Option<u8>,
+    pub float_bar_background_color: Option<String>,
+    pub float_bar_background_opacity: Option<u8>,
     pub float_bar_scale: Option<u8>,
     pub float_bar_orientation: Option<String>,
     pub float_bar_style: Option<String>,
@@ -123,8 +125,18 @@ pub struct SettingsUpdate {
     pub float_bar_provider_ids: Option<Vec<String>>,
     pub float_bar_dark_text: Option<bool>,
     pub float_bar_show_reset_inline: Option<bool>,
+    pub float_bar_hide_percent_when_exhausted: Option<bool>,
+    pub float_bar_exhausted_clock_time: Option<bool>,
+    pub float_bar_exhausted_weekday_time: Option<bool>,
     pub float_bar_show_cost: Option<bool>,
     pub float_bar_show_weekly: Option<bool>,
+    pub float_bar_battery_style: Option<bool>,
+    pub float_bar_battery_slots: Option<Vec<String>>,
+    pub float_bar_battery_low_percent: Option<i32>,
+    pub float_bar_pace_text_color: Option<bool>,
+    pub float_bar_pace_time_delta: Option<bool>,
+    pub float_bar_show_remaining: Option<bool>,
+    pub float_bar_follow_provider_order: Option<bool>,
     pub promote_tray_icon: Option<bool>,
     pub claude_daily_routines_usage_visible: Option<bool>,
     pub alibaba_token_plan_region: Option<String>,
@@ -175,6 +187,14 @@ impl SettingsUpdate {
             || self.show_as_used.is_some()
             || self.reset_time_relative.is_some()
             || self.show_reset_when_exhausted.is_some()
+            || self.provider_metrics.is_some()
+            || self.float_bar_battery_style.is_some()
+            || self.float_bar_battery_slots.is_some()
+            || self.float_bar_battery_low_percent.is_some()
+            || self.float_bar_pace_text_color.is_some()
+            || self.float_bar_pace_time_delta.is_some()
+            || self.float_bar_show_remaining.is_some()
+            || self.float_bar_follow_provider_order.is_some()
     }
 
     fn rebuilds_tray_menu(&self) -> bool {
@@ -655,6 +675,8 @@ impl SettingsUpdate {
         crate::floatbar::SettingsPatch {
             enabled: self.float_bar_enabled,
             opacity: self.float_bar_opacity,
+            background_color: self.float_bar_background_color.clone(),
+            background_opacity: self.float_bar_background_opacity,
             scale: self.float_bar_scale,
             orientation: self.float_bar_orientation.clone(),
             style: self.float_bar_style.clone(),
@@ -662,8 +684,18 @@ impl SettingsUpdate {
             provider_ids: self.float_bar_provider_ids.clone(),
             dark_text: self.float_bar_dark_text,
             show_reset_inline: self.float_bar_show_reset_inline,
+            hide_percent_when_exhausted: self.float_bar_hide_percent_when_exhausted,
+            exhausted_clock_time: self.float_bar_exhausted_clock_time,
+            exhausted_weekday_time: self.float_bar_exhausted_weekday_time,
             show_cost: self.float_bar_show_cost,
             show_weekly: self.float_bar_show_weekly,
+            battery_style: self.float_bar_battery_style,
+            battery_slots: self.float_bar_battery_slots.clone(),
+            battery_low_percent: self.float_bar_battery_low_percent,
+            pace_text_color: self.float_bar_pace_text_color,
+            pace_time_delta: self.float_bar_pace_time_delta,
+            show_remaining: self.float_bar_show_remaining,
+            follow_provider_order: self.float_bar_follow_provider_order,
         }
     }
 

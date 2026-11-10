@@ -21,7 +21,7 @@ impl QuotaInfo {
     /// Monthly used percentage, clamped to 0-100. Zero when the maximum is not
     /// a positive finite number, so a broken record never shows false usage.
     pub fn used_percent(&self) -> f64 {
-        if !(self.maximum.is_finite() && self.maximum > 0.0) || !self.used.is_finite() {
+        if !(self.maximum.is_finite() && self.maximum > 0.0 && self.used.is_finite()) {
             return 0.0;
         }
         ((self.used / self.maximum) * 100.0).clamp(0.0, 100.0)

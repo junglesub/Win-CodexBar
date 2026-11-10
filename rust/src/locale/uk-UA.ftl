@@ -1914,3 +1914,36 @@ AcknowledgementsAuthor = Автор
 AcknowledgementsAuthors = Автори
 AcknowledgementsLicense = Ліцензія
 AcknowledgementsStandardText = Стандартний текст ліцензії. Пакет не містить файлу ліцензії.
+
+FloatBarThirtyDayShort = 30d
+
+FloatBarHidePercentWhenExhausted = Ховати відсоток після вичерпання
+FloatBarHidePercentWhenExhaustedHelper = Коли квоту вичерпано, показувати лише залишок часу замість 100%.
+FloatBarExhaustedClockTime = Показувати скидання як час
+FloatBarExhaustedClockTimeHelper = Показувати скидання як М/Д ГГ:ХХ (ГГ:ХХ того ж дня) замість зворотного відліку.
+FloatBarExhaustedWeekdayTime = Показувати день тижня замість дати
+FloatBarExhaustedWeekdayTimeHelper = Показувати пн, вт, ср замість дати, якщо скидання припадає на наступний тиждень.
+
+DetailPaceElapsed = { "{}" } минуло
+DetailPaceResetRemaining = { "{}" } до скидання
+DetailPaceRestToTrack = { "{}" } відпочинку, щоб повернутися в графік
+FloatBarAgyRunNeeded = Запустіть agy
+FloatBarBatteryStyleLabel = Стиль батареї
+FloatBarBatteryStyleHelper = Показувати використання у плаваючій панелі як комірки батареї замість відсотків.
+FloatBarBatterySlotsLabel = Комірки батареї
+FloatBarBatterySlotsHelper = Виберіть, які слоти плаваючої панелі показувати як комірки батареї; можна вибрати кілька. За замовчуванням використовуються всі слоти.
+FloatBarBatterySlotMonthly = Місяць
+FloatBarBatterySlotFallback = Резерв
+FloatBarBatteryLowPercentLabel = Показувати відсоток, коли мало
+FloatBarBatteryLowPercentHelper = Коли залишок квоти опускається нижче цього відсотка, показувати число відсотків замість комірки батареї. -1 вимикає.
+FloatBarPaceTextColorLabel = Колір тексту темпу
+FloatBarPaceTextColorHelper = Забарвлювати зворотний відлік скидання в плаваючій панелі кольором темпу (повільно/рівно/швидко/критично). Комірки батареї та відсотки зберігають колір порогу використання.
+FloatBarPaceTimeDeltaLabel = Часове відхилення темпу
+FloatBarPaceTimeDeltaHelper = Показувати відхилення темпу при наведенні на плаваючу панель як час попереду або позаду (напр., +24m) замість відсоткових пунктів.
+FloatBarShowRemainingLabel = Показувати залишок
+FloatBarShowRemainingHelper = Показувати використання в плаваючій панелі як залишок квоти замість використаної квоти.
+FloatBarFollowProviderOrderLabel = Власний порядок постачальників
+FloatBarFollowProviderOrderHelper = Показувати постачальників у плаваючій панелі у вашому власному порядку, а не за використанням. Вимкніть, щоб повернутися до порядку за використанням.
+FloatBarBackgroundColor = Колір фону
+FloatBarBackgroundOpacity = Непрозорість фону
+FloatBarResetBackground = Скинути фон

@@ -748,8 +748,10 @@ fn configured_roots_include_explicit_pi_and_omp_profile_sources() {
 
     let roots = pi_compatible_session_roots_for(home.path(), &cwd, &environment);
     let pi_root = cwd.join("pi-sessions");
-    let omp_root = home
-        .path()
+    // The OMP root resolves `PI_CONFIG_DIR` under the canonical home, so the
+    // expectation has to start from the canonical home too (Windows short
+    // names such as `RYOOJU~1` otherwise never match).
+    let omp_root = crate::agent_sessions::pi_family::canonicalize_for_scan(home.path())
         .join("config")
         .join("profiles")
         .join("work")

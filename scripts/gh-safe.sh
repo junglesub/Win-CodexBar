@@ -13,9 +13,8 @@ Usage:
   bash scripts/gh-safe.sh --repo owner/repo --verify-kind repo|pr|issue|release [--target id-or-tag] [--allow-upstream-write] [--what-if] -- <gh args...>
 
 Examples:
-  bash scripts/gh-safe.sh --repo nesszer/Win-CodexBar --verify-kind pr --target 361 --what-if -- pr comment 361 --body-file .review/comment.md
-  bash scripts/gh-safe.sh --repo nesszer/Win-CodexBar --verify-kind repo --what-if -- pr create --title "..." --body-file body.md
-  bash scripts/gh-safe.sh --repo microsoft/winget-pkgs --verify-kind repo --what-if -- pr create --head Finesssee:branch --title "..." --body-file body.md
+  bash scripts/gh-safe.sh --repo junglesub/Win-CodexBar --verify-kind pr --target 361 --what-if -- pr comment 361 --body-file .review/comment.md
+  bash scripts/gh-safe.sh --repo junglesub/Win-CodexBar --verify-kind repo --what-if -- pr create --title "..." --body-file body.md
 EOF
 }
 
@@ -40,12 +39,9 @@ case "$verify_kind" in repo|pr|issue|release) ;; *) echo "Invalid --verify-kind 
 
 if [[ "${repo,,}" == "steipete/codexbar" ]]; then
   ((allow_upstream_write == 1)) || { echo 'Writes to steipete/CodexBar are blocked by default. Explicit current-turn authorization is required.' >&2; exit 3; }
-else
-  # Winget release step: the fork receives the manifest branch, and the PR opens on microsoft/winget-pkgs.
-  case "${repo,,}" in
-    nesszer/win-codexbar|finesssee/winget-pkgs|microsoft/winget-pkgs) ;;
-    *) echo "GitHub writes are not allowlisted for '$repo'. Expected nesszer/Win-CodexBar, Finesssee/winget-pkgs or microsoft/winget-pkgs." >&2; exit 3 ;;
-  esac
+elif [[ "${repo,,}" != "junglesub/win-codexbar" ]]; then
+  echo "GitHub writes are not allowlisted for '$repo'. Expected junglesub/Win-CodexBar." >&2
+  exit 3
 fi
 
 for arg in "${gh_args[@]}"; do

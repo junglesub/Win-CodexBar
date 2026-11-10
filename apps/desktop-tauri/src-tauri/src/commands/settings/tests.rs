@@ -820,3 +820,48 @@ fn limit_reset_toggle_travels_through_patch_and_snapshot() {
     assert!(settings.limit_reset_notifications_enabled);
     assert_eq!(snapshot(&settings), serde_json::Value::Bool(true));
 }
+
+/// Personal: per-provider metric preferences and every Float Bar appearance
+/// setting must repaint the overlay.
+#[test]
+fn provider_metric_changes_notify_the_float_bar() {
+    assert!(
+        SettingsUpdate {
+            provider_metrics: Some(
+                [("antigravity".to_string(), "session".to_string())]
+                    .into_iter()
+                    .collect(),
+            ),
+            ..Default::default()
+        }
+        .notifies_float_bar()
+    );
+    for update in [
+        SettingsUpdate {
+            float_bar_battery_style: Some(true),
+            ..Default::default()
+        },
+        SettingsUpdate {
+            float_bar_show_remaining: Some(true),
+            ..Default::default()
+        },
+        SettingsUpdate {
+            float_bar_battery_slots: Some(vec!["weekly".into()]),
+            ..Default::default()
+        },
+        SettingsUpdate {
+            float_bar_follow_provider_order: Some(true),
+            ..Default::default()
+        },
+        SettingsUpdate {
+            float_bar_pace_text_color: Some(true),
+            ..Default::default()
+        },
+        SettingsUpdate {
+            float_bar_pace_time_delta: Some(true),
+            ..Default::default()
+        },
+    ] {
+        assert!(update.notifies_float_bar());
+    }
+}

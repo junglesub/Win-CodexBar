@@ -2,14 +2,14 @@ import { useEffect, useState } from "react";
 import { useLocale } from "../../../hooks/useLocale";
 import { useUpdateState } from "../../../hooks/useUpdateState";
 import { getAppInfo, openExternalUrl } from "../../../lib/tauri";
-import { Field, Select, SettingsGroup, Toggle } from "../../../components/FormControls";
-import type { AppInfoBridge, UpdateChannel } from "../../../types/bridge";
+import { Field, SettingsGroup, Toggle } from "../../../components/FormControls";
+import type { AppInfoBridge } from "../../../types/bridge";
 import type { LocaleKey } from "../../../i18n/keys";
 import type { TabProps } from "../settingsTabs";
 import codexbarIcon from "../../../assets/codexbar-icon.png";
 import AcknowledgementsView from "./AcknowledgementsView";
 
-const REPO_URL = "https://github.com/nesszer/Win-CodexBar";
+const REPO_URL = "https://github.com/junglesub/Win-CodexBar";
 const SUBMIT_ISSUE_URL = `${REPO_URL}/issues/new?labels=bug&template=bug_report.yml`;
 
 const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
@@ -19,7 +19,7 @@ const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
   },
   {
     labelKey: "AboutLinkWebsite",
-    url: "https://codexbar.app",
+    url: "https://junglesub.github.io/Win-CodexBar/",
   },
   {
     labelKey: "AboutLinkOriginalProject",
@@ -33,7 +33,6 @@ const ABOUT_LINKS: ReadonlyArray<{ labelKey: LocaleKey; url: string }> = [
 
 export default function AboutTab({ settings, set, saving }: TabProps) {
   const { t } = useLocale();
-  const ctl = { settings, set, saving };
   const [appInfo, setAppInfo] = useState<AppInfoBridge | null>(null);
   const { updateState, checkNow, download, apply, openRelease } =
     useUpdateState();
@@ -113,22 +112,7 @@ export default function AboutTab({ settings, set, saving }: TabProps) {
             onChange={(v) => set({ autoDownloadUpdates: v })}
           />
         </Field>
-        <Field
-          label={t("UpdateChannelChoice")}
-          description={t("UpdateChannelChoiceHelper")}
-        >
-          <Select
-            variant="menu"
-            value={settings.updateChannel}
-            disabled={saving}
-            ariaLabel={t("UpdateChannelChoice")}
-            options={[
-              { value: "stable", label: t("UpdateChannelStableOption") },
-              { value: "beta", label: t("UpdateChannelBetaOption") },
-            ]}
-            onChange={(v) => set({ updateChannel: v as UpdateChannel })}
-          />
-        </Field>
+        {/* Personal: the rolling `personal-latest` channel has no stable/beta split. */}
         <div className="settings-group__row settings-group__row--split">
           <span className="about-update-msg">
             {t("Version")} {appInfo.version}

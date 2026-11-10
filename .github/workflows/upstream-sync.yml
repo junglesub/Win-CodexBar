@@ -1,0 +1,223 @@
+name: Sync upstream
+
+on:
+  schedule:
+    # Monday 03:00 Asia/Seoul
+    - cron: "0 3 * * 1"
+      timezone: "Asia/Seoul"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: upstream-sync
+  cancel-in-progress: false
+
+# main tracks nesszer/main with fast-forward-only updates. The sync PR then
+# merges main into personal, preserving both histories and letting GitHub block
+# textual conflicts. Paths changed on both branches are listed for developer
+# review because a clean textual merge can still be a product-level collision.
+
+jobs:
+  sync:
+    name: Upstream Sync
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Generate GitHub App token
+        id: generate-token
+        uses: actions/create-github-app-token@v3
+        with:
+          client-id: ${{ vars.APP_CLIENT_ID }}
+          private-key: ${{ secrets.APP_PRIVATE_KEY }}
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.generate-token.outputs.token }}
+
+      - name: Configure Git
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+      - name: Add upstream remote
+        run: git remote add upstream https://github.com/nesszer/Win-CodexBar.git
+
+      - name: Fetch repositories
+        run: |
+          git fetch --prune origin
+          git fetch upstream main
+
+      - name: Fast-forward main and find overlaps
+        id: sync_main
+        shell: bash
+        run: |
+          LOCAL_MAIN_SHA="$(git rev-parse origin/main)"
+          UPSTREAM_MAIN_SHA="$(git rev-parse upstream/main)"
+
+          git checkout -B main origin/main
+          git merge --ff-only upstream/main
+          if [ "$LOCAL_MAIN_SHA" != "$UPSTREAM_MAIN_SHA" ]; then
+            git push origin main
+          fi
+
+          MERGE_BASE="$(git merge-base origin/personal main)"
+          OVERLAP_FILES="$(
+            comm -12 \
+              <(git diff --name-only "$MERGE_BASE"..origin/personal | sort) \
+              <(git diff --name-only "$MERGE_BASE"..main | sort)
+          )"
+
+          echo "local_main_sha=$LOCAL_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          echo "upstream_main_sha=$UPSTREAM_MAIN_SHA" >> "$GITHUB_OUTPUT"
+          {
+            echo 'overlap_files<<EOF'
+            echo "$OVERLAP_FILES"
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+
+          if git merge-base --is-ancestor main origin/personal; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Write PR description
+        env:
+          OLD_SHA: ${{ steps.sync_main.outputs.local_main_sha }}
+          NEW_SHA: ${{ steps.sync_main.outputs.upstream_main_sha }}
+          OVERLAP_FILES: ${{ steps.sync_main.outputs.overlap_files }}
+        shell: bash
+        run: |
+          if [ -n "$OVERLAP_FILES" ]; then
+            OVERLAP_SECTION="$(cat <<EOF
+
+          ### Developer decision required
+
+          Both \`personal\` and \`main\` changed these paths since their merge base.
+          Review each path for product-level duplication even if Git reports no
+          textual conflict. Preserve the personal behavior documented in
+          \`docs/personal/commits-after-main.md\` unless a developer explicitly
+          chooses the main behavior.
+
+          \`\`\`
+          $OVERLAP_FILES
+          \`\`\`
+          EOF
+          )"
+          else
+            OVERLAP_SECTION="No paths were changed by both branches."
+          fi
+
+          cat > "$RUNNER_TEMP/upstream-sync-pr.md" <<EOF
+          Automated upstream synchronization.
+
+          Fork main before sync:
+          \`$OLD_SHA\`
+
+          Upstream main:
+          \`$NEW_SHA\`
+
+          This PR merges \`main\` into \`personal\` with normal Git ancestry.
+          Do not squash or rebase this PR. GitHub merge conflicts and final merge
+          approval are intentionally manual.
+          $OVERLAP_SECTION
+
+          ### Local conflict resolution
+
+          \`\`\`bash
+          git fetch origin
+          git checkout -B sync/upstream origin/sync/upstream
+          git merge origin/personal
+
+          # Resolve conflicts, verify, commit, and push.
+          git push origin sync/upstream
+          \`\`\`
+          EOF
+
+      - name: Find existing sync PR
+        id: pr
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          PR_NUMBER="$(
+            gh pr list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --base personal \
+              --head sync/upstream \
+              --json number \
+              --jq '.[0].number // empty'
+          )"
+
+          if [ -n "$PR_NUMBER" ]; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Update existing sync branch and PR
+        if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          git fetch origin sync/upstream
+          git checkout -B sync/upstream origin/sync/upstream
+
+          # Replace commits created by the previous squash workflow. They can
+          # contain conflict markers while GitHub still reports the PR mergeable.
+          if git log -1 --format=%s | grep -qE '^chore: sync upstream .+ \(conflicts\)$'; then
+            git reset --hard main
+            git push --force-with-lease origin sync/upstream
+          elif ! git merge-base --is-ancestor main HEAD; then
+            if ! git merge --no-edit main; then
+              git merge --abort || true
+              echo "::error::New main changes conflict with sync/upstream. Resolve them manually; no conflict markers were committed."
+              exit 1
+            fi
+            git push origin sync/upstream
+          fi
+
+          gh pr edit "${{ steps.pr.outputs.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "chore: sync upstream" \
+            --body-file "$RUNNER_TEMP/upstream-sync-pr.md"
+
+      - name: Close stale sync PR
+        if: steps.pr.outputs.exists == 'true' && steps.sync_main.outputs.needed == 'false'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          gh pr close "${{ steps.pr.outputs.number }}" \
+            --repo "$GITHUB_REPOSITORY" \
+            --comment "personal already contains the latest main." || true
+          git push origin --delete sync/upstream || true
+
+      - name: Create new sync branch and PR
+        if: steps.pr.outputs.exists == 'false' && steps.sync_main.outputs.needed == 'true'
+        env:
+          GH_TOKEN: ${{ steps.generate-token.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          git push origin --delete sync/upstream 2>/dev/null || true
+          git checkout -B sync/upstream main
+          git push -u origin sync/upstream
+
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --base personal \
+            --head sync/upstream \
+            --title "chore: sync upstream" \
+            --body-file "$RUNNER_TEMP/upstream-sync-pr.md"

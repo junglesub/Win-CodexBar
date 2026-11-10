@@ -112,6 +112,10 @@ export interface PaceSnapshot {
   etaSeconds: number | null;
   expectedUsedPercent: number;
   actualUsedPercent: number;
+  /** Personal-only: seconds elapsed since the window started. */
+  elapsedSeconds?: number | null;
+  /** Personal-only: seconds remaining until the window resets. */
+  resetsInSeconds?: number | null;
   /** Block of the window this pace comes from; no pace is shown while it is active. */
   monthlyLimitBlock?: MonthlyLimitBlock | null;
 }
@@ -245,6 +249,10 @@ export interface ProviderUsageSnapshot {
   error: string | null;
   errorState: ProviderStateKind;
   pace: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the weekly (secondary) lane. */
+  secondaryPace?: PaceSnapshot | null;
+  /** Personal-only: per-lane pace for the monthly (tertiary) lane. */
+  tertiaryPace?: PaceSnapshot | null;
   accountOrganization: string | null;
   trayStatusLabel: string | null;
   fetchDurationMs?: number | null;

@@ -353,6 +353,10 @@ export interface SettingsSnapshot {
   floatBarEnabled: boolean;
   /** 30..=100 — clamped server-side. */
   floatBarOpacity: number;
+  /** #RRGGBB, normalized server-side. Personal-only pill surface tint. */
+  floatBarBackgroundColor: string;
+  /** 0..=100, clamped server-side. Affects only the pill surfaces. */
+  floatBarBackgroundOpacity: number;
   /** 75..=200 — clamped server-side. */
   floatBarScale: number;
   floatBarOrientation: FloatBarOrientation;
@@ -364,9 +368,35 @@ export interface SettingsSnapshot {
   floatBarDarkText: boolean;
   /** When true, render the selected metric's next reset inline in each provider pill. */
   floatBarShowResetInline: boolean;
+  /**
+   * When true, an exhausted slot with a future reset shows only the detailed
+   * two-unit countdown instead of `100% 4d`. Personal-only.
+   */
+  floatBarHidePercentWhenExhausted: boolean;
+  /** Personal-only: exhausted hide-percent time renders as local absolute clock. */
+  floatBarExhaustedClockTime: boolean;
+  /** Personal-only: exhausted clock time uses a weekday abbreviation within the coming week. */
+  floatBarExhaustedWeekdayTime: boolean;
   /** When true, scan and render local cost summaries. */
   floatBarShowCost: boolean;
   floatBarShowWeekly: boolean;
+  /** Personal-only: render usage as battery cells instead of percentage numbers. */
+  floatBarBatteryStyle: boolean;
+  /** Personal-only: slots that use battery cells. Empty = every slot. */
+  floatBarBatterySlots: string[];
+  /**
+   * Personal-only: remaining-quota percent below which battery cells fall back
+   * to a percentage number. `-1` disables the fallback (default).
+   */
+  floatBarBatteryLowPercent?: number;
+  /** Personal-only: tint Float Bar reset countdowns with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
+  /** Personal-only: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
+  /** Personal-only: Float Bar renders remaining quota instead of used quota. */
+  floatBarShowRemaining: boolean;
+  /** Personal-only: order Float Bar pills with the custom drag-reorder sequence. */
+  floatBarFollowProviderOrder: boolean;
   /** Promote the tray icon out of the Windows hidden-icons overflow (Win11 only). */
   promoteTrayIcon?: boolean;
   /** When true, show Claude Daily Routines quota row (default true). */
@@ -522,6 +552,10 @@ export interface SettingsUpdate {
   providerHiddenUsageItemIds?: Record<string, string[]>;
   floatBarEnabled?: boolean;
   floatBarOpacity?: number;
+  /** #RRGGBB, normalized server-side. Personal-only. */
+  floatBarBackgroundColor?: string;
+  /** 0..=100, clamped server-side. Personal-only. */
+  floatBarBackgroundOpacity?: number;
   floatBarScale?: number;
   floatBarOrientation?: FloatBarOrientation;
   floatBarStyle?: FloatBarStyle;
@@ -529,8 +563,25 @@ export interface SettingsUpdate {
   floatBarProviderIds?: string[];
   floatBarDarkText?: boolean;
   floatBarShowResetInline?: boolean;
+  floatBarHidePercentWhenExhausted?: boolean;
+  floatBarExhaustedClockTime?: boolean;
+  floatBarExhaustedWeekdayTime?: boolean;
   floatBarShowCost?: boolean;
   floatBarShowWeekly?: boolean;
+  /** Personal-only: render usage as battery cells instead of percentage numbers. */
+  floatBarBatteryStyle?: boolean;
+  /** Personal-only: slots that use battery cells. Empty = every slot. */
+  floatBarBatterySlots?: string[];
+  /** Personal-only: `-1` disables the low-remaining fallback to percentage numbers. */
+  floatBarBatteryLowPercent?: number;
+  /** Personal-only: tint Float Bar reset countdowns with the pace bucket color. */
+  floatBarPaceTextColor?: boolean;
+  /** Personal-only: show hover pace deltas as time ahead/behind. */
+  floatBarPaceTimeDelta?: boolean;
+  /** Personal-only: render Float Bar usage as remaining quota instead of used quota. */
+  floatBarShowRemaining?: boolean;
+  /** Personal-only: order Float Bar providers with the custom drag-reorder sequence. */
+  floatBarFollowProviderOrder?: boolean;
   promoteTrayIcon?: boolean;
   claudeDailyRoutinesUsageVisible?: boolean;
   alibabaTokenPlanRegion?: string;

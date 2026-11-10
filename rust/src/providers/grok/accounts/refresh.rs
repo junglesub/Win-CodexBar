@@ -59,8 +59,7 @@ impl AccountManager {
         };
         let expires = text_field(entry.value(), "expires_at")
             .and_then(|value| DateTime::parse_from_rfc3339(&value).ok());
-        if !force && !expires.is_some_and(|date| date <= Utc::now() + chrono::Duration::seconds(60))
-        {
+        if !force && expires.is_none_or(|date| date > Utc::now() + chrono::Duration::seconds(60)) {
             return Ok(text);
         }
         let refresh = text_field(entry.value(), "refresh_token")

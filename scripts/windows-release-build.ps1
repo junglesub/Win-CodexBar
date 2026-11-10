@@ -40,7 +40,7 @@
 
 param(
     [string]$Ref = "HEAD",
-    [string]$RepoUrl = "https://github.com/nesszer/Win-CodexBar.git",
+    [string]$RepoUrl = "https://github.com/junglesub/Win-CodexBar.git",
     [string]$WorkRoot = "C:\code\Win-CodexBar-release",
     [switch]$RefreshInstallerDependencies,
     [switch]$WarmCacheOnly,
@@ -278,6 +278,11 @@ try {
     $version = Get-AppVersion -CargoTomlPath (Join-Path $SourceDir "rust\Cargo.toml")
 
     $env:APP_VERSION = $version
+    $buildSha = if ($env:GITHUB_SHA) { $env:GITHUB_SHA.Trim() } else { $commit }
+    $env:CODEXBAR_BUILD_SHA = $buildSha
+    if (-not $env:BUILD_NUMBER) {
+        $env:BUILD_NUMBER = $buildSha.Substring(0, [Math]::Min(7, $buildSha.Length))
+    }
     $env:CARGO_TARGET_DIR = $DesktopCargoTargetDir
     # Link the C runtime statically into the desktop and CLI binaries so they
     # start without the Visual C++ Redistributable (#761). With an explicit

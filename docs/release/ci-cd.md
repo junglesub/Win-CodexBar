@@ -1,111 +1,70 @@
-# Win-CodexBar CI and release delivery
+# Personal branch release delivery
 
-## Responsibilities
+## Automated release
 
-CircleCI is the primary hosted Windows validation system. Its
-pr-check workflow runs the canonical scripts/local-check.ps1 -Slice ci contract
-for pull requests and protected branch pushes. CircleCI does not build or
-publish release tags.
+`.github/workflows/personal-release.yml` runs on every push to `personal` and
+can also be started manually from that branch. The workflow runs on GitHub's
+hosted Windows 2025 image. Its build job has `contents: read`; only the
+separate publish job has `contents: write`.
 
-GitHub Actions is the sole canonical release producer. The tag workflow in
-.github/workflows/release.yml runs on a GitHub-hosted Windows runner, because
-SignPath's GitHub trusted-build integration verifies that the build and the
-uploaded signing artifact came from GitHub Actions.
+The build job checks out the triggering commit without persisting credentials,
+restores Cargo, pnpm, and installer dependency caches, then calls the existing
+`scripts/windows-release-build.ps1` with the immutable `GITHUB_SHA`. The four
+outputs cross into the publish job through a one-day workflow artifact:
 
-The manual .github/workflows/signpath-test.yml workflow exercises the same
-three-file signing bundle with the fixed test-signing policy. It retains the
-verified result as a workflow artifact and never creates or modifies a GitHub
-Release.
+- `CodexBar-X.Y.Z-Setup.exe`
+- `CodexBar-X.Y.Z-Setup.exe.sha256`
+- `CodexBar-X.Y.Z-portable.exe`
+- `CodexBar-X.Y.Z-portable.exe.sha256`
 
-## Production release flow
+After all four assets exist, the publish job verifies that `GITHUB_SHA` is
+still the head of `personal`. The workflow artifact is the staging layer. On
+the first run the publisher creates `personal-latest`; later runs replace its
+assets in place, remove assets from older versions, and verify the exact
+four-file set. It then updates the title and notes and moves the Git tag to the
+new commit. Runs are serialized, and stale reruns skip publication.
 
-A maintainer creates a protected canonical tag such as v0.60.4 on main. The
-tag workflow then performs this sequence:
+The rolling prerelease is intentionally separate from canonical `vX.Y.Z`
+releases and Winget. Do not use `personal-latest` as a Winget source because
+its assets and tag are mutable.
 
-1. Check out the exact tag and freeze its full 40-character commit SHA.
-2. Run scripts/release-preflight.ps1 to validate the canonical repository,
-   tag/SHA identity, main ancestry, and every committed version file.
-3. Fail immediately if the required SignPath credentials are absent.
-4. Build fresh unsigned artifacts with the existing Windows release builder.
-5. Create a signing input containing exactly these top-level files:
-   - CodexBar-X.Y.Z-Setup.exe
-   - CodexBar-X.Y.Z-portable.exe
-   - CodexBarCLI-vX.Y.Z-windows-x64.zip
-6. Upload that directory as a GitHub Actions artifact and submit it to the
-   pinned codexbar-installer configuration and release-signing policy.
-7. Wait for SignPath to finish. Denial, timeout, approval failure, origin
-   verification failure, missing output, or any malformed output fails the job.
-8. Verify Authenticode on both top-level executables and on codexbar-cli.exe
-   inside the returned CLI ZIP.
-9. Build a new final bundle only from the verified SignPath files, compute all
-   three SHA-256 sidecars after signing, and regenerate release-manifest.json.
-10. Validate the exact six publishable assets, hashes, byte counts, and sidecars.
-11. Run scripts/publish-github-release.ps1, which creates or updates a draft
-    release without replacing divergent assets. A maintainer publishes the
-    draft manually after review.
+The Windows publisher parses `gh` JSON with PowerShell's `ConvertFrom-Json`.
+Keep quoted string filters out of `gh --jq` arguments: Windows PowerShell can
+strip those quotes before `gh` receives them. Assign parsed JSON arrays before
+filtering them because Windows PowerShell 5.1 does not enumerate an array
+emitted directly by `ConvertFrom-Json` in this pipeline shape.
 
-The unsigned build tree, SignPath output, and final bundle are separate. There
-is no unsigned fallback after a signing failure.
+## Repository settings
 
-The final public asset set is:
+GitHub Actions must be allowed to create releases with `GITHUB_TOKEN`. In
+**Settings → Actions → General → Workflow permissions**, select
+**Read and write permissions**. No personal access token or repository secret
+is required.
 
-- CodexBar-X.Y.Z-Setup.exe and its .sha256 sidecar
-- CodexBar-X.Y.Z-portable.exe and its .sha256 sidecar
-- CodexBarCLI-vX.Y.Z-windows-x64.zip and its .sha256 sidecar
+The workflow only publishes when its ref is `refs/heads/personal`; selecting a
+different branch for `workflow_dispatch` safely skips the job.
 
-release-manifest.json is retained for verification but is not a publishable
-release asset.
+Run the dependency-free release checks locally with:
 
-## SignPath onboarding boundary
-
-The repository wiring can be reviewed before production signing is enabled.
-Do not create a production tag until the SignPath project has a valid
-release-signing policy, an issued production certificate, the GitHub.com
-trusted build system linked to the project, the SignPath GitHub App installed
-with repository access, and the repository secrets configured.
-
-The production policy is intentionally fail-closed. v0.60.3 remains the
-immutable unsigned release created before this cutover. The first signed
-production release is the next normal version, such as v0.60.4.
-
-After the manual test-signing run, inspect the origin value reported by
-SignPath before narrowing the policy's allowed branch names. Do not guess the
-branch value from the tag name.
-
-## Local checks
-
-Run the dependency-free release checks:
-
-~~~powershell
+```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release-pipeline.tests.ps1
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\install-release-prerequisites.ps1 -AssertOnly
-~~~
+```
 
-The build and preflight helpers accept explicit tag and SHA values:
+## Retry behavior
 
-~~~powershell
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\release-preflight.ps1 -Tag vX.Y.Z -Sha <full-40-character-sha>
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts\circleci-release-build.ps1 -Tag vX.Y.Z -Sha <full-40-character-sha>
-~~~
+Rerunning the current workflow rebuilds the same commit and repairs the rolling
+prerelease idempotently. A stale rerun does not publish. A failed build leaves
+the previous release untouched because publication begins only after all assets
+are present. GitHub does not provide an atomic whole-release asset swap, so an
+upload failure can leave a partially updated asset set; rerun the workflow to
+replace and verify all four files.
 
-The second script retains its historical filename for compatibility; the
-release workflow passes all identity values explicitly and does not depend on
-CircleCI environment variables.
+For a local installer build, use:
 
-## Administrator setup
+```powershell
+$commit = git rev-parse HEAD
+./scripts/windows-release-build.ps1 -Ref $commit -RepoUrl (git rev-parse --show-toplevel)
+```
 
-Configure SIGNPATH_API_TOKEN as the only SignPath GitHub Actions repository
-secret. The workflow pins the reviewed organization ID, project slug,
-release-signing/test-signing policies, and codexbar-installer configuration in
-source. After SignPath issues the certificates, set the nonsecret Actions
-variable SIGNPATH_RELEASE_CERT_THUMBPRINT; production verification requires
-it and compares all three signed executables against it.
-- GITHUB_TOKEN is provided by GitHub Actions
-
-The workflow pins release-signing, test-signing, and codexbar-installer in
-reviewed source. The policy slug is not selected by a mutable secret.
-
-Keep CircleCI credentials and release contexts disabled for tag publication.
-CircleCI only needs its existing validation configuration and CI budget
-settings. Protect main and the canonical vX.Y.Z tag namespace so only
-authorized maintainers can create release tags.
+The automated personal build does not run installer smoke tests. Use
+`-SmokeInstall` locally before promoting a commit to a canonical release.

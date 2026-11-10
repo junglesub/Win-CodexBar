@@ -36,7 +36,10 @@ fn token_count(timestamp: &str, input: i64, cached: i64, output: i64) -> Value {
     })
 }
 
-/// Write one rollout under `sessions/2026/10/05` and scan a 30-day window.
+/// Write one rollout under `sessions/2026/10/05` and scan a window wide enough
+/// to cover it. The fixtures sit at fixed 2026-10 dates around the auto-review
+/// pricing cutoff, so a rolling 30-day window stops containing them as the
+/// clock advances; a year keeps the cutoff assertions date-independent.
 fn scan_rollout(root: &Path, lines: &[Value]) -> (CostSummary, CostUsageCache) {
     let day_dir = root.join("sessions").join("2026").join("10").join("05");
     std::fs::create_dir_all(&day_dir).unwrap();
@@ -46,7 +49,7 @@ fn scan_rollout(root: &Path, lines: &[Value]) -> (CostSummary, CostUsageCache) {
         body,
     )
     .unwrap();
-    let (summary, _stats, cache) = CostScanner::new(30)
+    let (summary, _stats, cache) = CostScanner::new(365)
         .with_cache_root(root.join("cache"))
         .with_sessions_dirs(vec![root.join("sessions")])
         .scan_codex_detailed_with_cache(None);
