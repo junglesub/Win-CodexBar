@@ -291,6 +291,11 @@ try {
     if ("$env:RUSTFLAGS" -notmatch [regex]::Escape($crtStaticFlag)) {
         $env:RUSTFLAGS = ("$env:RUSTFLAGS $crtStaticFlag").Trim()
     }
+    # Tauri CLI turns this on unless it is already false. tauri-build then
+    # keeps the static VC runtime but links the dynamic UCRT, which the
+    # release verifier rejects. The desktop build script reruns when
+    # CODEXBAR_BUILD_SHA changes, so a cached link line does not stick.
+    $env:STATIC_VCRUNTIME = 'false'
     if (-not $env:CARGO_BUILD_TARGET -and [System.Runtime.InteropServices.RuntimeInformation]::IsOSPlatform(
         [System.Runtime.InteropServices.OSPlatform]::Windows
     )) {

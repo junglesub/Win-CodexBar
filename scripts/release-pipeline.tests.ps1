@@ -131,6 +131,7 @@ Assert-True ($upstreamSyncText -notmatch 'checkout origin/personal -- \.github/w
 
 # #761: release binaries link the C runtime statically and the verifier rejects dynamic CRT imports.
 Assert-True ($builderText -match [regex]::Escape('-C target-feature=+crt-static')) 'release build links the C runtime statically'
+Assert-True ($builderText -match '\$env:STATIC_VCRUNTIME\s*=\s*''false''') 'release build disables Tauri hybrid CRT'
 $verifierText = Get-Content -Raw -LiteralPath (Join-Path $scriptRoot 'verify-windows-executables.ps1')
 Assert-True ($verifierText -match 'Get-DynamicCrtImports \(Get-PeImportedDllNames') 'executable verifier rejects dynamic CRT imports'
 Assert-Equal (@(Get-DynamicCrtImports @('KERNEL32.dll', 'VCRUNTIME140.dll', 'vcruntime140_1.dll', 'MSVCP140.dll', 'api-ms-win-crt-runtime-l1-1-0.dll', 'ucrtbase.dll', 'WS2_32.dll', 'api-ms-win-core-synch-l1-2-0.dll', 'msvcrt.dll', 'VCRUNTIME140D.dll', 'ucrtbased.dll')) -join ',') 'VCRUNTIME140.dll,vcruntime140_1.dll,MSVCP140.dll,api-ms-win-crt-runtime-l1-1-0.dll,ucrtbase.dll,VCRUNTIME140D.dll,ucrtbased.dll' 'dynamic CRT import classification'
